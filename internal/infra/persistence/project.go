@@ -131,7 +131,18 @@ func (s *ProjectStore) Load(ctx context.Context, id string) (entity.Project, err
 	if err := ctx.Err(); err != nil {
 		return entity.Project{}, err
 	}
-	return s.loadLocked(id)
+	project, err := s.loadLocked(id)
+	if err != nil {
+		return entity.Project{}, err
+	}
+	projectPaths, err := paths.ResolveProject(s.layout, id)
+	if err != nil {
+		return entity.Project{}, err
+	}
+	if err := recoverPendingTransaction(ctx, projectPaths.Dir, project.Revision); err != nil {
+		return entity.Project{}, err
+	}
+	return project, nil
 }
 
 func (s *ProjectStore) Exists(ctx context.Context, id string) (bool, error) {

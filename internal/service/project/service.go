@@ -167,18 +167,73 @@ func (s *Service) Open(ctx context.Context, id string) (entity.Project, error) {
 }
 
 func (s *Service) Current(ctx context.Context) (entity.Project, error) {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+	return s.currentLocked(ctx)
+}
+
+func (s *Service) currentLocked(ctx context.Context) (entity.Project, error) {
 	if err := ctx.Err(); err != nil {
 		return entity.Project{}, err
 	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if err := s.configErr; err != nil {
+		s.mu.Unlock()
 		return entity.Project{}, err
 	}
 	if s.active == nil {
+		s.mu.Unlock()
 		return entity.Project{}, ErrNoActiveProject
 	}
-	return s.active.Clone(), nil
+	projectID := s.active.ID
+	s.mu.Unlock()
+
+	project, err := s.opts.Projects.Load(ctx, projectID)
+	if err != nil {
+		return entity.Project{}, err
+	}
+	s.mu.Lock()
+	s.active = &project
+	s.mu.Unlock()
+	return project.Clone(), nil
+}
+
+// WithExclusive keeps project switching out of multi-file workflow commits.
+func (s *Service) WithExclusive(ctx context.Context, fn func(port.ProjectAccess) error) error {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+	project, err := s.currentLocked(ctx)
+	if err != nil {
+		return err
+	}
+	return fn(&projectAccess{service: s, projectID: project.ID})
+}
+
+type projectAccess struct {
+	service   *Service
+	projectID string
+}
+
+func (a *projectAccess) Current(ctx context.Context) (entity.Project, error) {
+	if err := ctx.Err(); err != nil {
+		return entity.Project{}, err
+	}
+	a.service.mu.Lock()
+	defer a.service.mu.Unlock()
+	if a.service.active == nil {
+		return entity.Project{}, ErrNoActiveProject
+	}
+	if a.service.active.ID != a.projectID {
+		return entity.Project{}, fmt.Errorf("%w: active %s, expected %s", ErrActiveProjectChanged, a.service.active.ID, a.projectID)
+	}
+	return a.service.active.Clone(), nil
+}
+
+func (a *projectAccess) Save(ctx context.Context, project entity.Project) (entity.Project, error) {
+	if project.ID != a.projectID {
+		return entity.Project{}, fmt.Errorf("%w: active %s, got %s", ErrActiveProjectChanged, a.projectID, project.ID)
+	}
+	return a.service.saveLocked(ctx, project)
 }
 
 // Save persists a command-layer mutation of the active project and updates
@@ -186,6 +241,10 @@ func (s *Service) Current(ctx context.Context) (entity.Project, error) {
 func (s *Service) Save(ctx context.Context, project entity.Project) (entity.Project, error) {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
+	return s.saveLocked(ctx, project)
+}
+
+func (s *Service) saveLocked(ctx context.Context, project entity.Project) (entity.Project, error) {
 	if err := ctx.Err(); err != nil {
 		return entity.Project{}, err
 	}

@@ -48,8 +48,13 @@ func (c *artifactCandidateCounter) Count(ctx context.Context, projectID string, 
 	if err != nil {
 		return 0, err
 	}
-	if artifact.Kind != valueobject.OutputKindTopics {
-		return 0, nil
+	if artifact.ID != latest.ArtifactID {
+		return 0, fmt.Errorf("artifact id does not match latest topic round")
+	}
+	if artifact.Kind != latest.Kind {
+		if err := valueobject.ValidateStructuredPayload(latest.Kind, payload); err != nil {
+			return 0, fmt.Errorf("artifact payload does not match latest topic round: %w", err)
+		}
 	}
 	var document struct {
 		Topics []json.RawMessage `json:"topics"`

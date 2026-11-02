@@ -54,7 +54,7 @@ infra         json / claudecli / edgetts / renderer-bridge
 | `domain/entity` | Project、Graph、Node、Round、Run、Pending、Artifact；Chain 为派生视图，不持久化 |
 | `domain/valueobject` | NodeType、Hash、OutputKind、CandidateIndex、ChainPath、ContextVersion、TokenBudget、SceneDSL、Theme、EnvironmentInfo、LogEntry |
 | `domain/event` | 领域事件 |
-| `domain/port` | ProjectStore、ProjectSession、RunStore、PendingStore、ArtifactStore、ArtifactStoreProvider、ConfigStore、M1Migrator、WorkspaceMover、WorkspaceReader、RunWorkspaceReader、GraphReader、ReplySink、TurnRunner、AgentDriver、RunToolServerFactory、ScopedPathResolver、EventBus、PermissionGate、QuestionGate、Media、CLIProbe、WebView2Probe、LogTailer |
+| `domain/port` | ProjectStore、ProjectSession/ProjectAccess、RunStore、PendingStore/Provider、ArtifactStore、ArtifactStoreProvider、ContextHasher、ConfigStore、M1Migrator、WorkspaceMover、WorkspaceReader、RunWorkspaceReader、GraphReader、ReplySink、TurnRunner、AgentDriver、RunToolServerFactory、ScopedPathResolver、EventBus、PermissionGate、QuestionGate、Media、CLIProbe、WebView2Probe、LogTailer |
 | `service/project` | 工程生命周期、迁移、自动保存 |
 | `service/system` | M0 环境自检、最近日志聚合 |
 | `service/run` | 运行生命周期、一次性 Agent 会话、TurnGate、每运行 MCP/token、transcript |
@@ -73,7 +73,7 @@ infra         json / claudecli / edgetts / renderer-bridge
 | `infra/agent/claudecli` | Claude SDK 适配、原生 CLI、一次性运行、工具注入、事件映射 |
 | `infra/agent/mcp` | HTTP MCP 服务、每运行 token、只读图工具、reply |
 | `infra/agenthost` | Windows stdio 代理、隐藏窗口、Job Object |
-| `infra/persistence` | `project.json`、`runs.json`/`runs/`、`pending.json`、artifact、`config.json`、迁移 |
+| `infra/persistence` | `project.json`、`runs.json`/`runs/`、`pending.json`、`pending.txn.json`、artifact、`config.json`、迁移 |
 | `infra/eventbus` | 预留；M2 的 Wails 事件桥仍在 `internal/app/eventbus.go` |
 | `infra/audit` | 独立 audit.log（含 runId/treeId/nodeId/chainId） |
 | `infra/workspace` | topic 树路径叠加读取（当前节点 → 祖先 → 根 `runtime/`）、节点写作用域、list/grep/stat |
@@ -153,6 +153,7 @@ UI / handler
 │   ├── projects/<id>/
 │   │   ├── project.json               # 元信息、图、节点、轮次（链为派生视图）
 │   │   ├── pending.json               # 待应用索引
+│   │   ├── pending.txn.json            # pending 跨文件事务意图与恢复点
 │   │   ├── pending/<pendingId>.json   # 原始结构化输出（含无效）
 │   │   ├── artifacts/<sha256>/        # 应用后的不可变产物
 │   │   ├── runs.json                  # 运行索引（含 chainPath）
@@ -174,11 +175,11 @@ UI / handler
 M2 收口后 `sessions.json` 不再写入；M2 开发期 M1 会话服务仍会读取/写入它，迁移不删除原文件。M2 首次启动把当时的 `activeChainId` 导入为只读运行。Agent profile（默认 `~/.claude`）是适配器例外，不属于应用数据。
 
 - 原子写入：临时文件 + `Sync` + 重命名；新建工程与迁移先在 `data/projects/` 下的隐藏 staging 目录（`.creating-*` / `.m1-migration-*`）写完整目录，再整体重命名到 `projects/<id>`。
-- 工程级锁：单实例锁 + 命令层写互斥。
-- Schema 版本：`project.json`、`pending.json`、`runs.json` 带 `version`；`config.json` 无版本，缺省预算在读取时归一为 1,000,000。
+- 工程级锁：单实例锁；所有写命令按 `workflow.mu → ProjectSession` 操作锁排序。`ProjectSession.WithExclusive` 与 `New/Open` 共用操作锁，pending 多文件事务期间工程不能切换。
+- Schema 版本：`project.json`、`pending.json`、`pending.txn.json`、`runs.json` 带 `version`；`config.json` 无版本，缺省预算在读取时归一为 1,000,000。
 - 运行索引/详情：`runs.json` 只存摘要；`runs/<runId>.json` 存 transcript 与上下文预览。先写详情再写索引；索引引用缺失详情视为损坏，孤立详情不进入列表。
-- pending 索引与原文分离：先写原文再写索引；原文大小上限 256 KiB；无效输出保留原文。
-- 应用后的结构化产物按 SHA-256 命名；pending 只有索引引用，不共享 CAS 内容。同一 payload 的重复应用复用同一产物，`meta.json` 以首次写入为准。
+- pending 原文与索引分离；创建/应用/丢弃先原子写 `pending.txn.json` 和必需原文/CAS，再保存带目标 revision 的 `project.json`，最后更新 `pending.json` 并删除日志。工程加载/打开按 base/target revision 回滚未提交事务或幂等重放已提交事务；日志损坏、revision 无法判定或恢复失败时拒绝暴露工程。原文上限 256 KiB，无效 Schema 也保留原文；`pending` 与 `invalid` 计入每树 50 条上限，应用/丢弃释放名额。
+- 结构化产物规范化使用保留 `json.Number` 精度的确定性 JSON；payload SHA-256 为 CAS ID。`Round.Kind` 是当前产物种类的授权真相，CAS `meta.json` 仅为首次写入元数据；元数据种类不一致时按轮次种类校验 payload。
 - `contextTokenBudget` 默认 1,000,000；上下文估算与实际 usage 记入 run。
 - 工程 ID、节点 ID、运行 ID、pending ID 只使用 `[a-z0-9_]`，由程序生成；迁移使用确定性 ID。
 

@@ -6,7 +6,7 @@
 
 ## [Unreleased]
 
-M2 图与提示词（进行中：M2-00..04 已验收；M2-05 Pending 后端未开始）。
+M2 图与提示词（进行中：M2-00..05 已验收；M2-06 未开始）。
 
 ### Added
 
@@ -14,6 +14,10 @@ M2 图与提示词（进行中：M2-00..04 已验收；M2-05 Pending 后端未�
 - M2-04：保守 token 估算、祖先全文→2,000 tokens 原文摘录→引用降级、完整目标参数及 `CONTEXT_TOO_LARGE` 估算/预算详情；提供实际 usage 超预算比较值对象。
 - M2-04：`RunWorkspaceReader` 作用域校验与工作区逻辑文件清单；文件正文不注入上下文，二进制资源仅引用，清单上限和截断显式标记。
 - M2-04：golden、候选/路径隔离、预算与哈希、真实工作区叠加及文件引用测试；证据见 `docs/dev/evidence/m2-04.md`。
+- M2-05：pending 原文与索引分离，保留无效 Schema 输出；实现 request_id 幂等/冲突处理、每运行一个结构化结果、每树 50 条活动上限及 256 KiB payload 上限。
+- M2-05：实现 `topics`/`script` Schema 校验、pending 查询、应用与丢弃；应用时校验哈希、写内容寻址 artifact、追加轮次、锁定节点并传播后代 stale。
+- M2-05：新增 `pending.txn.json` 跨文件事务日志与工程加载恢复；修复崩溃窗口下 project revision、pending 索引、原文与 artifact 的一致性。
+- M2-05：新增 request 冲突、Schema/限额、force 限制、discard 幂等、artifact kind 与事务恢复测试；任务自检证据见 `docs/dev/evidence/m2-05.md`。
 - M2-02：`service/workflow` 图命令层——`AddNode`（topic 根 / 带父 prompt / 草稿）、`Connect`（改挂确认）、`MoveNode`（位置）、`UpdateNodeParams`、`SelectNode`、`EnsureExecutable`。
 - M2-02：单父树校验（无环、自连、topic 根、草稿父拒绝）、子树 `stale` 传播与 revision 规则；`SelectNode` 不递增 revision、不广播。
 - M2-02：topic 候选端口解析——0 基 `parentCandidate` 从最新已应用 `topics` 产物计数；非法候选返回 `CANDIDATE_INVALID`；父为 prompt/草稿时清空候选。
@@ -60,7 +64,7 @@ M2 图与提示词（进行中：M2-00..04 已验收；M2-05 Pending 后端未�
 
 ### 说明
 
-- 本节记录 M2 设计与 M2-01..04 已验收的后端；画布、选题/提示词、运行与待应用 UI 仍待后续任务；M2 整体验收证据在 M2-13 汇总。
+- 本节记录 M2 设计与 M2-01..05 已验收的后端；画布、选题/提示词、运行与待应用 UI 仍待后续任务；M2 整体验收证据在 M2-13 汇总。
 
 ---
 

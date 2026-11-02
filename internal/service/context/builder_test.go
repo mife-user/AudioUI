@@ -198,7 +198,7 @@ func TestContextGoldenAndPathIsolation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.InitialPrompt+"\n" != string(want) {
+	if got.InitialPrompt+"\n" != strings.ReplaceAll(string(want), "\r\n", "\n") {
 		t.Fatalf("context differs from %s\n%s", golden, got.InitialPrompt)
 	}
 }
@@ -400,5 +400,25 @@ func TestTopicTargetNeedsNoPriorArtifact(t *testing.T) {
 	body, _ := decodeBody(t, result)
 	if len(body.Path) != 0 || result.OutputKind != valueobject.OutputKindTopics || strings.Contains(result.InitialPrompt, "候选甲") {
 		t.Fatalf("unexpected topic target context: %s", result.InitialPrompt)
+	}
+}
+
+func TestAncestorKindUsesAppliedRoundAndPreservesLegacySameKindPayloads(t *testing.T) {
+	f := newFixture()
+	f.store.items[f.topicID] = artifactItem{
+		kind:    valueobject.OutputKindScript,
+		payload: []byte(`{"topics":[{"title":"甲","angle":"角度","hook":"开头"},{"title":"乙","angle":"角度","hook":"开头"},{"title":"丙","angle":"角度","hook":"开头"}]}`),
+	}
+	if _, err := f.builder.Build(context.Background(), f.input); err != nil {
+		t.Fatalf("valid payload with first-write metadata mismatch was rejected: %v", err)
+	}
+	f.store.items[f.topicID] = artifactItem{kind: valueobject.OutputKindScript, payload: []byte(`{"topics":[]}`)}
+	if _, err := f.builder.Build(context.Background(), f.input); !errors.Is(err, ErrAncestorNotReady) {
+		t.Fatalf("invalid cross-kind payload error = %v, want ANCESTOR_NOT_READY", err)
+	}
+	f.store.items[f.topicID] = artifactItem{kind: valueobject.OutputKindTopics, payload: []byte(`{"topics":[{"title":"甲","angle":"角度","hook":"开头"},{"title":"乙","angle":"角度","hook":"开头"},{"title":"丙","angle":"角度","hook":"开头"}]}`)}
+	f.store.items[f.latestID] = artifactItem{kind: valueobject.OutputKindScript, payload: []byte(`{"legacy":true}`)}
+	if _, err := f.builder.Build(context.Background(), f.input); err != nil {
+		t.Fatalf("legacy same-kind artifact was retroactively schema-rejected: %v", err)
 	}
 }

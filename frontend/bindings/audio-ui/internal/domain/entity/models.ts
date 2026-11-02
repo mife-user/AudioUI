@@ -45,6 +45,35 @@ export interface NodeParams {
 }
 
 /**
+ * Pending binds one structured Agent output to the run and path that
+ * produced it. The raw payload is stored separately so invalid output is
+ * preserved.
+ */
+export interface Pending {
+    "id": string;
+    "runId": string;
+    "requestId"?: string;
+    "chainId": string;
+    "chainPath": string[] | null;
+    "nodeId": string;
+    "kind": valueobject$0.OutputKind;
+    "status": valueobject$0.PendingStatus;
+    "contextHash"?: string;
+    "ancestorHash"?: string;
+    "paramsHash"?: string;
+    "payload": string;
+    "summary"?: string;
+    "error"?: string;
+    "artifactId"?: string;
+    "createdAt": string;
+}
+
+export interface PendingDetail {
+    "pending": Pending;
+    "rawPayload": string | null;
+}
+
+/**
  * Position is the persisted canvas position of a node.
  */
 export interface Position {

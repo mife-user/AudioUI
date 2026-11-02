@@ -53,6 +53,21 @@ export enum OutputKind {
     OutputKindSceneDSL = "scene_dsl",
 };
 
+/**
+ * PendingStatus is the lifecycle state of a pending artifact.
+ */
+export enum PendingStatus {
+    /**
+     * The Go zero value for the underlying type of the enum.
+     */
+    $zero = "",
+
+    PendingPending = "pending",
+    PendingInvalid = "invalid",
+    PendingApplied = "applied",
+    PendingDiscarded = "discarded",
+};
+
 export interface PermissionRequest {
     "id": string;
     "tool": string;

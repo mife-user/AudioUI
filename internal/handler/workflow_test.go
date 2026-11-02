@@ -20,6 +20,12 @@ func (handlerCandidates) Count(ctx context.Context, projectID string, node entit
 	return 3, nil
 }
 
+type handlerContextHasher struct{}
+
+func (handlerContextHasher) InputHashes(context.Context, entity.Project, string) (valueobject.ContextHashes, error) {
+	return valueobject.ContextHashes{ContextHash: "ctx", AncestorHash: "ancestor", ParamsHash: "params"}, nil
+}
+
 func newWorkflowHandler(t *testing.T) *WorkflowService {
 	t.Helper()
 	root := t.TempDir()
@@ -50,8 +56,11 @@ func newWorkflowHandler(t *testing.T) *WorkflowService {
 	if _, err := projectService.New(context.Background(), "工程"); err != nil {
 		t.Fatal(err)
 	}
+	artifactStores := persistence.NewArtifactStoreProvider(layout)
 	workflowService := workflow.New(workflow.Options{
 		Project: projectService, Candidates: handlerCandidates{},
+		Pending: persistence.NewPendingStoreProvider(layout), Artifacts: artifactStores,
+		ContextHasher: handlerContextHasher{},
 	})
 	return NewWorkflowService(workflowService)
 }
@@ -108,6 +117,68 @@ func TestWorkflowHandlerAddMoveUpdateSelect(t *testing.T) {
 	candidate := 0
 	if _, err := h.Connect(topicID, promptID, &candidate, false); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestWorkflowHandlerPendingQueriesApplyAndDiscard(t *testing.T) {
+	h := newWorkflowHandler(t)
+	projectValue, err := h.AddNode(AddNodeRequest{Type: "topic", Title: "选题"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	topicID := projectValue.Nodes[0].ID
+	candidate := 0
+	projectValue, err = h.AddNode(AddNodeRequest{
+		Type: "prompt", Title: "脚本 A", Parent: topicID, ParentCandidate: &candidate,
+		Params: entity.NodeParams{OutputKind: valueobject.OutputKindScript},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstNodeID := projectValue.Nodes[len(projectValue.Nodes)-1].ID
+	projectValue, err = h.AddNode(AddNodeRequest{
+		Type: "prompt", Title: "脚本 B", Parent: topicID, ParentCandidate: &candidate,
+		Params: entity.NodeParams{OutputKind: valueobject.OutputKindScript},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondNodeID := projectValue.Nodes[len(projectValue.Nodes)-1].ID
+	payload := []byte(`{"title":"脚本","scenes":[{"narration":"旁白","duration":0}]}`)
+	first, err := h.service.CreatePending(context.Background(), workflow.CreatePendingInput{
+		RunID: "r_first", ChainID: "c_" + firstNodeID, ChainPath: []string{topicID, firstNodeID},
+		NodeID: firstNodeID, Kind: valueobject.OutputKindScript,
+		ContextHash: "ctx", AncestorHash: "ancestor", ParamsHash: "params", Payload: payload,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := h.service.CreatePending(context.Background(), workflow.CreatePendingInput{
+		RunID: "r_second", ChainID: "c_" + secondNodeID, ChainPath: []string{topicID, secondNodeID},
+		NodeID: secondNodeID, Kind: valueobject.OutputKindScript,
+		ContextHash: "ctx", AncestorHash: "ancestor", ParamsHash: "params", Payload: payload,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	list, err := h.ListPending()
+	if err != nil || len(list) != 2 {
+		t.Fatalf("pending list = %+v err=%v", list, err)
+	}
+	detail, err := h.GetPending(second.ID)
+	if err != nil || string(detail.RawPayload) != string(payload) {
+		t.Fatalf("pending detail=%+v err=%v", detail, err)
+	}
+	applied, err := h.ApplyPending(first.ID, false)
+	if err != nil || !applied.Nodes[1].Locked {
+		t.Fatalf("apply result=%+v err=%v", applied, err)
+	}
+	if _, err := h.DiscardPending(second.ID); err != nil {
+		t.Fatal(err)
+	}
+	list, err = h.ListPending()
+	if err != nil || list[0].Status != valueobject.PendingApplied || list[1].Status != valueobject.PendingDiscarded {
+		t.Fatalf("pending statuses = %+v err=%v", list, err)
 	}
 }
 

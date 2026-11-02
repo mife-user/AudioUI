@@ -2,7 +2,7 @@
 
 | 项 | 内容 |
 |---|---|
-| 状态 | 草案（M2 进行中：M2-00..04 已完成；M2-05 未开始） |
+| 状态 | 草案（M2 进行中：M2-00..05 已验收；M2-06 未开始） |
 | 最后更新 | 2026-11-02 |
 | 适用 | 每个新开对话只执行一个 M2 任务 |
 | 关联 | [路线图](roadmap.md)、[流程](process.md)、[PRD](../prd.md)、[架构](../architecture.md)、[协议](../agent-protocol.md)、[验收](../acceptance.md)、[ADR](../decisions.md) |
@@ -151,19 +151,24 @@ DoD：分层与不变量未破坏；新增/修改逻辑有测试；任务级门�
 
 ### M2-05 Pending 后端
 
-- **需求 / 验收**：F-07；AC-M2-3/4、AC-07。
+- **状态**：已完成（用户验收通过；2026-11-02）；不代表 AC-M2-3/4、AC-07 的 UI/端到端验收完成。
+- **需求 / 验收**：F-07；AC-M2-3/4、AC-07（后端组件级覆盖）。
 - **依赖**：M2-02、M2-04。
 - **目标**：pending 存储、Schema、应用/丢弃、轮次、锁定、下游 stale、应用后提升为 artifact。
-- **关键设计**：
-  - pending 绑定 runId/chainId/chainPath/nodeId/kind/contextHash/ancestorHash/paramsHash；无效也落盘。
-  - topic 应用后锁定内容与执行并暴露候选端口；prompt 应用首轮后锁定内容与执行；无 selectedTopic。
-  - apply 校验类型/kind/锁定/哈希；不一致 `PARAMS_CHANGED`/`CONTEXT_CHANGED`，确认后 force；已锁定节点拒绝（`NODE_LOCKED`）。
-  - apply = 写 artifact + 追加轮次 + 锁定内容与执行 + 后代 stale；discard 幂等；M2 的 topic/prompt 每节点最多 1 个已应用轮次。
-  - artifact 为 `artifacts/<sha256>/{payload.json,meta.json}`；哈希按规范化 payload 计算。
-  - pending ≤50/树；payload ≤256 KiB。
-- **文件**：`internal/service/workflow/pending.go`、`internal/infra/persistence/{pending,artifacts}.go`、handler。
-- **测试**：幂等/重复 apply/discard、force、轮次编号、锁定节点 apply/执行拒绝、stale、artifact 去重、无效原文保留、候选端口生成。
-- **风险**：apply 半途失败；artifact 与轮次一致性；topic/prompt 锁定差异。
+- **实现与不变量**：
+  - `pending.json` 保存索引，`pending/<id>.json` 保存原始 payload；`pending.txn.json` 协调 pending、artifact 与 `project.json` revision。工程加载按 base/target revision 回滚未提交意图或幂等恢复已提交索引、原文与 CAS；revision 不匹配、日志损坏或恢复失败时拒绝暴露工程。
+  - Pending 绑定 runId/chainId/chainPath/nodeId/kind/contextHash/ancestorHash/paramsHash；payload 上限 256 KiB，`request_id` 上限 128 字节。无效 JSON/Schema 原文与错误持久化，状态 `invalid`，不可应用。
+  - `topics` 要求 3–10 个对象候选，各候选 `title`/`angle`/`hook` 为字符串；`script` 要求顶层 `title` 为字符串、至少一个 scene，scene 的 `narration` 为字符串、`duration` 为 JSON 数字。保留额外字段；不添加正数时长约束；`scene_dsl` 返回 `UNSUPPORTED_UNTIL_M3`。
+  - 同一运行最多一个结构化结果；相同 runId + request_id 且绑定信息与原始 payload 一致时幂等返回原记录，不重复递增 revision/广播；同 ID 内容冲突返回 `REQUEST_ID_CONFLICT`，第二个结果返回 `TURN_PENDING_EXISTS`。
+  - 每 topic 树最多 50 条 `pending`/`invalid`；应用或丢弃释放名额，历史索引及原文不删除。
+  - Apply 重验节点/kind、Schema、运行锁、内容锁，并重算 `ancestorHash`/`paramsHash`；`force=true` 仅绕过哈希差异，不绕过其他校验。成功后写确定性 JSON CAS artifact、追加轮次、锁定节点内容与执行、将全部后代标记 stale；当前轮次的 `Round.Kind` 是 artifact kind 的权威值。
+  - Discard 幂等，只更新状态；已应用 pending 不可丢弃。成功写操作递增 project revision、以 `pending` reason 通知；项目切换与多文件写入由同一工程操作锁串行化。
+  - Wails handler 提供列表、详情、应用与丢弃；创建入口留给 M2-06 的 `reply` 接线。topic 应用后候选端口仍由现有候选计数逻辑读取，无 selectedTopic。
+- **文件**：`internal/domain/{entity/pending.go,port/project.go,port/context.go,valueobject/project.go,valueobject/structured_payload.go}`；`internal/infra/persistence/{pending.go,pending_provider.go,pending_recovery.go,project.go}`；`internal/service/{project/service.go,workflow/pending.go,workflow/service.go,workflow/errors.go,workflow/candidates.go,context/builder.go}`；`internal/app/workflow.go`；`internal/handler/workflow.go`。
+- **测试**：Schema 与 canonical JSON 精度/额外字段；幂等重放、request_id 冲突、同 run 第二结果拒绝；无效原文保留；payload/每树限额及释放名额；哈希冲突与 force 边界；轮次、锁定、后代 stale、CAS 去重/跨 kind；discard 幂等及重复 apply；pending ID 身份冲突不覆盖原文；未提交回滚、已提交恢复、恢复失败阻断及重试。主要用例位于 `internal/domain/valueobject/structured_payload_test.go`、`internal/service/workflow/pending_test.go`、`internal/infra/persistence/pending*_test.go`、`internal/handler/workflow_test.go`。
+- **证据**：[M2-05 自检证据](evidence/m2-05.md)。
+- **未包含**：MCP `reply` 与 create pending 的协议接线、只读图工具/`read_artifact`（M2-06）；运行启动与实际 usage 存储（M2-07）；前端 pending 卡片及 GUI/live CLI 端到端验收（后续任务）。
+- **风险**：事务日志损坏或磁盘错误时工程 fail closed，需人工修复/恢复文件；内容寻址目录的 `meta.json` 首写为准，消费端必须按 project round kind 校验；组件级自动化不等同于 GUI/端到端 AC 验收。
 
 ### M2-06 MCP 只读图与结构化 reply
 
@@ -306,7 +311,7 @@ wails3 build
 | M2-02 图命令层/改挂/运行锁 | 已完成 | 用户确认 AC-M2-1/6/11 通过；`internal/domain/entity/graph.go`、`internal/service/workflow`、`internal/infra/workspace/mover.go`、`internal/handler/workflow_test.go`、全量 Go/前端/Wails 门禁通过 |
 | M2-03 工作区与写作用域 | 已完成 | [验收证据](evidence/m2-03.md)；用户确认通过（2026-11-02） |
 | M2-04 上下文构建器 | 已完成 | [验收证据](evidence/m2-04.md)；用户确认通过（2026-11-02） |
-| M2-05 Pending 后端 | 未开始 | —（本轮未开始） |
+| M2-05 Pending 后端 | 已完成 | [自检与验收证据](evidence/m2-05.md)；用户已确认验收通过（2026-11-02） |
 | M2-06 MCP 只读与 reply | 未开始 | — |
 | M2-07 运行管理 | 未开始 | — |
 | M2-08 前端工作台骨架 | 未开始 | — |

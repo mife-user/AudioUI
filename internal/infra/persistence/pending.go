@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 
 	"audio-ui/internal/domain/entity"
@@ -79,6 +80,21 @@ func (s *PendingStore) GetPayload(ctx context.Context, id string) ([]byte, error
 	return data, nil
 }
 
+func (s *PendingStore) WritePayload(ctx context.Context, id string, payload []byte) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := valueobject.ValidateID(id); err != nil {
+		return fmt.Errorf("%w: id: %v", ErrInvalidPending, err)
+	}
+	if len(payload) > valueobject.MaxPendingPayloadSize {
+		return fmt.Errorf("%w: %d > %d", ErrPendingTooLarge, len(payload), valueobject.MaxPendingPayloadSize)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.writePayloadLocked(id, payload)
+}
+
 func (s *PendingStore) Save(ctx context.Context, pending entity.Pending, payload []byte) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -96,28 +112,97 @@ func (s *PendingStore) Save(ctx context.Context, pending entity.Pending, payload
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(s.payloadPath(pending.ID)), 0o755); err != nil {
-		return err
-	}
-	if err := writeFileAtomic(s.payloadPath(pending.ID), payload, 0o644); err != nil {
-		return fmt.Errorf("写入待应用原文: %w", err)
-	}
 	pending.Payload = s.payloadRelative(pending.ID)
 	updated := false
 	for i := range index.Pending {
 		if index.Pending[i].ID == pending.ID {
-			index.Pending[i] = pending
+			if !samePendingIdentity(index.Pending[i], pending) {
+				return fmt.Errorf("%w: conflicting pending id %q", ErrPendingConflict, pending.ID)
+			}
 			updated = true
 			break
 		}
 	}
-	if !updated {
+	if err := s.writePayloadLocked(pending.ID, payload); err != nil {
+		return fmt.Errorf("写入待应用原文: %w", err)
+	}
+	if updated {
+		for i := range index.Pending {
+			if index.Pending[i].ID == pending.ID {
+				index.Pending[i] = pending
+				break
+			}
+		}
+	} else {
 		index.Pending = append(index.Pending, pending)
 	}
 	if err := writeJSONAtomic(s.indexPath(), index); err != nil {
 		return fmt.Errorf("写入待应用索引: %w", err)
 	}
 	return nil
+}
+
+func (s *PendingStore) SaveTransaction(ctx context.Context, transaction entity.PendingTransaction) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	transaction.Pending = normalizePending(transaction.Pending)
+	transaction.Pending.Payload = s.payloadRelative(transaction.Pending.ID)
+	if err := validatePendingTransaction(transaction); err != nil {
+		return fmt.Errorf("%w: %v", ErrCorruptPendingTransaction, err)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, err := os.Stat(s.transactionPath()); err == nil {
+		return ErrPendingTransactionConflict
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	if err := writeJSONAtomic(s.transactionPath(), transaction); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *PendingStore) LoadTransaction(ctx context.Context) (entity.PendingTransaction, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return entity.PendingTransaction{}, false, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var transaction entity.PendingTransaction
+	found, err := readJSONFile(s.transactionPath(), &transaction)
+	if err != nil {
+		return entity.PendingTransaction{}, false, fmt.Errorf("%w: %v", ErrCorruptPendingTransaction, err)
+	}
+	if !found {
+		return entity.PendingTransaction{}, false, nil
+	}
+	transaction.Pending = normalizePending(transaction.Pending)
+	transaction.Pending.Payload = s.payloadRelative(transaction.Pending.ID)
+	if err := validatePendingTransaction(transaction); err != nil {
+		return entity.PendingTransaction{}, false, fmt.Errorf("%w: %v", ErrCorruptPendingTransaction, err)
+	}
+	return transaction, true, nil
+}
+
+func (s *PendingStore) DeleteTransaction(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := os.Remove(s.transactionPath()); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
+}
+
+func (s *PendingStore) writePayloadLocked(id string, payload []byte) error {
+	if err := os.MkdirAll(filepath.Dir(s.payloadPath(id)), 0o755); err != nil {
+		return err
+	}
+	return writeFileAtomic(s.payloadPath(id), payload, 0o644)
 }
 
 func (s *PendingStore) loadIndexLocked() (entity.PendingFile, error) {
@@ -160,6 +245,50 @@ func (s *PendingStore) payloadRelative(id string) string {
 	return "pending/" + id + ".json"
 }
 
+func (s *PendingStore) transactionPath() string {
+	return filepath.Join(s.dir, "pending.txn.json")
+}
+
+func samePendingIdentity(left, right entity.Pending) bool {
+	return left.ID == right.ID && left.RunID == right.RunID && left.RequestID == right.RequestID &&
+		left.ChainID == right.ChainID && slices.Equal(left.ChainPath, right.ChainPath) &&
+		left.NodeID == right.NodeID && left.Kind == right.Kind &&
+		left.ContextHash == right.ContextHash && left.AncestorHash == right.AncestorHash &&
+		left.ParamsHash == right.ParamsHash && left.CreatedAt == right.CreatedAt
+}
+
+func validatePendingTransaction(transaction entity.PendingTransaction) error {
+	if transaction.Version != valueobject.PendingTransactionFileVersion {
+		return fmt.Errorf("unsupported transaction version %d", transaction.Version)
+	}
+	if transaction.BaseRevision < 0 || transaction.TargetRevision != transaction.BaseRevision+1 {
+		return fmt.Errorf("invalid revision range %d -> %d", transaction.BaseRevision, transaction.TargetRevision)
+	}
+	if len(transaction.Payload) > valueobject.MaxPendingPayloadSize {
+		return fmt.Errorf("pending payload too large: %d", len(transaction.Payload))
+	}
+	if err := validatePending(transaction.Pending); err != nil {
+		return err
+	}
+	if transaction.ArtifactMeta == nil {
+		if len(transaction.ArtifactPayload) != 0 || transaction.Pending.Status == valueobject.PendingApplied || transaction.Pending.ArtifactID != "" {
+			return fmt.Errorf("applied pending is missing its artifact")
+		}
+		return nil
+	}
+	meta := *transaction.ArtifactMeta
+	if transaction.Pending.Status != valueobject.PendingApplied || transaction.Pending.ArtifactID == "" ||
+		meta.Kind != transaction.Pending.Kind || meta.NodeID != transaction.Pending.NodeID ||
+		meta.CreatedAt != transaction.Pending.CreatedAt || meta.SourceRunID != transaction.Pending.RunID ||
+		meta.SourcePendingID != transaction.Pending.ID {
+		return fmt.Errorf("artifact metadata does not match pending")
+	}
+	if len(transaction.ArtifactPayload) == 0 || len(transaction.ArtifactPayload) > valueobject.MaxPendingPayloadSize {
+		return fmt.Errorf("invalid artifact payload size %d", len(transaction.ArtifactPayload))
+	}
+	return valueobject.ValidateStructuredPayload(meta.Kind, transaction.ArtifactPayload)
+}
+
 func normalizePending(pending entity.Pending) entity.Pending {
 	if pending.ChainPath == nil {
 		pending.ChainPath = []string{}
@@ -175,6 +304,9 @@ func validatePending(pending entity.Pending) error {
 	}
 	if err := valueobject.ValidateID(pending.RunID); err != nil {
 		return fmt.Errorf("%w: runId: %v", ErrInvalidPending, err)
+	}
+	if len(pending.RequestID) > valueobject.MaxPendingRequestIDLength {
+		return fmt.Errorf("%w: requestId is too long", ErrInvalidPending)
 	}
 	if pending.ChainID != "" {
 		if err := valueobject.ValidateID(pending.ChainID); err != nil {

@@ -81,3 +81,39 @@ func (h *WorkflowService) SelectNode(id string) (entity.Project, error) {
 	defer cancel()
 	return h.service.SelectNode(ctx, id)
 }
+
+func (h *WorkflowService) ListPending() ([]entity.Pending, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	return h.service.ListPending(ctx)
+}
+
+func (h *WorkflowService) GetPending(id string) (entity.PendingDetail, error) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return entity.PendingDetail{}, errors.New("待应用 ID 不能为空")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	return h.service.GetPending(ctx, id)
+}
+
+func (h *WorkflowService) ApplyPending(id string, force bool) (entity.Project, error) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return entity.Project{}, errors.New("待应用 ID 不能为空")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	return h.service.ApplyPending(ctx, id, force)
+}
+
+func (h *WorkflowService) DiscardPending(id string) (entity.Project, error) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return entity.Project{}, errors.New("待应用 ID 不能为空")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	return h.service.DiscardPending(ctx, id)
+}

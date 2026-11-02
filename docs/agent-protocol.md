@@ -163,15 +163,18 @@ App 在启动运行前构建并作为首条消息注入：
 | `node_id` | 必须等于当前运行目标节点，否则 `TURN_NOT_ACTIVE` |
 | `kind` | `message` / `topics` / `script`；`scene_dsl` 在 M2 返回 `UNSUPPORTED_UNTIL_M3` |
 | `payload` | 结构化内容 ≤256 KiB；`message` 可为 `{"text":"..."}` |
-| `request_id` | 可选；存在时幂等，重复提交返回同一 pending |
+| `request_id` | 可选，最多 128 字节；同一 runId 下相同 request id、绑定信息与原始 payload 重放时返回原 pending；内容不一致返回 `REQUEST_ID_CONFLICT` |
 
 校验：
 
 - `kind` 必须与节点类型匹配：topic → `topics`；prompt → `script`；不匹配返回 `NODE_KIND_MISMATCH`。
-- 结构化输出校验失败：创建 `status=invalid` 的 pending，保留原文与错误；节点标红，不自动重试。
-- 同一运行最多一个结构化 pending；第二个返回 `TURN_PENDING_EXISTS`。
-- 每个 topic 树 pending 上限 50。
-- 目标节点已锁定（应用过首轮/候选）时，运行与 `apply_artifact` 均被拒绝（`NODE_LOCKED`）；M2 的 topic/prompt 每节点最多一个已应用轮次，迭代新增下游节点或分支。
+- 结构化 payload 上限 256 KiB。校验失败仍创建 `status=invalid` 的 pending，逐字节保留原文与校验错误；不能应用，不自动重试。
+- `topics`：顶层对象的 `topics` 数组含 3–10 个对象；每项的 `title`、`angle`、`hook` 必须为字符串，额外字段保留。
+- `script`：顶层 `title` 为字符串，`scenes` 至少一个对象；每项 `narration` 为字符串、`duration` 为 JSON 数字（允许 0），额外字段保留。
+- 同一运行最多一个结构化 pending；相同 runId + request_id 且运行/节点/类型/哈希绑定与原始 payload 均相同则幂等返回原记录；相同 ID 内容不同返回 `REQUEST_ID_CONFLICT`，同运行另一个结构化结果返回 `TURN_PENDING_EXISTS`。
+- 每个 topic 树最多 50 条 `pending`/`invalid`；应用或丢弃释放名额，历史索引与原文保留。
+- 应用时重新计算参数与祖先哈希；`force=true` 只覆盖 `PARAMS_CHANGED`/`CONTEXT_CHANGED`，不绕过 Schema、节点类型、运行锁或内容锁。应用后节点内容与执行锁定、追加轮次并将全部后代标记为 stale；M2 的 topic/prompt 每节点最多一个已应用轮次。
+- 目标节点已锁定（应用过首轮/候选）时，运行与应用均被拒绝（`NODE_LOCKED`）；M2 的 topic/prompt 每节点最多一个已应用轮次，迭代新增下游节点或分支。
 
 Schema（M2 最小）：
 
@@ -329,7 +332,12 @@ workspace:changed { v, revision, reason }
 | `TURN_NOT_ACTIVE` | 运行已结束或节点不匹配 |
 | `TURN_PENDING_EXISTS` | 本次运行已有结构化 pending |
 | `PENDING_NOT_FOUND` | pending 不存在 |
+| `PENDING_INVALID` | Schema 无效或 pending 不可应用 |
+| `PENDING_NOT_APPLICABLE` | pending 已丢弃或状态不允许应用 |
 | `PENDING_ALREADY_APPLIED` | pending 已应用 |
+| `PENDING_LIMIT_REACHED` | topic 树已有 50 条活动 pending |
+| `PENDING_PAYLOAD_TOO_LARGE` | payload 超过 256 KiB |
+| `REQUEST_ID_CONFLICT` | 同一运行的 request_id 被不同请求内容复用 |
 | `BASE_ROUND_CHANGED` | 旧版错误码，M2 由 `CONTEXT_CHANGED` 取代 |
 | `QUESTION_TIMEOUT` | ask_user 超时 |
 | `SEND_FAILED` | 指令未能送达 Agent，可重试 |

@@ -335,8 +335,13 @@ func loadAncestor(ctx context.Context, store port.ArtifactStore, node, child *en
 	if err != nil {
 		return resolvedAncestor{}, fmt.Errorf("%w: node %s: %w", ErrAncestorNotReady, node.ID, err)
 	}
-	if artifact.ID != latest.ArtifactID || artifact.Kind != expected || len(payload) > valueobject.MaxPendingPayloadSize || !utf8.Valid(payload) || !json.Valid(payload) {
+	if artifact.ID != latest.ArtifactID || len(payload) > valueobject.MaxPendingPayloadSize || !utf8.Valid(payload) || !json.Valid(payload) {
 		return resolvedAncestor{}, fmt.Errorf("%w: node %s has an invalid artifact", ErrAncestorNotReady, node.ID)
+	}
+	if artifact.Kind != expected {
+		if err := valueobject.ValidateStructuredPayload(expected, payload); err != nil {
+			return resolvedAncestor{}, fmt.Errorf("%w: node %s artifact does not match its round kind", ErrAncestorNotReady, node.ID)
+		}
 	}
 	var object map[string]json.RawMessage
 	if err := json.Unmarshal(payload, &object); err != nil || object == nil {

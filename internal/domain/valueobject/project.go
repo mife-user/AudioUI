@@ -76,15 +76,18 @@ func (s PendingStatus) Valid() bool {
 }
 
 const (
-	ProjectFileVersion = 1
-	RunsFileVersion    = 1
-	PendingFileVersion = 1
+	ProjectFileVersion            = 1
+	RunsFileVersion               = 1
+	PendingFileVersion            = 1
+	PendingTransactionFileVersion = 1
 
 	DefaultContextTokenBudget = 1_000_000
 	DefaultContextVersion     = 1
 
-	MaxRunTranscriptItems = 500
-	MaxProjectNameLength  = 120
-	MaxNodeTitleLength    = 200
-	MaxPendingPayloadSize = 256 * 1024
+	MaxRunTranscriptItems     = 500
+	MaxProjectNameLength      = 120
+	MaxNodeTitleLength        = 200
+	MaxPendingPayloadSize     = 256 * 1024
+	MaxPendingPerTree         = 50
+	MaxPendingRequestIDLength = 128
 )

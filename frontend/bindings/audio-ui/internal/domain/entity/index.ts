@@ -5,6 +5,8 @@ export type {
     Node,
     NodeConstraints,
     NodeParams,
+    Pending,
+    PendingDetail,
     Position,
     Project,
     ProjectSummary,

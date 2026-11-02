@@ -59,22 +59,28 @@ func TestArtifactCandidateCounter(t *testing.T) {
 func TestArtifactCandidateCounterEmptyCases(t *testing.T) {
 	store := persistence.NewArtifactStore(t.TempDir())
 	counter := NewArtifactCandidateCounter(&fakeArtifactProvider{store: store})
-	scriptArtifact, err := store.Put(context.Background(), []byte(`{"topics":[{"title":"a"}]}`), entity.ArtifactMeta{
+	scriptArtifact, err := store.Put(context.Background(), []byte(`{"topics":[{"title":"a","angle":"a","hook":"a"},{"title":"b","angle":"b","hook":"b"},{"title":"c","angle":"c","hook":"c"}]}`), entity.ArtifactMeta{
 		Kind: valueobject.OutputKindScript, NodeID: "n_topic", CreatedAt: "2026-11-01T10:00:00Z",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	for name, node := range map[string]entity.Node{
-		"no rounds":     {ID: "n_topic", Type: valueobject.NodeTypeTopic},
-		"prompt node":   {ID: "n_prompt", Type: valueobject.NodeTypePrompt, Rounds: []entity.Round{{N: 1, Kind: valueobject.OutputKindTopics, ArtifactID: "sha256:x"}}},
-		"script round":  {ID: "n_topic", Type: valueobject.NodeTypeTopic, Rounds: []entity.Round{{N: 1, Kind: valueobject.OutputKindScript, ArtifactID: "sha256:x"}}},
-		"artifact kind": {ID: "n_topic", Type: valueobject.NodeTypeTopic, Rounds: []entity.Round{{N: 1, Kind: valueobject.OutputKindTopics, ArtifactID: scriptArtifact.ID}}},
+		"no rounds":    {ID: "n_topic", Type: valueobject.NodeTypeTopic},
+		"prompt node":  {ID: "n_prompt", Type: valueobject.NodeTypePrompt, Rounds: []entity.Round{{N: 1, Kind: valueobject.OutputKindTopics, ArtifactID: "sha256:x"}}},
+		"script round": {ID: "n_topic", Type: valueobject.NodeTypeTopic, Rounds: []entity.Round{{N: 1, Kind: valueobject.OutputKindScript, ArtifactID: "sha256:x"}}},
 	} {
 		count, err := counter.Count(context.Background(), "p_test", node)
 		if err != nil || count != 0 {
 			t.Fatalf("%s: count=%d err=%v", name, count, err)
 		}
+	}
+	count, err := counter.Count(context.Background(), "p_test", entity.Node{
+		ID: "n_topic", Type: valueobject.NodeTypeTopic,
+		Rounds: []entity.Round{{N: 1, Kind: valueobject.OutputKindTopics, ArtifactID: scriptArtifact.ID}},
+	})
+	if err != nil || count != 3 {
+		t.Fatalf("current round kind should override first artifact metadata: count=%d err=%v", count, err)
 	}
 }
 
@@ -93,6 +99,18 @@ func TestArtifactCandidateCounterErrors(t *testing.T) {
 		Rounds: []entity.Round{{N: 1, Kind: valueobject.OutputKindTopics, ArtifactID: "sha256:" + "0"}},
 	}); err == nil {
 		t.Fatal("missing artifact error = nil")
+	}
+	wrongKind, err := store.Put(context.Background(), []byte(`{"topics":"bad"}`), entity.ArtifactMeta{
+		Kind: valueobject.OutputKindScript, NodeID: "n_topic", CreatedAt: "2026-11-01T10:00:00Z",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := counter.Count(context.Background(), "p_test", entity.Node{
+		ID: "n_topic", Type: valueobject.NodeTypeTopic,
+		Rounds: []entity.Round{{N: 1, Kind: valueobject.OutputKindTopics, ArtifactID: wrongKind.ID}},
+	}); err == nil {
+		t.Fatal("invalid cross-kind payload error = nil")
 	}
 	noProvider := NewArtifactCandidateCounter(nil)
 	if _, err := noProvider.Count(context.Background(), "p_test", entity.Node{

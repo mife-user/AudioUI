@@ -17,8 +17,24 @@ export function AddNode(request: $models.AddNodeRequest): $CancellablePromise<en
     return $Call.ByID(768279910, request);
 }
 
+export function ApplyPending(id: string, force: boolean): $CancellablePromise<entity$0.Project> {
+    return $Call.ByID(599074776, id, force);
+}
+
 export function Connect(parentID: string, childID: string, parentCandidate: number | null, replace: boolean): $CancellablePromise<entity$0.Project> {
     return $Call.ByID(2783250323, parentID, childID, parentCandidate, replace);
+}
+
+export function DiscardPending(id: string): $CancellablePromise<entity$0.Project> {
+    return $Call.ByID(1112831042, id);
+}
+
+export function GetPending(id: string): $CancellablePromise<entity$0.PendingDetail> {
+    return $Call.ByID(395943744, id);
+}
+
+export function ListPending(): $CancellablePromise<entity$0.Pending[] | null> {
+    return $Call.ByID(3179214806);
 }
 
 export function MoveNode(id: string, x: number, y: number): $CancellablePromise<entity$0.Project> {

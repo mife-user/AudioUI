@@ -179,15 +179,18 @@
 
 - **背景**：Agent 结构化结果必须先待应用，人工确认后才改节点；无效输出要保留原文；应用后产生不可变轮次。
 - **决策**：
-  - pending 与 artifact 分离：pending 是工作流状态（`pending.json` + `pending/<id>.json`），artifact 是应用后的不可变结果（`artifacts/<sha256>/`）。
-  - `reply` 生成 pending，绑定 runId/chainId（运行时的末端节点）/chainPath/nodeId/contextHash/ancestorHash/paramsHash；无效 Schema 也落盘，状态 `invalid`，节点标红，不自动重试。
-  - 同一运行最多一个结构化 pending；`request_id` 存在时幂等。
-  - `ApplyPending` 校验节点类型/kind、未锁定、参数与祖先哈希；不一致返回 `PARAMS_CHANGED`/`CONTEXT_CHANGED`，UI 确认后 `force=true`；应用 = 写 artifact + 追加轮次 + 锁定节点内容与执行 + 全部后代 `stale`。锁定后不可再次执行或应用新轮次；M2 的 topic/prompt 每节点最多一个已应用轮次，迭代通过新增下游节点或候选端口分支完成。
-  - artifact 存于 `artifacts/<sha256>/payload.json` 与 `meta.json`；哈希按规范化 payload 字节计算，`meta.json` 记录 kind/nodeId/createdAt/sourceRunId/sourcePendingId。
+  - pending 与 artifact 分离：pending 是工作流状态（`pending.json` + `pending/<id>.json`），artifact 是应用后的不可变结果（`artifacts/<sha256>/`）。pending 记录可选 `request_id`，限制为 128 字节。
+  - `reply` 生成 pending，绑定 runId/chainId（运行时的末端节点）/chainPath/nodeId/contextHash/ancestorHash/paramsHash；无效 Schema 也落盘，状态 `invalid`，保留原文与错误，不自动重试。
+  - 同一运行最多一个结构化 pending；相同 runId + `request_id` + 请求内容重放时返回原 pending，复用 request id 但内容不同返回 `REQUEST_ID_CONFLICT`。
+  - 每 topic 树最多 50 条 `pending`/`invalid`；应用或丢弃释放名额，历史索引与原文继续保留。
+  - `ApplyPending` 校验节点类型/kind、未锁定、参数与祖先哈希；不一致返回 `PARAMS_CHANGED`/`CONTEXT_CHANGED`，UI 确认后 `force=true` 只覆盖哈希冲突，不能绕过 Schema、节点、运行锁或内容锁。应用 = 写 artifact + 追加唯一轮次 + 锁定节点内容与执行 + 全部后代 `stale`。M2 的 topic/prompt 每节点最多一个已应用轮次，迭代通过新增下游节点或候选端口分支完成。
+  - artifact 存于 `artifacts/<sha256>/payload.json` 与 `meta.json`；payload 按保留数字精度的确定性 JSON 规范化后计算 SHA-256。`meta.json` 以首次写入为准，当前轮次的 `kind` 才是授权真相；跨 kind 复用时按轮次 kind 校验 payload。
+  - `pending.txn.json` 是 pending、artifact 与 `project.json` revision 的工程内恢复日志：先写意图和必需原文/CAS，再保存目标 revision 的工程，最后更新 pending 索引并删除日志。工程加载/打开比较 base/target revision，未提交时删除日志，已提交时幂等重放索引与 CAS；revision 不匹配、日志损坏或恢复失败时阻止操作，不暴露半成品。
+  - 创建/应用/丢弃与 `ProjectService.New/Open` 共用 `ProjectSession.WithExclusive` 操作锁，避免工程切换穿过跨文件事务；锁顺序为 workflow 命令锁后工程操作锁。
   - `parentCandidate` 为 0 基候选序号；UI 显示为 1 基。
   - topic 应用 `topics` 后锁定参数、候选集合与执行；每个候选成为一个输出端口，可继续连接新分支；**不设「选定」步骤，连接哪个候选端口，哪条分支就用哪个候选**。
   - prompt 应用首轮后锁定内容与执行；拓扑在非运行链上仍可改挂，改挂会标记子树 `stale`。
-  - `DiscardPending` 只改状态，不删除 payload；应用后丢弃返回 `PENDING_ALREADY_APPLIED`。
+  - `DiscardPending` 幂等，只改状态且不删除 payload；应用后丢弃返回 `PENDING_ALREADY_APPLIED`。
   - `apply_artifact` 永远只由 UI 调用，不注册为 MCP 工具。
 - **理由**：生命周期与语义分离；无效输出可追溯；候选端口把「选择」变成结构事实，不再需要节点级 selectedTopic；应用是唯一改节点内容的路径。
 - **代价**：多一步人工应用；pending 清理与引用回收留 M5；候选端口连接后改挂需重新校验上下文。

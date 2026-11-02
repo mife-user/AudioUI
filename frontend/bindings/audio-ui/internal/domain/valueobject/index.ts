@@ -4,6 +4,7 @@
 export {
     NodeType,
     OutputKind,
+    PendingStatus,
     PermissionTier,
     SessionState,
     TranscriptKind

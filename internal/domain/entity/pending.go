@@ -8,6 +8,7 @@ import "audio-ui/internal/domain/valueobject"
 type Pending struct {
 	ID           string                    `json:"id"`
 	RunID        string                    `json:"runId"`
+	RequestID    string                    `json:"requestId,omitempty"`
 	ChainID      string                    `json:"chainId"`
 	ChainPath    []string                  `json:"chainPath"`
 	NodeID       string                    `json:"nodeId"`
@@ -27,4 +28,20 @@ type Pending struct {
 type PendingFile struct {
 	Version int       `json:"version"`
 	Pending []Pending `json:"pending"`
+}
+
+type PendingDetail struct {
+	Pending    Pending `json:"pending"`
+	RawPayload []byte  `json:"rawPayload"`
+}
+
+// Revision is the commit point used to distinguish rollback from replay.
+type PendingTransaction struct {
+	Version         int           `json:"version"`
+	BaseRevision    int64         `json:"baseRevision"`
+	TargetRevision  int64         `json:"targetRevision"`
+	Pending         Pending       `json:"pending"`
+	Payload         []byte        `json:"payload"`
+	ArtifactPayload []byte        `json:"artifactPayload,omitempty"`
+	ArtifactMeta    *ArtifactMeta `json:"artifactMeta,omitempty"`
 }

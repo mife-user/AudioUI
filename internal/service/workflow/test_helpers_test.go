@@ -35,6 +35,13 @@ func (s *fakeSession) Save(ctx context.Context, project entity.Project) (entity.
 	return project.Clone(), nil
 }
 
+func (s *fakeSession) WithExclusive(ctx context.Context, fn func(port.ProjectAccess) error) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return fn(s)
+}
+
 type fakeCandidates struct {
 	counts map[string]int
 	err    error

@@ -22,10 +22,13 @@ const (
 )
 
 type Options struct {
-	Project    port.ProjectSession
-	Candidates CandidateCounter
-	Workspace  port.WorkspaceMover
-	OnChange   func(revision int64, reason string)
+	Project       port.ProjectSession
+	Candidates    CandidateCounter
+	Workspace     port.WorkspaceMover
+	Pending       port.PendingStoreProvider
+	Artifacts     port.ArtifactStoreProvider
+	ContextHasher port.ContextHasher
+	OnChange      func(revision int64, reason string)
 }
 
 type Service struct {
@@ -343,8 +346,16 @@ func (s *Service) SelectNode(ctx context.Context, id string) (entity.Project, er
 }
 
 func (s *Service) changed(revision int64) {
+	s.changedWithReason(revision, ChangeReasonGraph)
+}
+
+func (s *Service) changedPending(revision int64) {
+	s.changedWithReason(revision, ChangeReasonPending)
+}
+
+func (s *Service) changedWithReason(revision int64, reason string) {
 	if s.opts.OnChange != nil {
-		s.opts.OnChange(revision, ChangeReasonGraph)
+		s.opts.OnChange(revision, reason)
 	}
 }
 
