@@ -1,0 +1,15 @@
+{
+	"fixed": {
+		"file_version": "0.2.0"
+	},
+	"info": {
+		"0409": {
+			"ProductVersion": "0.2.0",
+			"CompanyName": "AudioUI",
+			"FileDescription": "本地运行的节点化内容生产工作台",
+			"LegalCopyright": "(c) 2026, AudioUI",
+			"ProductName": "AudioUI",
+			"Comments": "Local-first content workbench"
+		}
+	}
+}

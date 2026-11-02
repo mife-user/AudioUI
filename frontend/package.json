@@ -1,0 +1,40 @@
+{
+  "name": "audio-ui-frontend",
+  "private": true,
+  "version": "0.2.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build:dev": "tsc && vite build --minify false --mode development && node scripts/ensure-dist-gitkeep.mjs",
+    "build": "tsc && vite build --mode production",
+    "postbuild": "node scripts/ensure-dist-gitkeep.mjs",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "check:tokens": "node scripts/check-tokens.mjs",
+    "preview": "vite preview",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@wailsio/runtime": "3.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "zustand": "^5.0.16"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.0.0",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.3",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^6.0.0",
+    "eslint": "^9.0.0",
+    "eslint-plugin-react-hooks": "^6.0.0",
+    "eslint-plugin-react-refresh": "^0.4.0",
+    "globals": "^16.0.0",
+    "jsdom": "^27.4.0",
+    "typescript": "^5.9.0",
+    "typescript-eslint": "^8.0.0",
+    "vite": "^8.2.4",
+    "vitest": "^4.1.12"
+  }
+}

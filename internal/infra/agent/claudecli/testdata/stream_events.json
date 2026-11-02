@@ -1,0 +1,20 @@
+[
+  {
+    "type": "stream_event",
+    "uuid": "evt-1",
+    "session_id": "session-fixture",
+    "event": {
+      "type": "content_block_delta",
+      "delta": { "type": "text_delta", "text": "Hello " }
+    }
+  },
+  {
+    "type": "stream_event",
+    "uuid": "evt-1",
+    "session_id": "session-fixture",
+    "event": {
+      "type": "content_block_delta",
+      "delta": { "type": "text_delta", "text": "world" }
+    }
+  }
+]

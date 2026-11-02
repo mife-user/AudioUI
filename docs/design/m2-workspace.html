@@ -1,0 +1,1314 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="color-scheme" content="dark" />
+<title>AudioUI · M2 工作台原型</title>
+<style>
+  :root {
+    --bg: #0a0e11;
+    --bg-elev: #0c1216;
+    --panel: #101a1f;
+    --panel-2: #0b1216;
+    --border: #1e2a30;
+    --border-strong: #2a3f48;
+    --text: #dfe7ea;
+    --text-dim: #9fb2b9;
+    --muted: #6f828a;
+    --accent: #5ad1e6;
+    --accent-soft: rgba(90, 209, 230, 0.09);
+    --ok: #6fd3a4;
+    --ok-soft: rgba(111, 211, 164, 0.10);
+    --warn: #d8b27a;
+    --warn-soft: rgba(216, 178, 122, 0.10);
+    --danger: #d98a8a;
+    --danger-soft: rgba(217, 138, 138, 0.10);
+    --grid: #16232a;
+    --edge: #3d6b78;
+    --glass: rgba(12, 18, 22, 0.92);
+    --radius-sm: 5px;
+    --radius: 9px;
+    --radius-lg: 14px;
+    --s1: 4px;
+    --s2: 8px;
+    --s3: 12px;
+    --s4: 16px;
+    --topbar-h: 48px;
+    --console-w: 322px;
+    --font: Inter, "Noto Sans SC", "Microsoft YaHei UI", sans-serif;
+    --mono: "JetBrains Mono", Consolas, monospace;
+    --motion: 140ms ease-out;
+  }
+
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font);
+    font-size: 13px;
+    line-height: 1.5;
+    overflow: hidden;
+  }
+  button { font-family: inherit; color: inherit; }
+  button:focus-visible, [tabindex]:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+  .mono { font-family: var(--mono); font-size: 10.5px; }
+  .dim { color: var(--text-dim); }
+  .muted { color: var(--muted); }
+
+  /* ---------- shell ---------- */
+  .app { height: 100vh; display: flex; flex-direction: column; }
+  .topbar {
+    height: var(--topbar-h);
+    flex: 0 0 var(--topbar-h);
+    display: flex;
+    align-items: center;
+    gap: var(--s3);
+    padding: 0 var(--s4);
+    background: var(--bg-elev);
+    border-bottom: 1px solid var(--border);
+    z-index: 20;
+  }
+  .brand { display: flex; align-items: center; gap: var(--s2); font-weight: 650; letter-spacing: .04em; }
+  .brand-mark {
+    width: 18px; height: 18px; border-radius: 5px;
+    border: 1px solid var(--edge);
+    display: grid; place-items: center;
+    color: var(--accent); font-size: 10px;
+  }
+  .project-btn {
+    display: flex; align-items: center; gap: 6px;
+    background: transparent; border: 1px solid transparent;
+    border-radius: var(--radius-sm); padding: 4px 8px;
+    color: var(--text-dim); cursor: pointer; transition: border-color var(--motion), color var(--motion);
+  }
+  .project-btn:hover { border-color: var(--border-strong); color: var(--text); }
+  .topbar-spacer { flex: 1; }
+  .status { display: flex; align-items: center; gap: 6px; color: var(--text-dim); font-size: 12px; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 8px var(--ok); }
+  .dot.warn { background: var(--warn); box-shadow: 0 0 8px var(--warn); }
+  .btn {
+    background: var(--panel-2); border: 1px solid var(--border);
+    color: var(--text-dim); border-radius: var(--radius-sm);
+    padding: 5px 10px; font-size: 12px; cursor: pointer;
+    transition: border-color var(--motion), color var(--motion), background var(--motion);
+  }
+  .btn:hover { border-color: var(--border-strong); color: var(--text); }
+  .btn.primary { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+  .btn.primary:hover { background: rgba(90, 209, 230, 0.16); }
+  .btn.danger { color: var(--danger); border-color: var(--danger); background: var(--danger-soft); }
+  .btn.ghost { background: transparent; border-color: transparent; }
+  .btn.ghost:hover { border-color: var(--border-strong); }
+  .version { color: var(--muted); font-family: var(--mono); font-size: 10.5px; }
+
+  /* ---------- workspace ---------- */
+  .workspace { flex: 1; min-height: 0; display: flex; }
+  .canvas-wrap { flex: 1; min-width: 0; position: relative; overflow: hidden; background: var(--bg); }
+  .canvas {
+    position: absolute; inset: 0;
+    background-image: radial-gradient(circle, var(--grid) 1px, transparent 1px);
+    background-size: 22px 22px;
+    cursor: grab; overflow: hidden;
+  }
+  .canvas.panning { cursor: grabbing; }
+  .world {
+    position: absolute; left: 0; top: 0;
+    width: 1400px; height: 900px;
+    transform-origin: 0 0;
+    transition: transform 60ms linear;
+  }
+  .canvas.panning .world { transition: none; }
+  .edges { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+  .edge-path { fill: none; stroke: var(--edge); stroke-width: 1.5; }
+  .edge-path.active { stroke: var(--accent); }
+  .edge-path.dim { opacity: .28; }
+  .edge-temp { fill: none; stroke: var(--accent); stroke-width: 1.5; stroke-dasharray: 5 4; }
+
+  /* ---------- nodes ---------- */
+  .node {
+    position: absolute;
+    width: 280px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, .28);
+    transition: border-color var(--motion), opacity var(--motion), box-shadow var(--motion);
+    user-select: none;
+  }
+  .node:hover { border-color: var(--border-strong); }
+  .node.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent-soft), 0 8px 24px rgba(0, 0, 0, .3); }
+  .node.dimmed { opacity: .42; }
+  .node.draft { border-style: dashed; border-color: var(--border-strong); opacity: .86; }
+  .node.locked .node-body { opacity: .78; }
+  .node.running { border-color: var(--accent); }
+  .node.error { border-left: 2px solid var(--danger); }
+  .node-head {
+    display: flex; align-items: center; gap: var(--s2);
+    padding: 9px 11px; border-bottom: 1px solid var(--border);
+  }
+  .node-kind {
+    font-size: 10px; letter-spacing: .08em; text-transform: uppercase;
+    color: var(--accent); font-family: var(--mono);
+  }
+  .node-kind.prompt { color: var(--text-dim); }
+  .node-title { font-size: 12.5px; font-weight: 650; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 2px 6px; border-radius: 999px;
+    font-size: 10px; border: 1px solid var(--border);
+    color: var(--text-dim); background: var(--panel-2); white-space: nowrap;
+  }
+  .chip.accent { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+  .chip.ok { color: var(--ok); border-color: var(--ok); background: var(--ok-soft); }
+  .chip.warn { color: var(--warn); border-color: var(--warn); background: var(--warn-soft); }
+  .chip.danger { color: var(--danger); border-color: var(--danger); background: var(--danger-soft); }
+  .node-body { padding: 10px 11px 11px; display: grid; gap: 8px; }
+  .field-label { font-size: 10px; color: var(--muted); letter-spacing: .06em; }
+  .field-value { font-size: 12px; color: var(--text-dim); line-height: 1.55; }
+  .field-value.strong { color: var(--text); }
+  .candidate {
+    position: relative;
+    display: flex; align-items: center; gap: 6px;
+    padding: 5px 18px 5px 7px; border: 1px solid var(--border);
+    border-radius: var(--radius-sm); background: var(--panel-2);
+    cursor: pointer; transition: border-color var(--motion), background var(--motion);
+  }
+  .candidate:hover { border-color: var(--border-strong); }
+  .candidate.selected { border-color: var(--accent); background: var(--accent-soft); }
+  .candidate.connected { border-color: var(--edge); }
+  .candidate.connected .name { color: var(--text); }
+  .cand-port {
+    position: absolute; right: -6px; top: 50%; margin-top: -5.5px;
+    width: 11px; height: 11px; border-radius: 50%;
+    background: var(--bg-elev); border: 1.5px solid var(--edge);
+    transition: border-color var(--motion), background var(--motion), transform var(--motion);
+    cursor: crosshair;
+  }
+  .cand-port:hover { border-color: var(--accent); background: var(--accent-soft); transform: scale(1.15); }
+  .candidate.connected .cand-port { border-color: var(--accent); }
+  .candidate .idx { font-family: var(--mono); font-size: 10px; color: var(--muted); }
+  .candidate .name { flex: 1; min-width: 0; font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .node-actions { display: flex; gap: 6px; align-items: center; }
+  .node-note { font-size: 10.5px; color: var(--warn); }
+  .node-note.ok { color: var(--ok); }
+  .port {
+    position: absolute; width: 11px; height: 11px; border-radius: 50%;
+    background: var(--bg-elev); border: 1.5px solid var(--edge);
+    transition: border-color var(--motion), background var(--motion), transform var(--motion);
+  }
+  .port:hover { border-color: var(--accent); background: var(--accent-soft); transform: scale(1.15); }
+  .port-out { bottom: -6px; left: 50%; margin-left: -5.5px; cursor: crosshair; }
+  .port-in { top: -6px; left: 50%; margin-left: -5.5px; }
+  .node.draft .port-in { border-color: var(--warn); }
+  .node.invalid-target { border-color: var(--danger) !important; box-shadow: 0 0 0 2px var(--danger-soft); }
+  .node.runlocked { border-color: var(--warn); }
+  .node.runlocked .node-head { background: var(--warn-soft); }
+  .node.runlocked .node-body { opacity: .82; }
+  .node.runlocked .cand-port,
+  .node.runlocked .port-out { opacity: .35; cursor: not-allowed; }
+  .node.runlocked .node-run,
+  .node.runlocked .node-add { opacity: .55; }
+  .node.editable-branch { border-color: var(--ok); }
+  .chip.lock { color: var(--warn); border-color: var(--warn); background: var(--warn-soft); }
+  .node-actions .btn { padding: 4px 8px; font-size: 11px; }
+
+  /* ---------- quickbar ---------- */
+  .quickbar {
+    position: absolute; left: 14px; right: 14px; bottom: 14px;
+    background: var(--glass);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    backdrop-filter: blur(10px);
+    box-shadow: 0 12px 30px rgba(0, 0, 0, .35);
+    padding: 8px 10px;
+    display: flex; align-items: center; gap: var(--s2);
+    z-index: 6;
+  }
+  .quickbar-label { font-size: 10px; letter-spacing: .08em; color: var(--muted); padding-right: 4px; white-space: nowrap; }
+  .chain-card {
+    display: flex; align-items: center; gap: 7px;
+    border: 1px solid var(--border); border-radius: var(--radius-sm);
+    background: var(--panel-2); color: var(--text-dim);
+    padding: 5px 9px; cursor: pointer; font-size: 11.5px;
+    transition: border-color var(--motion), color var(--motion), background var(--motion);
+  }
+  .chain-card:hover { border-color: var(--border-strong); color: var(--text); }
+  .chain-card.active { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+  .chain-card.muted { opacity: .55; border-style: dashed; cursor: default; }
+  .chain-card.muted:hover { border-color: var(--border); color: var(--text-dim); }
+  .chain-card .chain-state { font-size: 10px; color: var(--muted); }
+  .chain-card.active .chain-state { color: var(--accent); }
+  .chain-card.running .chain-state { color: var(--ok); }
+  .chain-card.pending .chain-state { color: var(--warn); }
+  .quickbar-spacer { flex: 1; }
+  .canvas-hint {
+    position: absolute; left: 16px; top: 14px; z-index: 5;
+    display: flex; align-items: center; gap: 8px;
+    font-size: 10.5px; color: var(--muted);
+    background: var(--glass); border: 1px solid var(--border);
+    border-radius: 999px; padding: 4px 10px;
+    backdrop-filter: blur(8px);
+  }
+  .canvas-hint .kbd {
+    font-family: var(--mono); color: var(--text-dim);
+    border: 1px solid var(--border); border-radius: 3px; padding: 0 4px;
+  }
+
+  /* ---------- console ---------- */
+  .console {
+    width: var(--console-w); flex: 0 0 var(--console-w);
+    background: var(--bg-elev); border-left: 1px solid var(--border);
+    display: flex; flex-direction: column; min-height: 0;
+  }
+  .console-head {
+    height: 40px; flex: 0 0 40px; display: flex; align-items: center; gap: var(--s2);
+    padding: 0 var(--s3); border-bottom: 1px solid var(--border);
+  }
+  .console-title { font-size: 10px; letter-spacing: .12em; color: var(--muted); font-family: var(--mono); }
+  .console-state { font-size: 11.5px; color: var(--text-dim); }
+  .console-head .btn { margin-left: auto; padding: 3px 7px; font-size: 11px; }
+  .console-meta {
+    padding: 8px var(--s3); border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--text-dim);
+  }
+  .console-meta .chain-name { font-weight: 650; color: var(--text); }
+  .console-meta .badge {
+    margin-left: auto; font-family: var(--mono); font-size: 10px;
+    color: var(--warn); border: 1px solid var(--warn); background: var(--warn-soft);
+    border-radius: 999px; padding: 1px 6px;
+  }
+  .pin-card {
+    margin: var(--s2) var(--s3) 0;
+    border: 1px solid var(--warn); background: var(--warn-soft);
+    border-radius: var(--radius-sm); padding: 8px 9px;
+    font-size: 11px; display: flex; align-items: center; gap: 8px;
+  }
+  .pin-card .pin-text { flex: 1; color: var(--text-dim); }
+  .pin-card.run { border-color: var(--ok); background: var(--ok-soft); }
+  .pin-card.run .pin-text { color: var(--text); }
+  .tabs { display: flex; gap: 2px; padding: var(--s2) var(--s3) 0; border-bottom: 1px solid var(--border); }
+  .tab {
+    background: transparent; border: 0; border-bottom: 2px solid transparent;
+    color: var(--muted); padding: 7px 10px; font-size: 11.5px; cursor: pointer;
+    border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  }
+  .tab:hover { color: var(--text-dim); }
+  .tab[aria-selected="true"] { color: var(--accent); border-bottom-color: var(--accent); }
+  .tab .count { font-family: var(--mono); font-size: 10px; margin-left: 3px; }
+  .panel { flex: 1; min-height: 0; overflow: auto; padding: var(--s3); display: none; }
+  .panel.active { display: block; }
+  .run-list { display: grid; gap: 6px; margin-bottom: var(--s3); }
+  .run-item {
+    text-align: left; width: 100%;
+    border: 1px solid var(--border); border-radius: var(--radius-sm);
+    background: var(--panel-2); padding: 7px 9px; cursor: pointer;
+    display: grid; gap: 3px;
+    transition: border-color var(--motion), background var(--motion);
+  }
+  .run-item:hover { border-color: var(--border-strong); }
+  .run-item.active { border-color: var(--accent); background: var(--accent-soft); }
+  .run-top { display: flex; align-items: center; gap: 6px; }
+  .run-node { font-size: 11.5px; font-weight: 650; color: var(--text); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .run-meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-family: var(--mono); font-size: 9.5px; color: var(--muted); }
+  .run-status { font-size: 10px; }
+  .run-status.ok { color: var(--ok); }
+  .run-status.warn { color: var(--warn); }
+  .run-status.danger { color: var(--danger); }
+  .transcript { display: grid; gap: 8px; }
+  .msg {
+    border: 1px solid var(--border); border-radius: var(--radius-sm);
+    background: var(--panel-2); padding: 7px 9px; font-size: 11.5px; color: var(--text-dim);
+    white-space: pre-wrap; line-height: 1.55;
+  }
+  .msg.user { background: var(--accent-soft); border-color: rgba(90, 209, 230, .28); color: var(--text); }
+  .msg.tool {
+    display: flex; gap: 6px; align-items: center;
+    font-family: var(--mono); font-size: 10px; color: var(--muted);
+    border-style: dashed;
+  }
+  .msg .tool-name { color: var(--text-dim); }
+  .msg .tool-ok { margin-left: auto; color: var(--ok); font-size: 9.5px; }
+  .empty-state {
+    border: 1px dashed var(--border-strong); border-radius: var(--radius);
+    padding: 18px 14px; text-align: center; color: var(--muted); font-size: 11.5px;
+  }
+  .pending-card {
+    border: 1px solid var(--warn); border-radius: var(--radius);
+    background: var(--panel); overflow: hidden;
+  }
+  .pending-head {
+    display: flex; align-items: center; gap: 6px;
+    padding: 8px 10px; border-bottom: 1px solid var(--border);
+    background: var(--warn-soft);
+  }
+  .pending-title { font-size: 11.5px; font-weight: 650; flex: 1; }
+  .pending-body { padding: 9px 10px; display: grid; gap: 6px; }
+  .pending-row { display: flex; gap: 8px; font-size: 11px; color: var(--text-dim); }
+  .pending-row .k { color: var(--muted); width: 52px; flex: 0 0 52px; }
+  .pending-actions { display: flex; gap: 6px; padding: 0 10px 10px; }
+  .console-empty { font-size: 11px; color: var(--muted); padding: 6px 2px; }
+
+  /* ---------- dialog / toast ---------- */
+  .backdrop {
+    position: fixed; inset: 0; background: rgba(0, 0, 0, .62);
+    display: none; place-items: center; z-index: 90;
+  }
+  .backdrop.open { display: grid; }
+  .dialog {
+    width: 380px; max-width: calc(100vw - 40px);
+    background: var(--bg-elev); border: 1px solid var(--border-strong);
+    border-radius: var(--radius-lg); box-shadow: 0 24px 60px rgba(0, 0, 0, .55);
+    padding: var(--s4);
+  }
+  .dialog h2 { margin: 0 0 4px; font-size: 15px; }
+  .dialog p { margin: 0 0 var(--s3); color: var(--muted); font-size: 11.5px; }
+  .project-list { display: grid; gap: 6px; margin-bottom: var(--s3); }
+  .project-row {
+    display: flex; align-items: center; gap: 8px; width: 100%;
+    border: 1px solid var(--border); background: var(--panel-2);
+    border-radius: var(--radius-sm); padding: 8px 10px; cursor: pointer; text-align: left;
+  }
+  .project-row:hover { border-color: var(--border-strong); }
+  .project-row.active { border-color: var(--accent); background: var(--accent-soft); }
+  .project-row .name { flex: 1; font-size: 12px; }
+  .project-row .id { font-family: var(--mono); font-size: 9.5px; color: var(--muted); }
+  .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
+  .toast {
+    position: fixed; left: 50%; bottom: 84px; transform: translateX(-50%);
+    background: var(--glass); border: 1px solid var(--border-strong);
+    border-radius: var(--radius); padding: 8px 14px; font-size: 12px;
+    color: var(--text); box-shadow: 0 10px 30px rgba(0, 0, 0, .4);
+    opacity: 0; pointer-events: none; transition: opacity 150ms ease-out, transform 150ms ease-out;
+    z-index: 120; backdrop-filter: blur(10px);
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(-4px); }
+
+  @media (max-width: 1279px) {
+    .workspace { flex-direction: column; }
+    .console { width: auto; flex: 0 0 260px; border-left: 0; border-top: 1px solid var(--border); }
+    .console-meta { display: none; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; animation: none !important; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="brand"><span class="brand-mark">A</span>AUDIOUI</div>
+    <button class="project-btn" id="projectBtn" aria-haspopup="dialog">
+      <span id="projectName">未命名工作台</span><span class="muted">▾</span>
+    </button>
+    <div class="topbar-spacer"></div>
+    <div class="status"><span class="dot" id="agentDot"></span><span id="agentState">Agent 空闲</span></div>
+    <button class="btn ghost" id="toggleRun" aria-pressed="false" title="演示运行路径锁与 BUSY">模拟运行</button>
+    <button class="btn ghost" id="resetView">重置视图</button>
+    <button class="btn ghost" id="openSystem">系统</button>
+    <span class="version">v0.3.0 · 原型</span>
+  </header>
+
+  <main class="workspace">
+    <section class="canvas-wrap">
+      <div class="canvas" id="canvas" aria-label="工作台画布">
+        <div class="canvas-hint">
+          <span class="kbd">拖拽</span> 平移
+          <span class="kbd">滚轮</span> 缩放
+          <span class="kbd">候选端口</span> 建分支
+          <span class="kbd">已有父</span> 改挂确认
+        </div>
+        <div class="world" id="world">
+          <svg class="edges" id="edges" viewBox="0 0 1400 900" aria-hidden="true"></svg>
+
+          <!-- topic -->
+          <article class="node selected" id="node-topic" data-node="n_7a1c" style="left:40px; top:150px;">
+            <div class="node-head">
+              <span class="node-kind">topic</span>
+              <span class="node-title">选题</span>
+              <span class="chip accent">已应用</span>
+            </div>
+            <div class="node-body">
+              <div>
+                <div class="field-label">想法</div>
+                <div class="field-value strong">BPM 砍半后，音游手感为什么更“重”</div>
+              </div>
+              <div>
+                <div class="field-label">方向 · 候选数</div>
+                <div class="field-value">音游作曲解析 · 3</div>
+              </div>
+              <div class="field-label" style="margin-top:2px">候选（各有一个输出端口）</div>
+              <div class="candidate connected" data-topic data-candidate="0">
+                <span class="idx">01</span><span class="name">BPM 砍半，手感就变了</span>
+                <span class="cand-port" data-cand="0" title="拖到提示词节点建分支"></span>
+              </div>
+              <div class="candidate connected" data-topic data-candidate="1">
+                <span class="idx">02</span><span class="name">为什么高 BPM 谱面反而更“轻”</span>
+                <span class="cand-port" data-cand="1" title="拖到提示词节点建分支"></span>
+              </div>
+              <div class="candidate" data-topic data-candidate="2">
+                <span class="idx">03</span><span class="name">从 174 到 87：变速背后的判定逻辑</span>
+                <span class="cand-port" data-cand="2" title="拖到提示词节点建分支"></span>
+              </div>
+              <div class="node-actions">
+                <button class="btn node-run" data-run-node="node-topic" disabled title="已应用并锁定：不可重跑">生成候选</button>
+              </div>
+              <div class="node-note ok">应用后锁定；候选 3 未连接；拖动候选端口建分支，连线即选定</div>
+              <div class="node-note lock-note" hidden>运行锁：参数、拓扑、执行与新增子节点只读</div>
+            </div>
+          </article>
+
+          <!-- prompt locked -->
+          <article class="node prompt locked" id="node-prompt" data-node="n_b2e9" style="left:400px; top:420px;">
+            <div class="node-head">
+              <span class="node-kind prompt">prompt</span>
+              <span class="node-title">分镜脚本 A</span>
+              <span class="chip warn" id="pendingChip">待应用 1</span>
+            </div>
+            <div class="node-body">
+              <div>
+                <div class="field-label">指令</div>
+                <div class="field-value">生成 3 个场景，左右分屏对比 174 与 87 的判定线；旁白 90 秒内。</div>
+              </div>
+              <div style="display:flex; gap:6px; flex-wrap:wrap">
+                <span class="chip">script</span>
+                <span class="chip">3 场景</span>
+                <span class="chip">90s</span>
+              </div>
+              <div class="node-actions">
+                <button class="btn node-run" data-run-node="node-prompt" disabled title="已锁定：不可再次执行">执行</button>
+                <button class="btn ghost node-add" data-add-child="node-prompt">新增提示词</button>
+              </div>
+              <div class="node-note">已锁定：内容与执行冻结；新增提示词节点继续</div>
+              <div class="node-note lock-note" hidden>运行锁：参数、拓扑与执行只读</div>
+              <div class="node-note ok edit-note" hidden>路径外分支：拓扑可编辑；内容已锁定</div>
+            </div>
+            <span class="port port-in" aria-hidden="true"></span>
+            <span class="port port-out" data-port-out="n_b2e9" title="拖到已有父节点可改挂（演示）"></span>
+          </article>
+
+          <!-- second branch -->
+          <article class="node prompt" id="node-b" data-node="n_c4f0" style="left:800px; top:420px;">
+            <div class="node-head">
+              <span class="node-kind prompt">prompt</span>
+              <span class="node-title">分镜脚本 B</span>
+              <span class="chip">待执行</span>
+            </div>
+            <div class="node-body">
+              <div>
+                <div class="field-label">指令</div>
+                <div class="field-value">从“高 BPM 反而更轻”的角度写 3 个场景，保留 174 原速对比。</div>
+              </div>
+              <div style="display:flex; gap:6px; flex-wrap:wrap">
+                <span class="chip">script</span>
+                <span class="chip">3 场景</span>
+              </div>
+              <div class="node-actions">
+                <button class="btn primary node-run" data-run-node="node-b">执行</button>
+                <button class="btn ghost node-add" data-add-child="node-b">新增提示词</button>
+              </div>
+              <div class="node-note">候选 2 分支；未执行</div>
+              <div class="node-note lock-note" hidden>运行锁：参数、拓扑与执行只读</div>
+              <div class="node-note ok edit-note" hidden>路径外分支：拓扑可编辑</div>
+            </div>
+            <span class="port port-in" aria-hidden="true"></span>
+            <span class="port port-out" data-port-out="n_c4f0" title="拖到已有父节点可改挂（演示）"></span>
+          </article>
+
+          <!-- draft node -->
+          <article class="node prompt draft" id="node-draft" data-node="n_d5a1" style="left:800px; top:140px;">
+            <div class="node-head">
+              <span class="node-kind prompt">prompt</span>
+              <span class="node-title">草稿提示词</span>
+              <span class="chip warn">未连接</span>
+            </div>
+            <div class="node-body">
+              <div>
+                <div class="field-label">指令</div>
+                <div class="field-value">等待从候选端口接入；草稿不可执行，接入后成为分支。</div>
+              </div>
+              <div style="display:flex; gap:6px; flex-wrap:wrap">
+                <span class="chip">script</span>
+                <span class="chip">草稿</span>
+              </div>
+              <div class="node-actions">
+                <button class="btn node-run" data-run-node="node-draft" disabled title="草稿未连接，不可执行">执行</button>
+                <button class="btn ghost node-add" data-add-child="node-draft">新增提示词</button>
+              </div>
+              <div class="node-note">未连接：可作为任意输出端口的目标（含改挂）</div>
+              <div class="node-note lock-note" hidden>草稿不可执行；接入后才可使用</div>
+              <div class="node-note ok edit-note" hidden>路径外草稿：可接入任意候选端口</div>
+            </div>
+            <span class="port port-in" aria-hidden="true"></span>
+            <span class="port port-out" data-port-out="n_d5a1" title="拖到已有父节点可改挂（演示）"></span>
+          </article>
+        </div>
+
+        <div class="quickbar" role="navigation" aria-label="链路快捷栏">
+          <span class="quickbar-label">链路</span>
+          <button class="chain-card active pending" data-chain-node="node-prompt" data-label="路径 候选1 → 分镜 A">
+            <span>候选1 → 分镜 A</span><span class="chain-state" id="chainStateA">待处理</span>
+          </button>
+          <button class="chain-card" data-chain-node="node-b" data-label="路径 候选2 → 分镜 B" id="chainCardB">
+            <span>候选2 → 分镜 B</span><span class="chain-state" id="chainStateB">空闲</span>
+          </button>
+          <button class="chain-card" id="newChain" title="新建链路">
+            <span>+ 新建链路</span>
+          </button>
+          <span class="quickbar-spacer"></span>
+          <span class="muted" id="chainCount" style="font-size:10px">2 条链 · 0 工作 · 1 待处理</span>
+        </div>
+      </div>
+    </section>
+
+    <aside class="console" aria-label="Agent 控制台">
+      <div class="console-head">
+        <span class="dot" id="consoleDot"></span>
+        <span class="console-title">AGENT</span>
+        <span class="console-state" id="consoleState">空闲</span>
+        <button class="btn ghost" title="收起控制台">‹</button>
+      </div>
+      <div class="console-meta">
+        <span class="chain-name" id="consoleChainName">路径 候选1 → 分镜 A</span>
+        <span class="mono" id="consoleChainId">c_n_b2e9</span>
+        <span class="badge" id="consoleBadge">待处理 1</span>
+      </div>
+      <div class="pin-card run" id="runPinCard" hidden>
+        <span class="chip ok">运行中</span>
+        <span class="pin-text" id="runPinText">路径只读；其他分支可编辑</span>
+        <button class="btn" style="padding:3px 8px" id="runPinStop">结束</button>
+      </div>
+      <div class="pin-card" id="pinCard">
+        <span class="chip warn">待应用</span>
+        <span class="pin-text">分镜脚本已生成，尚未写入节点</span>
+        <button class="btn primary" style="padding:3px 8px" id="pinApply">应用</button>
+      </div>
+
+      <div class="tabs" role="tablist" aria-label="控制台分页">
+        <button class="tab" role="tab" id="tab-dialog" aria-selected="true" aria-controls="panel-dialog" data-tab="dialog">
+          对话
+        </button>
+        <button class="tab" role="tab" id="tab-pending" aria-selected="false" aria-controls="panel-pending" data-tab="pending">
+          待处理<span class="count" id="pendingCount">1</span>
+        </button>
+      </div>
+
+      <div class="panel active" id="panel-dialog" role="tabpanel" aria-labelledby="tab-dialog">
+        <div class="run-list" id="runList">
+          <button class="run-item" id="liveRunItem" data-run="r_live" aria-pressed="false" hidden>
+            <span class="run-top"><span class="run-node" id="liveRunNode">提示词 · 分镜脚本 B</span><span class="run-status warn" id="liveRunStatus">运行中</span></span>
+            <span class="run-meta"><span class="mono">r_live</span><span>现在</span><span>ctx 7e2a…</span><span id="liveRunTokens">估算 6.2k / 1M</span></span>
+          </button>
+          <button class="run-item active" data-run="r_9f2a" aria-pressed="true">
+            <span class="run-top"><span class="run-node">提示词 · 分镜脚本 A</span><span class="run-status ok">完成</span></span>
+            <span class="run-meta"><span class="mono">r_9f2a</span><span>12:41</span><span>ctx 9c1f…</span><span>14.2k / 1M</span></span>
+          </button>
+          <button class="run-item" data-run="r_8c1d" aria-pressed="false">
+            <span class="run-top"><span class="run-node">选题 · 候选生成</span><span class="run-status ok">完成</span></span>
+            <span class="run-meta"><span class="mono">r_8c1d</span><span>12:33</span><span>ctx 2a90…</span><span>3.1k / 1M</span></span>
+          </button>
+          <button class="run-item" data-run="r_7b0e" aria-pressed="false">
+            <span class="run-top"><span class="run-node">提示词 · 分镜脚本 A</span><span class="run-status warn">中断</span></span>
+            <span class="run-meta"><span class="mono">r_7b0e</span><span>12:20</span><span>ctx 4d0c…</span><span>上下文 9.8k</span></span>
+          </button>
+        </div>
+        <div class="transcript" id="transcript"></div>
+        <p class="console-empty" style="margin-top:12px">运行之间不共享 Agent 记忆；历史只读。</p>
+      </div>
+
+      <div class="panel" id="panel-pending" role="tabpanel" aria-labelledby="tab-pending">
+        <div id="pendingList">
+          <div class="pending-card" id="pendingCard">
+            <div class="pending-head">
+              <span class="chip warn">pending</span>
+              <span class="pending-title">分镜脚本 A · n_b2e9</span>
+            </div>
+            <div class="pending-body">
+              <div class="pending-row"><span class="k">run</span><span class="mono">r_9f2a</span></div>
+              <div class="pending-row"><span class="k">上下文</span><span class="mono">sha256:9c1f…4a2d</span></div>
+              <div class="pending-row"><span class="k">场景</span><span>3 段 · 预计 86 秒</span></div>
+              <div class="pending-row"><span class="k">摘要</span><span>左右分屏对比 174/87 判定线；旁白更口语化。</span></div>
+            </div>
+            <div class="pending-actions">
+              <button class="btn primary" id="applyPending">应用</button>
+              <button class="btn" id="discardPending">丢弃</button>
+              <button class="btn ghost" title="查看原文">原文</button>
+            </div>
+          </div>
+        </div>
+        <div class="empty-state" id="pendingEmpty" hidden>没有待处理产物<br />执行节点后，结构化结果会先出现在这里。</div>
+      </div>
+    </aside>
+  </main>
+</div>
+
+<div class="backdrop" id="projectBackdrop">
+  <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="projectDialogTitle">
+    <h2 id="projectDialogTitle">切换工程</h2>
+    <p>一次只打开一个工程；运行在途时不可切换。</p>
+    <div class="project-list">
+      <button class="project-row active" data-project="未命名工作台">
+        <span class="name">未命名工作台</span><span class="id">p_2f3a</span>
+      </button>
+      <button class="project-row" data-project="音游解析 · 第二期">
+        <span class="name">音游解析 · 第二期</span><span class="id">p_8c11</span>
+      </button>
+    </div>
+    <div class="dialog-actions">
+      <button class="btn" id="closeProject">取消</button>
+      <button class="btn primary" id="newProject">新建工作台</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script>
+(function () {
+  "use strict";
+
+  var canvas = document.getElementById("canvas");
+  var world = document.getElementById("world");
+  var edgesSvg = document.getElementById("edges");
+  var toast = document.getElementById("toast");
+  var toastTimer = null;
+
+  function showToast(text) {
+    toast.textContent = text;
+    toast.classList.add("show");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { toast.classList.remove("show"); }, 2600);
+  }
+
+  var runState = null;
+  var runPath = [];
+
+  /* ---------- canvas pan & zoom ---------- */
+  var view = { x: 0, y: 0, scale: 1 };
+  function applyView() {
+    world.style.transform = "translate(" + view.x + "px," + view.y + "px) scale(" + view.scale + ")";
+  }
+  var pan = null;
+  canvas.addEventListener("pointerdown", function (e) {
+    if (e.target.closest(".node") || e.target.closest("button")) return;
+    pan = { sx: e.clientX, sy: e.clientY, ox: view.x, oy: view.y };
+    canvas.classList.add("panning");
+    canvas.setPointerCapture(e.pointerId);
+  });
+  canvas.addEventListener("pointermove", function (e) {
+    if (!pan) return;
+    view.x = pan.ox + (e.clientX - pan.sx);
+    view.y = pan.oy + (e.clientY - pan.sy);
+    applyView();
+  });
+  canvas.addEventListener("pointerup", function (e) {
+    pan = null;
+    canvas.classList.remove("panning");
+    if (canvas.hasPointerCapture(e.pointerId)) canvas.releasePointerCapture(e.pointerId);
+  });
+  canvas.addEventListener("wheel", function (e) {
+    e.preventDefault();
+    var rect = canvas.getBoundingClientRect();
+    var mx = e.clientX - rect.left;
+    var my = e.clientY - rect.top;
+    var next = Math.min(1.6, Math.max(0.6, view.scale * (e.deltaY < 0 ? 1.08 : 0.92)));
+    var k = next / view.scale;
+    view.x = mx - (mx - view.x) * k;
+    view.y = my - (my - view.y) * k;
+    view.scale = next;
+    applyView();
+  }, { passive: false });
+  document.getElementById("resetView").addEventListener("click", function () {
+    view = { x: 0, y: 0, scale: 1 };
+    applyView();
+    showToast("视图已重置");
+  });
+
+  /* ---------- edges & derived paths ---------- */
+  var edges = [
+    { from: "n_7a1c", to: "n_b2e9", cand: 0 },
+    { from: "n_7a1c", to: "n_c4f0", cand: 1 }
+  ];
+  var parents = {
+    "n_b2e9": { parent: "n_7a1c", cand: 0 },
+    "n_c4f0": { parent: "n_7a1c", cand: 1 }
+  };
+  function nodeDemoId(node) { return node.getAttribute("data-node"); }
+  function pathNodeIds(id) {
+    var path = [id];
+    var guard = 0;
+    while (parents[id] && guard++ < 50) {
+      id = parents[id].parent;
+      path.push(id);
+    }
+    return path;
+  }
+  function elementCenterInWorld(el) {
+    var r = el.getBoundingClientRect();
+    var c = canvas.getBoundingClientRect();
+    return {
+      x: (r.left + r.width / 2 - c.left - view.x) / view.scale,
+      y: (r.top + r.height / 2 - c.top - view.y) / view.scale
+    };
+  }
+  function sourcePoint(edge) {
+    var from = document.querySelector('[data-node="' + edge.from + '"]');
+    if (!from) return null;
+    if (edge.cand !== undefined && edge.cand !== null) {
+      var port = from.querySelector('.cand-port[data-cand="' + edge.cand + '"]');
+      if (port) return elementCenterInWorld(port);
+    }
+    return {
+      x: from.offsetLeft + from.offsetWidth / 2,
+      y: from.offsetTop + from.offsetHeight
+    };
+  }
+  function nodeCenterTop(node) {
+    return { x: node.offsetLeft + node.offsetWidth / 2, y: node.offsetTop };
+  }
+  function edgePath(a, b) {
+    var dy = Math.max(40, Math.abs(b.y - a.y) * 0.55);
+    return "M " + a.x + " " + a.y +
+      " C " + a.x + " " + (a.y + dy) + ", " + b.x + " " + (b.y - dy) + ", " + b.x + " " + b.y;
+  }
+  var activePath = ["n_7a1c", "n_b2e9"];
+  function renderEdges() {
+    var html = "";
+    edges.forEach(function (e) {
+      var from = document.querySelector('[data-node="' + e.from + '"]');
+      var to = document.querySelector('[data-node="' + e.to + '"]');
+      if (!from || !to) return;
+      var a = sourcePoint(e);
+      var b = nodeCenterTop(to);
+      if (!a) return;
+      var active = activePath.indexOf(e.from) !== -1 && activePath.indexOf(e.to) !== -1;
+      html += '<path class="edge-path' + (active ? " active" : " dim") + '" d="' +
+        edgePath(a, b) + '"></path>';
+    });
+    edgesSvg.innerHTML = html;
+  }
+  window.addEventListener("load", renderEdges);
+  window.addEventListener("resize", renderEdges);
+  window.addEventListener("load", function () { activePath = pathNodeIds("n_b2e9"); renderEdges(); });
+
+  /* ---------- selection & path highlight ---------- */
+  function selectNode(id) {
+    var node = document.getElementById(id);
+    if (!node) return;
+    var pathIds = pathNodeIds(nodeDemoId(node));
+    activePath = pathIds;
+    var cssIds = pathIds.map(function (demoId) {
+      var n = document.querySelector('[data-node="' + demoId + '"]');
+      return n ? n.id : "";
+    });
+    document.querySelectorAll(".node").forEach(function (n) {
+      n.classList.toggle("selected", n.id === id);
+      n.classList.toggle("dimmed", cssIds.indexOf(n.id) === -1);
+    });
+    var activeCard = null;
+    document.querySelectorAll(".chain-card[data-chain-node]").forEach(function (card) {
+      var isActive = card.getAttribute("data-chain-node") === id;
+      card.classList.toggle("active", isActive);
+      if (isActive) activeCard = card;
+    });
+    var chainName = document.getElementById("consoleChainName");
+    var chainIdEl = document.getElementById("consoleChainId");
+    if (activeCard) {
+      if (chainName) chainName.textContent = activeCard.getAttribute("data-label");
+      if (chainIdEl) chainIdEl.textContent = "c_" + nodeDemoId(node);
+    } else {
+      if (chainName) chainName.textContent = "草稿 · 未连接";
+      if (chainIdEl) chainIdEl.textContent = "—";
+    }
+    renderEdges();
+  }
+  document.querySelectorAll(".node").forEach(function (node) {
+    node.addEventListener("click", function (e) {
+      if (e.target.closest(".port") || e.target.closest(".cand-port")) return;
+      selectNode(node.id);
+    });
+  });
+
+  /* ---------- port drag: branch / reparent (demo) ---------- */
+  var drag = null;
+  document.querySelectorAll("[data-port-out], .cand-port").forEach(function (port) {
+    port.addEventListener("pointerdown", function (e) {
+      e.stopPropagation();
+      var nodeEl = port.closest(".node");
+      if (nodeEl.classList.contains("runlocked")) {
+        showToast("运行锁：路径节点不可新增分支或改挂（演示）");
+        return;
+      }
+      var fromId = nodeEl.getAttribute("data-node");
+      var candAttr = port.getAttribute("data-cand");
+      var cand = candAttr === null ? null : Number(candAttr);
+      var p = elementCenterInWorld(port);
+      drag = {
+        fromId: fromId,
+        cand: cand,
+        port: port,
+        target: null,
+        path: document.createElementNS("http://www.w3.org/2000/svg", "path")
+      };
+      drag.path.setAttribute("class", "edge-temp");
+      drag.path.setAttribute("d", edgePath(p, p));
+      edgesSvg.appendChild(drag.path);
+      try { port.setPointerCapture(e.pointerId); } catch (ignore) {}
+    });
+    port.addEventListener("pointermove", function (e) {
+      if (!drag) return;
+      var rect = canvas.getBoundingClientRect();
+      var x = (e.clientX - rect.left - view.x) / view.scale;
+      var y = (e.clientY - rect.top - view.y) / view.scale;
+      var p = elementCenterInWorld(drag.port);
+      drag.path.setAttribute("d", edgePath(p, { x: x, y: y }));
+      var over = document.elementFromPoint(e.clientX, e.clientY);
+      var target = over && over.closest ? over.closest(".node") : null;
+      drag.target = target;
+      document.querySelectorAll(".node").forEach(function (n) { n.classList.remove("invalid-target"); });
+      if (target) target.classList.add("invalid-target");
+    });
+    port.addEventListener("pointerup", function () {
+      if (!drag) return;
+      var target = drag.target;
+      if (drag.path && drag.path.parentNode) drag.path.parentNode.removeChild(drag.path);
+      document.querySelectorAll(".node").forEach(function (n) { n.classList.remove("invalid-target"); });
+      if (!target) {
+        showToast("拖到提示词节点完成连线（演示）");
+      } else if (target.classList.contains("runlocked")) {
+        showToast("运行锁：目标节点在运行路径上，不可改挂（演示）");
+      } else if (target.id === "node-topic") {
+        showToast("topic 是树根，不能作为子节点");
+      } else if (target.classList.contains("prompt")) {
+        if (target.classList.contains("draft")) {
+          showToast("已连接草稿节点：候选端口 → 草稿（演示）");
+        } else {
+          var toId = target.getAttribute("data-node");
+          var current = parents[toId];
+          if (current) {
+            if (current.parent === drag.fromId && drag.cand !== null) {
+              if (current.cand === drag.cand) {
+                showToast("已连接：同一父同一候选，无变化（演示）");
+              } else {
+                showToast("同父换候选确认：候选 " + (current.cand + 1) + " → " + (drag.cand + 1) + "；后代上下文将变化（演示）");
+              }
+            } else {
+              showToast("改挂确认：移动整个子树并重建后代上下文（演示）");
+            }
+          } else {
+            showToast("已连接：候选端口 → 新分支（演示）");
+          }
+        }
+      } else {
+        showToast("只能连接到提示词节点");
+      }
+      drag = null;
+    });
+  });
+
+  /* ---------- tabs ---------- */
+  function activateTab(name) {
+    document.querySelectorAll(".tab").forEach(function (t) {
+      t.setAttribute("aria-selected", String(t.getAttribute("data-tab") === name));
+    });
+    document.querySelectorAll(".panel").forEach(function (p) {
+      p.classList.toggle("active", p.id === "panel-" + name);
+    });
+  }
+  document.querySelectorAll(".tab").forEach(function (tab) {
+    tab.addEventListener("click", function () {
+      activateTab(tab.getAttribute("data-tab"));
+    });
+  });
+
+  /* ---------- run list ---------- */
+  var transcripts = {
+    r_9f2a: [
+      { kind: "user", text: "生成 3 个场景，左右分屏对比 174 与 87 的判定线；旁白 90 秒内。" },
+      { kind: "tool", name: "get_node", text: "n_7a1c · 读取选定选题" },
+      { kind: "tool", name: "read_file", text: "steps/n_b2e9/brief.md" },
+      { kind: "assistant", text: "已按祖先链上下文生成脚本：3 个场景，场景 2 用左右分屏对比 174/87 的判定线；旁白约 86 秒。已通过 reply(kind=script) 提交，等待应用。" },
+      { kind: "tool", name: "reply", text: "kind=script · pending pa_31d7" }
+    ],
+    r_8c1d: [
+      { kind: "user", text: "根据想法生成 3 个候选选题：BPM 砍半后，音游手感为什么更“重”。" },
+      { kind: "assistant", text: "给出 3 个候选：BPM 砍半手感变化、高 BPM 反而更“轻”、174→87 的判定逻辑。已通过 reply(kind=topics) 提交。" },
+      { kind: "tool", name: "reply", text: "kind=topics · pending pa_2a90" }
+    ],
+    r_7b0e: [
+      { kind: "user", text: "生成 3 个场景，左右分屏对比 174 与 87 的判定线。" },
+      { kind: "assistant", text: "正在读取祖先上下文……" },
+      { kind: "tool", name: "read_artifact", text: "sha256:9c1f… · offset 0 · 4 KiB" }
+    ],
+    r_live: [
+      { kind: "user", text: "（上下文包）路径 候选2 → 分镜 B；目标：分镜脚本 B" },
+      { kind: "tool", name: "get_node", text: "n_c4f0 · 读取当前参数" },
+      { kind: "assistant", text: "正在生成脚本……" }
+    ]
+  };
+  function renderTranscript(runId) {
+    var list = transcripts[runId] || [];
+    var host = document.getElementById("transcript");
+    host.innerHTML = list.map(function (m) {
+      if (m.kind === "tool") {
+        return '<div class="msg tool"><span class="tool-name">' + m.name + "</span><span>" +
+          m.text + '</span><span class="tool-ok">完成</span></div>';
+      }
+      return '<div class="msg ' + (m.kind === "user" ? "user" : "") + '">' + m.text + "</div>";
+    }).join("");
+  }
+  function selectRunItem(item) {
+    document.querySelectorAll(".run-item").forEach(function (i) {
+      var active = i === item;
+      i.classList.toggle("active", active);
+      i.setAttribute("aria-pressed", String(active));
+    });
+    renderTranscript(item.getAttribute("data-run"));
+  }
+  document.querySelectorAll(".run-item").forEach(function (item) {
+    item.addEventListener("click", function () { selectRunItem(item); });
+  });
+  renderTranscript("r_9f2a");
+
+  /* ---------- pending apply / discard ---------- */
+  var pendingOpen = true;
+  function refreshPending() {
+    document.getElementById("pendingCard").hidden = !pendingOpen;
+    document.getElementById("pendingEmpty").hidden = pendingOpen;
+    document.getElementById("pendingCount").textContent = pendingOpen ? "1" : "0";
+    document.getElementById("consoleBadge").textContent = pendingOpen ? "待处理 1" : "待处理 0";
+    document.getElementById("consoleBadge").hidden = !pendingOpen;
+    document.getElementById("pinCard").hidden = !pendingOpen;
+    var chip = document.getElementById("pendingChip");
+    if (chip) {
+      chip.hidden = !pendingOpen;
+    }
+    var stateA = document.getElementById("chainStateA");
+    if (stateA) stateA.textContent = pendingOpen ? "待处理" : "空闲";
+    var cardA = document.querySelector('.chain-card[data-chain-node="node-prompt"]');
+    if (cardA) cardA.classList.toggle("pending", pendingOpen);
+    updateQuickbarCount();
+    var prompt = document.getElementById("node-prompt");
+    if (!pendingOpen && prompt) {
+      var note = prompt.querySelector(".node-note");
+      if (note) {
+        note.className = "node-note ok";
+        note.textContent = "已应用第 1 轮；已锁定，新增提示词节点继续";
+      }
+      var chips = prompt.querySelectorAll(".chip");
+      var applied = false;
+      chips.forEach(function (c) { if (c.textContent === "已应用") applied = true; });
+      if (!applied && chips.length) {
+        var c = document.createElement("span");
+        c.className = "chip ok";
+        c.textContent = "已应用";
+        chips[chips.length - 1].after(c);
+      }
+    }
+  }
+  document.getElementById("applyPending").addEventListener("click", function () {
+    if (!pendingOpen) return;
+    pendingOpen = false;
+    refreshPending();
+    showToast("已应用：产生新轮次，下游标记待刷新（演示）");
+  });
+  document.getElementById("discardPending").addEventListener("click", function () {
+    if (!pendingOpen) return;
+    pendingOpen = false;
+    refreshPending();
+    showToast("已丢弃待应用产物（演示）");
+  });
+  document.getElementById("pinApply").addEventListener("click", function () {
+    if (!pendingOpen) return;
+    pendingOpen = false;
+    refreshPending();
+    showToast("已应用：产生新轮次，下游标记待刷新（演示）");
+  });
+
+  function updateQuickbarCount() {
+    var count = document.getElementById("chainCount");
+    if (!count) return;
+    count.textContent = "2 条链 · " + (runState ? 1 : 0) + " 工作 · " + (pendingOpen ? 1 : 0) + " 待处理";
+  }
+
+  /* ---------- run lock demo ---------- */
+  function nodeByDemoId(id) {
+    return document.querySelector('[data-node="' + id + '"]');
+  }
+
+  function addLockChip(el) {
+    var head = el.querySelector(".node-head");
+    if (!head || head.querySelector(".lock-chip")) return;
+    var chip = document.createElement("span");
+    chip.className = "chip lock lock-chip";
+    chip.textContent = "运行锁";
+    head.appendChild(chip);
+  }
+
+  function setRunLockButtonState(el, locked) {
+    el.querySelectorAll(".node-run").forEach(function (b) {
+      if (locked) {
+        if (!b.disabled) {
+          b.disabled = true;
+          b.dataset.lockDisabled = "1";
+        }
+      } else if (b.dataset.lockDisabled === "1") {
+        b.disabled = false;
+        delete b.dataset.lockDisabled;
+      }
+    });
+  }
+
+  function clearRunVisuals() {
+    document.querySelectorAll(".node").forEach(function (n) {
+      n.classList.remove("runlocked", "editable-branch");
+      n.querySelectorAll(".lock-chip").forEach(function (c) { c.remove(); });
+      n.querySelectorAll(".lock-note, .edit-note").forEach(function (el) { el.hidden = true; });
+      setRunLockButtonState(n, false);
+    });
+  }
+
+  function setAgentRunning(on) {
+    var state = document.getElementById("agentState");
+    var consoleState = document.getElementById("consoleState");
+    var dot = document.getElementById("agentDot");
+    var toggle = document.getElementById("toggleRun");
+    if (state) state.textContent = on ? "Agent 运行中" : "Agent 空闲";
+    if (consoleState) consoleState.textContent = on ? "运行中" : "空闲";
+    if (dot) dot.classList.toggle("warn", on);
+    if (toggle) {
+      toggle.textContent = on ? "结束运行" : "模拟运行";
+      toggle.setAttribute("aria-pressed", String(on));
+    }
+    var pin = document.getElementById("runPinCard");
+    if (pin) pin.hidden = !on;
+  }
+
+  function startRun(nodeEl) {
+    if (runState) {
+      showToast("BUSY：已有运行在途；M5 引入队列（演示）");
+      return;
+    }
+    if (!nodeEl) nodeEl = document.getElementById("node-b");
+    if (nodeEl.classList.contains("draft")) {
+      showToast("草稿未连接，不可执行（演示）");
+      return;
+    }
+    if (nodeEl.classList.contains("locked")) {
+      showToast("已锁定：内容与执行冻结；新增下游提示词节点继续（演示）");
+      return;
+    }
+    selectNode(nodeEl.id);
+    var tail = nodeEl.getAttribute("data-node");
+    runPath = pathNodeIds(tail);
+    runState = { nodeId: tail, path: runPath };
+    clearRunVisuals();
+    runPath.forEach(function (id) {
+      var el = nodeByDemoId(id);
+      if (!el) return;
+      el.classList.add("runlocked");
+      addLockChip(el);
+      var lockNote = el.querySelector(".lock-note");
+      if (lockNote) lockNote.hidden = false;
+      setRunLockButtonState(el, true);
+    });
+    document.querySelectorAll(".node").forEach(function (n) {
+      if (runPath.indexOf(n.getAttribute("data-node")) === -1) {
+        n.classList.add("editable-branch");
+        var editNote = n.querySelector(".edit-note");
+        if (editNote) editNote.hidden = false;
+      }
+    });
+    setAgentRunning(true);
+    var titleEl = nodeEl.querySelector(".node-title");
+    var kindEl = nodeEl.querySelector(".node-kind");
+    var kindLabel = kindEl && kindEl.textContent === "topic" ? "选题" : "提示词";
+    var title = titleEl ? titleEl.textContent : kindLabel;
+    var live = document.getElementById("liveRunItem");
+    if (live) {
+      live.hidden = false;
+      var liveNode = document.getElementById("liveRunNode");
+      if (liveNode) liveNode.textContent = kindLabel + " · " + title;
+      var liveStatus = document.getElementById("liveRunStatus");
+      if (liveStatus) {
+        liveStatus.textContent = "运行中";
+        liveStatus.className = "run-status warn";
+      }
+      var liveTokens = document.getElementById("liveRunTokens");
+      if (liveTokens) liveTokens.textContent = "估算 6.2k / 1M";
+      selectRunItem(live);
+    }
+    var cardB = document.getElementById("chainCardB");
+    if (cardB) cardB.classList.add("running");
+    var stateB = document.getElementById("chainStateB");
+    if (stateB) stateB.textContent = "工作中";
+    var runPinText = document.getElementById("runPinText");
+    if (runPinText) {
+      var card = document.querySelector('.chain-card[data-chain-node="' + nodeEl.id + '"]');
+      runPinText.textContent = "运行锁：" + (card ? card.getAttribute("data-label") : "当前路径") + " 只读；其他分支可编辑";
+    }
+    activateTab("dialog");
+    updateQuickbarCount();
+    showToast("运行已开始：路径节点只读，路径外分支可编辑（演示）");
+  }
+
+  function stopRun() {
+    if (!runState) return;
+    clearRunVisuals();
+    runState = null;
+    runPath = [];
+    setAgentRunning(false);
+    var live = document.getElementById("liveRunItem");
+    if (live) {
+      var liveStatus = document.getElementById("liveRunStatus");
+      if (liveStatus) {
+        liveStatus.textContent = "完成";
+        liveStatus.className = "run-status ok";
+      }
+      var liveTokens = document.getElementById("liveRunTokens");
+      if (liveTokens) liveTokens.textContent = "6.2k / 1M";
+    }
+    var cardB = document.getElementById("chainCardB");
+    if (cardB) cardB.classList.remove("running");
+    var stateB = document.getElementById("chainStateB");
+    if (stateB) stateB.textContent = "空闲";
+    transcripts.r_live = [
+      { kind: "user", text: "（上下文包）路径 候选2 → 分镜 B；目标：分镜脚本 B" },
+      { kind: "tool", name: "get_node", text: "n_c4f0 · 读取当前参数" },
+      { kind: "assistant", text: "脚本已生成，等待应用（演示）。" }
+    ];
+    if (live && live.classList.contains("active")) renderTranscript("r_live");
+    updateQuickbarCount();
+    showToast("运行已结束：路径锁释放（演示）");
+  }
+
+  document.getElementById("toggleRun").addEventListener("click", function () {
+    if (runState) {
+      stopRun();
+      return;
+    }
+    startRun(document.getElementById("node-b"));
+  });
+  document.getElementById("runPinStop").addEventListener("click", stopRun);
+
+  document.querySelectorAll(".node-run").forEach(function (btn) {
+    btn.addEventListener("click", function (e) {
+      e.stopPropagation();
+      var nodeEl = btn.closest(".node");
+      if (runState) {
+        if (nodeEl.classList.contains("runlocked")) {
+          showToast("运行锁：该节点在运行路径上（演示）");
+        } else {
+          showToast("BUSY：已有运行在途；M5 引入队列（演示）");
+        }
+        return;
+      }
+      startRun(nodeEl);
+    });
+  });
+
+  document.querySelectorAll(".node-add").forEach(function (btn) {
+    btn.addEventListener("click", function (e) {
+      e.stopPropagation();
+      var nodeEl = btn.closest(".node");
+      if (runState && nodeEl.classList.contains("runlocked")) {
+        showToast("运行锁：路径节点不可新增子节点（演示）");
+        return;
+      }
+      showToast("新增下游提示词节点（演示）");
+    });
+  });
+
+  /* ---------- topic candidate ports ---------- */
+  var branchByCand = { 0: "node-prompt", 1: "node-b" };
+  document.querySelectorAll("[data-topic]").forEach(function (c) {
+    c.addEventListener("click", function (e) {
+      e.stopPropagation();
+      var cand = c.getAttribute("data-candidate");
+      var branch = branchByCand[cand];
+      if (branch) {
+        selectNode(branch);
+        showToast("候选 " + (Number(cand) + 1) + "：已定位到该分支（演示）");
+      } else if (runState) {
+        showToast("运行锁：路径节点暂不可新建分支（演示）");
+      } else {
+        showToast("候选 " + (Number(cand) + 1) + " 未连接：拖动端口建分支（演示）");
+      }
+    });
+  });
+
+  /* ---------- chain switch (leaf paths) ---------- */
+  document.querySelectorAll(".chain-card[data-chain-node]").forEach(function (card) {
+    card.addEventListener("click", function () {
+      document.querySelectorAll(".chain-card[data-chain-node]").forEach(function (c) {
+        c.classList.toggle("active", c === card);
+      });
+      var target = card.getAttribute("data-chain-node");
+      selectNode(target);
+      var label = card.getAttribute("data-label") || "路径";
+      document.querySelector(".chain-name").textContent = label;
+      showToast("切换到 " + label + "；链是派生路径，切换不占并发（演示）");
+    });
+  });
+  document.getElementById("newChain").addEventListener("click", function () {
+    showToast("新建链路：将创建 topic 根并打开选题表单（演示）");
+  });
+
+  /* ---------- project dialog ---------- */
+  var backdrop = document.getElementById("projectBackdrop");
+  function openProjectDialog() {
+    backdrop.classList.add("open");
+    document.getElementById("closeProject").focus();
+  }
+  function closeProjectDialog() {
+    backdrop.classList.remove("open");
+    document.getElementById("projectBtn").focus();
+  }
+  document.getElementById("projectBtn").addEventListener("click", openProjectDialog);
+  document.getElementById("closeProject").addEventListener("click", closeProjectDialog);
+  document.getElementById("newProject").addEventListener("click", function () {
+    if (runState) {
+      showToast("运行在途：禁止新建/切换工程（演示）");
+      return;
+    }
+    closeProjectDialog();
+    showToast("新建工作台：输入名称后创建（演示）");
+  });
+  document.querySelectorAll(".project-row").forEach(function (row) {
+    row.addEventListener("click", function () {
+      if (runState) {
+        showToast("运行在途：禁止切换工程（演示）");
+        return;
+      }
+      document.querySelectorAll(".project-row").forEach(function (r) {
+        r.classList.toggle("active", r === row);
+      });
+      document.getElementById("projectName").textContent = row.getAttribute("data-project");
+      closeProjectDialog();
+      showToast("已切换工程（演示）");
+    });
+  });
+  backdrop.addEventListener("click", function (e) {
+    if (e.target === backdrop) closeProjectDialog();
+  });
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape" && backdrop.classList.contains("open")) closeProjectDialog();
+  });
+
+  document.getElementById("openSystem").addEventListener("click", function () {
+    showToast("系统抽屉：环境自检 / 最近日志 / 关于（M2 沿用）");
+  });
+
+  applyView();
+  refreshPending();
+  setAgentRunning(false);
+  selectNode("node-prompt");
+})();
+</script>
+</body>
+</html>

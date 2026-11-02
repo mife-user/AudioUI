@@ -1,0 +1,48 @@
+# Build output
+/dist/
+/bin/
+/out/
+*.exe
+*.dll
+*.pdb
+*.syso
+.task/
+build/linux/appimage/build/
+build/windows/nsis/MicrosoftEdgeWebview2Setup.exe
+build/android/gen/
+build/ios/gen/
+/build/darwin/
+/build/ios/
+/build/linux/
+/build/android/
+/build/docker/
+
+# Runtime data（绿色版运行时生成）
+/data/
+/logs/
+/webview2/
+/mailbox/
+
+# Frontend
+node_modules/
+frontend/dist/*
+!frontend/dist/.gitkeep
+frontend/.vite/
+*.tsbuildinfo
+
+# Go
+vendor/
+coverage.out
+*.test
+
+# IDE / OS
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
+desktop.ini
+
+# Secrets
+.env
+.env.*
+!.env.example

@@ -1,0 +1,316 @@
+# M2 逐任务执行手册
+
+| 项 | 内容 |
+|---|---|
+| 状态 | 草案（M2 进行中：M2-00..02 完成；M2-03 待验收） |
+| 最后更新 | 2026-11-01 |
+| 适用 | 每个新开对话只执行一个 M2 任务 |
+| 关联 | [路线图](roadmap.md)、[流程](process.md)、[PRD](../prd.md)、[架构](../architecture.md)、[协议](../agent-protocol.md)、[验收](../acceptance.md)、[ADR](../decisions.md) |
+
+> **M2 不一口气写完。** 每个任务单独开一个对话，做完、跑门禁、更新文档与证据，交给用户评审后再开下一个。任何任务都不得顺手实现其他任务的代码。
+
+---
+
+## 1. 当前模型（每次开工先对齐）
+
+| # | 决策 |
+|---|---|
+| 1 | 图是**单父森林**：每节点最多一个父；topic 必须无父且是树根；成环、自连、topic 作子节点拒绝。 |
+| 2 | 任意 prompt 节点（含子树）可**自由改挂**到任意可用输出端口；目标已有不同父或同一父不同候选需确认；改挂移动子树并将该子树标记 `stale`。 |
+| 3 | **topic 是特殊 prompt**：应用候选后锁定内容与执行；每个候选是一个输出端口；连接端口即选定该候选；没有 `selectedTopic`/`SelectTopic`。 |
+| 4 | **链 = topic 根到末端节点的派生路径**，不持久化；分支产生多条共享前缀的链；链 ID 视图层为 `c_<tailNodeId>`。 |
+| 5 | 链与会话分离：每次节点执行一个**一次性运行**；App 从路径构建上下文；运行之间不共享 Agent 记忆；不使用 resume。 |
+| 6 | 上下文只含该路径祖先的最新已应用轮次与**该路径所选候选**；不含目标自身历史、兄弟分支、子节点、其他候选、其他 topic 树。 |
+| 7 | 上下文预算按 **token**，默认 `contextTokenBudget=1,000,000`；发送前保守估算，运行后记录实际 usage。 |
+| 8 | **运行锁**：运行/排队路径（topic 根 → 运行节点）与共享祖先只读（参数、拓扑、执行、新增子节点）；路径外兄弟分支可编辑。 |
+| 9 | 工作区按 **topic 树**共享；内置读限当前运行路径、写限当前运行节点；MCP 只读叠加视图沿路径祖先并回退到 exe 同级 `runtime/`；其他 topic 树拒绝。 |
+| 10 | M2 不开放 Agent 写图工具；`apply_artifact` 永远只由 UI 调用；M2 全局单在途运行，队列在 M5。 |
+| 11 | **锁定后不可再次执行**；M2 的 topic/prompt 每节点最多一个已应用轮次；迭代通过新增下游节点或候选端口分支。 |
+| 12 | **同一父换候选按改挂确认**并标记子树 stale；`SelectNode` 只持久化 `activeNodeId`，不递增图 revision、不广播；派生链由 Go 快照返回。 |
+
+权威文档：模型细节以 `decisions.md` ADR-019..024 为准；需求以 PRD、验收以 acceptance 为准。发现冲突先停下来问用户。
+
+---
+
+## 2. 每次新对话的开工协议
+
+新对话建议直接粘贴：
+
+```text
+按 CLAUDE.md 与 docs/dev/m2-workplan.md 执行 M2-XX。
+开工前读：CLAUDE.md、docs/dev/roadmap.md、docs/dev/process.md、
+docs/dev/m2-workplan.md、该任务涉及的 ADR 与验收用例。
+只实现 M2-XX，不顺手做其他任务；测试与文档同次完成；
+跑任务级门禁；完成后把任务状态改为「待验收」并列出证据，不要自我验收。
+```
+
+步骤：
+
+1. 读 `CLAUDE.md`、路线图、流程、本手册与相关 ADR；确认任务状态、依赖、DoR。
+2. 检查上一个任务是否已完成/待验收；依赖未满足不抢跑。
+3. 实现代码 + 测试 + 受影响文档 + `CHANGELOG.md` Unreleased。
+4. 跑本手册第 4 节门禁；保留输出。
+5. 更新本手册任务状态为「待验收」（只能由用户改为「已完成」），写清 AC 映射与证据路径。
+6. 停下等用户评审；不自动进入下一任务。
+
+DoR（任一不满足则不开工）：任务有 F-xx/AC；依赖已完成；设计文档已更新；测试方式明确；不在暂存池。
+
+DoD：分层与不变量未破坏；新增/修改逻辑有测试；任务级门禁通过；文档与 CHANGELOG 同步；`process.md` §14.4 自审完成；用户评审通过。
+
+---
+
+## 3. 任务卡
+
+### M2-00 设计收口
+
+- **状态**：已完成（用户确认开工 M2-01）。
+- **目标**：ADR、PRD、架构、协议、前端设计、验收、路线图、流程、CLAUDE、README、CHANGELOG 与原型一致。
+- **产物**：`docs/decisions.md` ADR-019..024；`docs/design/m2-workspace.html`；各文档同步。
+- **已确认决策**：锁定节点不可重跑；M2 范围纳入 F-06/F-13；同一父换候选需确认；`SelectNode` 不递增图 revision、不广播；派生链由 Go 快照返回。
+- **出口**：用户确认设计；未确认前不得写 M2 实现代码。
+
+### M2-01 工程存储与 M1 迁移
+
+- **状态**：已完成（用户确认开始 M2-02）。
+- **需求 / 验收**：F-01；AC-01、AC-M2-7。
+- **依赖**：M2-00（已完成）。
+- **目标**：`project.json` v1、`config.json`、`runs.json`/`runs/`、`pending.json`、artifact 存储、路径布局、自动保存、M1 迁移。
+- **关键设计**：
+  - `project.json`：`version/id/name/revision/activeNodeId/nodes[]`；节点含 `id/type/title/parent/parentCandidate/position/params/rounds/locked/stale`；**不存 chains**。
+  - `config.json`：`lastProjectId`、`contextTokenBudget`（默认 1,000,000）；读取损坏配置直接报错，不覆写。
+  - 目录：`projects/<id>/{project.json,pending.json,pending/,artifacts/,runs.json,runs/,trees/<rootTopicId>/steps/<nodeId>/}`。
+  - 原子写：临时文件 + `Sync` + 重命名；工程创建与迁移先写 staging 目录再整体重命名；损坏文件不静默重建。
+  - 运行索引/详情：`runs.json` 只存摘要，`runs/<runId>.json` 存 transcript 与上下文预览；先写详情再写索引，索引引用缺失详情视为损坏。
+  - 迁移：仅当 `data/sessions.json` 存在；创建默认工程与 topic 根，名称均为「M1 迁移」；只导入 `activeChainId`（M1 仅有 `chain_default`，其他记录留在备份不导入）；transcript 导入为 `status=imported` 只读运行（`chainPath=[root]`）；旧 workspace 复制到 `trees/<root>/steps/<root>`；`sessions.json` 与旧 workspace 复制到 `data/backup/m1/`，原文件不移动；以 `data/backup/m1/migration.json` 作为完成标记，工程目录存在但标记缺失时补写，标记存在而工程被删除时不重新导入；失败 `MIGRATION_FAILED`，staging 清理。
+  - 自动保存：生命周期命令（新建/打开/切换）同步落盘；后续图命令在命令层成功后立即原子写入，不提供手动保存。
+- **文件**：`internal/domain/{valueobject,port,entity}/{project,id,config,run,pending,artifact}*.go`；`internal/infra/persistence/{project,runs,pending,artifacts,config,migrate,atomic,copy}.go`；`internal/infra/paths/{layout,project}.go`；`internal/service/project/`；`internal/handler/project.go`；`internal/app/project.go`；Wails 绑定。
+- **测试**：原子写/损坏/版本；新建/打开/切换/重启恢复；迁移有数据/无数据/损坏/目标已存在/失败清理/幂等；payload 限额与原文保留；artifact 去重与不可变；目录与 bundle 不写入 AppData。
+- **证据**：`go test . ./internal/...`、`go vet . ./internal/...`；`internal/infra/persistence/*_test.go`、`internal/service/project/service_test.go`、`internal/handler/project_test.go`、`internal/app/project_test.go`；绑定 `frontend/bindings/audio-ui/internal/handler/projectservice.ts`。
+- **门禁**：gofmt / go vet / go test、bindings、typecheck、lint、check:tokens、前端测试 21 项、前端构建、`wails3 build` 全部通过；前端首屏 JS 83.53 kB gzip；`--version` 与 `--self-check` 通过。
+- **未包含**：工程入口/切换 UI（M2-08）；运行/pending/artifact 的业务语义与 apply（M2-05/M2-07）；画布命令（M2-02）。
+- **风险**：迁移半途失败；路径安全；`runs.json` 与 `runs/<id>` 双文件一致性；共享内容寻址产物的 meta 以首次写入为准。
+
+### M2-02 图命令层、自由改挂与运行锁
+
+- **状态**：已完成（用户确认 AC-M2-1/6/11 验收通过；2026-11-02）。
+- **需求 / 验收**：F-03；AC-M2-1、AC-M2-6、AC-M2-11。
+- **依赖**：M2-01（已完成）。
+- **目标**：单父树校验、草稿、自由改挂/子树移动、topic 候选端口、运行路径锁、revision。
+- **关键设计**：
+  - 命令：`AddNode`（topic 根 / prompt 带父或草稿）、`Connect`（含 `replace` 改挂）、`MoveNode`（画布位置）、`UpdateNodeParams`（可在未锁定时同时更新 `title`）、`SelectNode`（activeNodeId）；`EnsureExecutable` 供 M2-07 执行前检查锁定。
+  - `Connect(parent, child, parentCandidate, replace)`：child 为 prompt；parent 为任意 topic 树内的 topic/prompt；self/cycle/topic-as-child/父为草稿拒绝；child 的 `(parent, parentCandidate)` 与目标不同（含同一父换候选）且 `replace=false` → `REPARENT_CONFIRM_REQUIRED`；同一父同一候选重复连接为幂等无操作；确认后移动子树（同父换候选不移动子树）并将被移动节点及其后代标记 `stale`。跨树时迁移子树 steps；失败 `WORKSPACE_MOVE_FAILED`；保存失败回滚 steps。
+  - topic 候选：`parentCandidate` 为 0 基；候选数量从该 topic 最新已应用 `topics` 产物读取；缺失/越界/产物不可读 → `CANDIDATE_INVALID`。父为 prompt 或草稿时清空 `parentCandidate`。
+  - 锁定：topic 应用后、prompt 首轮后内容与执行锁定；`UpdateNodeParams` 与 `EnsureExecutable` 拒绝（`NODE_LOCKED`）；锁定节点的拓扑仍可改，运行链上则拒绝。
+  - 运行锁：`AcquireRunLock(runID, treeID, nodeID, chainPath)` 记录 topic 根 → 运行节点路径；路径节点（含共享祖先）只读；对路径节点拒绝参数、改挂、新增子节点与再次执行（`RUNNING_CHAIN_LOCKED`）；路径外分支允许。路径必须是真实父子链。
+  - revision：`AddNode` / `Connect` / `MoveNode` / `UpdateNodeParams` 成功后递增并触发 `OnChange(revision, "graph")`；幂等无操作不递增；`SelectNode` 只持久化 `activeNodeId`，不递增、不广播。
+  - 链为派生：`entity.Graph.LeafChains` 返回 `c_<tail>` 路径；不落盘；`ActiveNodeID` 仍由工程持久化。
+- **文件**：`internal/domain/entity/graph.go`；`internal/domain/port/{project,workspace}.go`；`internal/service/workflow/{service,candidates,validate,locks,errors}.go`；`internal/service/project/service.go`（`Save`）；`internal/infra/workspace/mover.go`；`internal/infra/persistence/artifacts_provider.go`；`internal/handler/workflow.go`；`internal/app/workflow.go`；测试。
+- **测试**：单父/自连/成环/悬空/重复 ID/非法候选；改挂确认与子树 stale；同一父换候选确认/幂等；跨树 steps 迁移/保存失败回滚；运行锁路径/共享祖先/兄弟分支；锁定节点执行与参数拒绝、拓扑可变；`SelectNode` 不递增 revision/不广播；非法 ID/位置；候选计数从 artifacts 读取；Wails 绑定与工程接线。
+- **证据**：`go test -count=1 . ./internal/...`；`internal/domain/entity/graph_test.go`、`internal/service/workflow/*_test.go`、`internal/infra/workspace/mover_test.go`、`internal/handler/workflow_test.go`、`internal/app/project_test.go`；`frontend/bindings/audio-ui/internal/handler/workflowservice.ts`。
+- **门禁**：gofmt / go vet / go test、bindings、typecheck、lint、check:tokens、前端测试、前端构建、`wails3 build` 通过；前端首屏 JS 83.53 kB gzip 不变。
+- **未包含**：运行启动/上下文（M2-04/M2-07）、应用产物与锁定写入（M2-05）、快照与事件桥/画布 UI（M2-08/M2-09）、工作区读写 guard（M2-03）。`OnChange` 仅提供回调，Wails 事件桥在 M2-08 接入。
+- **风险**：子树移动遗漏 stale；运行锁与并发命令竞态；链派生与 activeNode 不一致；跨树 steps 移动在进程崩溃窗口内可能不同步。
+
+### M2-03 工作区与写作用域
+
+- **状态**：待验收。
+- **需求 / 验收**：F-03、F-13；不变量 9；AC-M2-11（路径隔离）、AC-M1-2（权限回归）。
+- **依赖**：M2-01（已完成）；M2-02（已验收通过）。
+- **目标**：topic 树 cwd、`steps/<nodeId>`、路径叠加读取、内置文件读写白名单、Bash 残余风险登记；跨树 steps 移动沿用 M2-02 已实现的 mover。
+- **实现**：
+  - `NewRunView` 将 topic 树 cwd 定位到 `trees/<rootTopicId>/`，确保运行路径中各节点 `steps/<nodeId>/` 存在；MCP 逻辑读取顺序为当前节点 → 路径祖先 → exe 同级根 `runtime/`。
+  - MCP `read_file` / `list_dir` / `grep` / `stat` 消费 `WorkspaceReader`；列表按路径优先级合并，同名条目由当前节点/最近祖先遮蔽；Agent 只看到逻辑相对路径，不可访问兄弟节点、其他 topic 树、物理 `steps/`、`artifacts/` 或保留目录名。
+  - MCP 读取限额：单文件 256 KiB、目录 200 项、grep 200 hits / 5,000 files / 单文件 512 KiB；无效 UTF-8 文件不作为文本返回，grep 跳过二进制文件。
+  - `RunGuard` 实现 `ScopedPathResolver`：内置 Read/Glob/Grep 仅限运行路径的实际 steps；Write/Edit/NotebookEdit 仅限当前运行节点 steps，并保留交互确认；越界/reparse point/junction 拒绝。
+  - `RunToolServerFactory.NewForRun` 支持按运行注入 overlay reader；M1 旧工厂继续使用 `NewDirectView`，保留旧 workspace 与绝对路径兼容。Bash 仍是协作式门禁，残余项 RM-017。
+  - 用户确认共享只读运行时为 exe 同级 `runtime/`；`data/runtime/` 不使用，已同步文档与发布目录语义（RM-013）。
+- **文件**：`internal/domain/port/{agent,workspace}.go`、`internal/domain/valueobject/environment.go`、`internal/infra/paths/{layout,guard,run_guard}.go`、`internal/infra/workspace/{view,mover}.go`、`internal/infra/agent/mcp/server.go`、`internal/service/permission/policy.go`、`internal/app/tools.go` 与测试；README、CLAUDE、架构、产品、协议、验收、路线图、CHANGELOG。
+- **测试**：`go test -count=1 ./internal/infra/paths ./internal/infra/workspace ./internal/infra/agent/mcp ./internal/service/permission ./internal/app`；覆盖路径与写白名单、overlay precedence/遮蔽/list/grep、runtime 回退、兄弟隔离、限额/UTF-8、跨树移动与回滚、reparse point/junction、MCP 注入与 M1 绝对路径回归。
+- **证据**：`go test -count=1 . ./internal/...` 全量通过；`go vet . ./internal/...` 通过；前端 typecheck/lint/check:tokens 通过，6 个文件 / 21 项测试通过；绑定生成、前端构建（首屏 JS 83.53 kB gzip）、`wails3 build` 通过；`bin/audio-ui.exe --version` 与 `--self-check` 通过。首次与其他门禁并行时环境超时测试受负载影响，单独重跑及随后全量 Go 测试均通过。
+- **未包含**：上下文构建（M2-04）、MCP 图工具/reply（M2-06）、RunService/每运行 `RunGuard` 与 reader 的实际启动接线（M2-07）。
+- **风险**：Bash 命令语法无法被完整解析；同一 topic 树内共享文件，RM-017 保留。
+
+### M2-04 上下文构建器
+
+- **需求 / 验收**：F-04/F-05；AC-M2-8、AC-M2-10、AC-M2-12。
+- **依赖**：M2-01、M2-02。
+- **目标**：从 topic 根 → 目标节点构建路径上下文；候选解析；token 估算/降级；哈希；工作区清单。
+- **关键设计**：
+  - 路径：topic 根 → 目标；每个祖先取最新已应用轮次（M2 的 topic/prompt 每节点最多 1 轮）；topic 段只带该路径 `parentCandidate` 对应的候选。
+  - 目标只带当前参数；不含自身历史/兄弟/子节点/其他候选/其他树。
+  - 上下文段：运行目标、任务、路径、候选、工作区清单、契约、元数据；不含 runId/时间戳。
+  - 预算 1,000,000 tokens；超出从最远祖先「全文 → 摘要（2,000 tokens 摘录）→ 引用」；目标/直接父最后降级；仍超 `CONTEXT_TOO_LARGE`。
+  - `estimatorVersion=1`；保守估算；运行后记录 actual input tokens/overBudget。
+  - 输出 `contextHash`、`ancestorHash`、`paramsHash`。
+- **文件**：`internal/service/context/{builder,tokens}.go`；domain valueobject。
+- **测试**：golden 上下文；同输入同哈希；候选不同上下文不同；不含目标历史/兄弟；降级顺序；超限；中英混合估算。
+- **风险**：候选解析错位；预算估算偏差；工作区清单变化导致哈希变化。
+
+### M2-05 Pending 后端
+
+- **需求 / 验收**：F-07；AC-M2-3/4、AC-07。
+- **依赖**：M2-02、M2-04。
+- **目标**：pending 存储、Schema、应用/丢弃、轮次、锁定、下游 stale、应用后提升为 artifact。
+- **关键设计**：
+  - pending 绑定 runId/chainId/chainPath/nodeId/kind/contextHash/ancestorHash/paramsHash；无效也落盘。
+  - topic 应用后锁定内容与执行并暴露候选端口；prompt 应用首轮后锁定内容与执行；无 selectedTopic。
+  - apply 校验类型/kind/锁定/哈希；不一致 `PARAMS_CHANGED`/`CONTEXT_CHANGED`，确认后 force；已锁定节点拒绝（`NODE_LOCKED`）。
+  - apply = 写 artifact + 追加轮次 + 锁定内容与执行 + 后代 stale；discard 幂等；M2 的 topic/prompt 每节点最多 1 个已应用轮次。
+  - artifact 为 `artifacts/<sha256>/{payload.json,meta.json}`；哈希按规范化 payload 计算。
+  - pending ≤50/树；payload ≤256 KiB。
+- **文件**：`internal/service/workflow/pending.go`、`internal/infra/persistence/{pending,artifacts}.go`、handler。
+- **测试**：幂等/重复 apply/discard、force、轮次编号、锁定节点 apply/执行拒绝、stale、artifact 去重、无效原文保留、候选端口生成。
+- **风险**：apply 半途失败；artifact 与轮次一致性；topic/prompt 锁定差异。
+
+### M2-06 MCP 只读图与结构化 reply
+
+- **需求 / 验收**：F-07；AC-M2-3、AC-06。
+- **依赖**：M2-02、M2-05。
+- **目标**：`get_chain`/`get_graph`/`get_node`/`list_node_types`/`validate`/`read_artifact`/`reply`；回合绑定；MCP 跨树访问拒绝；限额。
+- **关键设计**：
+  - `reply.node_id` 必须是当前运行目标；kind 匹配：topic→topics、prompt→script；`scene_dsl` → `UNSUPPORTED_UNTIL_M3`。
+  - `get_graph` 返回 parent/parentCandidate 摘要；不返回 selectedTopic；`read_artifact` 只读路径祖先，≤16 KiB/次。
+  - token 绑定 runId/treeId/nodeId；跨树 `CHAIN_SCOPE_DENIED`；每树 pending ≤50。
+  - 不注册写图工具与 `apply_artifact`。
+- **文件**：`internal/infra/agent/mcp/server.go`、`internal/service/workflow` 读取适配、协议 fixture。
+- **测试**：工具列表、入参校验、跨树、回合过期、重复 request_id、无效 Schema、artifact 分块、限额。
+- **风险**：SDK 工具描述漂移；token 作用域；reply 与 run 竞态。
+
+### M2-07 运行管理与运行锁
+
+- **需求 / 验收**：F-06、F-13；AC-06、AC-13、AC-M1-1/2/5、AC-M2-9、AC-M2-11。
+- **依赖**：M2-03、M2-04、M2-06。
+- **目标**：一次性 driver、per-run MCP/token/permission、TurnGate、run store、runId/treeId/chainPath 事件、运行路径锁、重启中断。
+- **关键设计**：
+  - `RunSpec`：runId/treeId/nodeId/chainPath/workspace/context/version/hash/tools/system prompt/MCP/gates。
+  - per-run MCP 配置 `data/agent/<projectId>/<runId>/mcp.json`；结束删除；token 不落日志。
+  - 全局 TurnGate（M2 1 个）；所有终态释放；带 runId owner；看门狗 `RUN_TIMEOUT`。
+  - 运行锁在启动时记录路径快照；路径节点只读；共享祖先只读。
+  - 重启把 starting/running 标记 interrupted；transcript ≤500；运行记录全部保留。
+  - driver 的 allowed tools/system prompt 按运行注入，删除 M1 硬编码。
+- **文件**：`internal/service/run/{manager,gate}.go`（取代 session）、`internal/infra/agent/claudecli/driver.go`、app wiring、eventbus。
+- **测试**：gate 所有释放路径；跨树 BUSY；per-run token/配置/权限与审计；运行锁；锁定节点不可执行；重启中断；transcript 截断；live CLI（opt-in）。
+- **风险**：gate 泄漏；进程泄漏；权限服务 per-run；上下文与运行锁竞态。
+
+### M2-08 前端工作台骨架
+
+- **需求 / 验收**：F-01、F-03；AC-01、AC-03。
+- **依赖**：M2-07。
+- **目标**：workspaceStore、runStore、事件桥、控制台分页、工程入口、删除 M1 临时 UI。
+- **关键设计**：快照字段以 `agent-protocol.md` §10.1 为准；快照 + revision/seq；快照含 Go 派生的链视图与 `lockedNodeIds`；runStore 按 runId；控制台「对话/待处理」；删除 PromptDock、SessionPage、ResumeFailureCard/新开会话/取消恢复；工程切换 dialog；运行在途禁止切换工程；`SelectNode` 本地更新，不递增 revision、不重拉快照。
+- **文件**：`frontend/src/stores/{workspaceStore,runStore}.ts`、`api/*`、`hooks/*`、`ui/{WorkspacePage,ConsoleTabs,RunList,ProjectSwitcher}.tsx`。
+- **测试**：store 缺口/乱序、运行分组、工程切换、无输入框、旧事件不污染、选中不触发快照重拉。
+- **风险**：Wails 事件 payload 形状；绑定重新生成；旧组件删除遗漏。
+
+### M2-09 画布与节点交互
+
+- **需求 / 验收**：F-02、F-03；AC-02、AC-M2-1/6、AC-M2-11。
+- **依赖**：M2-02、M2-08。
+- **目标**：React Flow、节点卡、平移缩放、位置持久化、topic 多候选端口、自由改挂确认、路径高亮、草稿、运行锁视觉。
+- **关键设计**：topic 候选行右侧端口；prompt 底部输出/顶部输入；拖到已有父弹确认并显示子树影响，同一 topic 换候选同样确认；失败不本地加边；运行路径节点禁用编辑；锁定节点禁用执行；QuickBar 叶子链由 M2-12 接入。
+- **文件**：`frontend/src/canvas/*`、`nodes/{TopicNode,PromptNode,NodeShell}.tsx`、`styles/workspace.css`、`@xyflow/react`。
+- **测试**：端口连接/改挂/回弹、同父换候选确认、锁定节点执行禁用、平移缩放、位置保存、键盘可达、路径高亮、令牌门禁。
+- **风险**：React Flow 受控状态与后端快照冲突；候选端口自定义 handle；改挂确认交互。
+
+### M2-10 选题流程
+
+- **需求 / 验收**：F-04；AC-04、AC-M2-12。
+- **依赖**：M2-05、M2-06、M2-09。
+- **目标**：topic 参数、执行、候选展示、应用、候选端口连线、锁定；无「选定」按钮。
+- **关键设计**：想法/方向/候选数 ≥3；运行 `topics`；待应用；应用后候选列表 + 每候选端口；连接端口即选定；topic 锁定内容与执行（不可重跑）；同候选可多分支。
+- **文件**：`TopicNode.tsx`、pending UI、workflow handler。
+- **测试**：候选 ≥3、无效 Schema、应用/丢弃、端口连接、锁定后新增分支、不同候选上下文。
+- **风险**：候选端口与 React Flow handle 同步；应用前禁止连线。
+
+### M2-11 提示词流程
+
+- **需求 / 验收**：F-05；AC-05、AC-M2-2。
+- **依赖**：M2-05、M2-06、M2-09。
+- **目标**：prompt 参数、执行 `script`、首轮后锁定、编辑禁用、新增节点、改挂。
+- **关键设计**：指令/产出类型/约束；运行；待应用；应用后锁定内容与执行（不可重跑）；新增子节点或从父分支继续；改挂在非运行链上允许并提示。
+- **文件**：`PromptNode.tsx`、pending UI、workflow handler。
+- **测试**：锁定后编辑与执行拒绝、应用/丢弃、新增子节点、改挂、上下文变化 stale。
+- **风险**：锁定与拓扑混淆；改挂后节点内容基于旧上游的提示。
+
+### M2-12 待应用、叶子链快捷栏与运行锁 UI
+
+- **需求 / 验收**：F-03、F-07；AC-03、AC-M2-3/4、AC-M2-11。
+- **依赖**：M2-10、M2-11。
+- **目标**：PendingArtifactCard、QuickBar 叶子链、整路径高亮、运行锁视觉、全局 BUSY、工程切换。
+- **关键设计**：QuickBar 消费 Go 快照的派生链视图（`c_<tail>`）；切换选中末端节点，不递增 revision、不重拉快照；分支多链共享前缀；运行中卡片显示工作中；路径节点锁 chip；其它分支可编辑；应用/丢弃刷新快照。
+- **文件**：`QuickBar.tsx`、`ChainCard.tsx`、`PendingArtifactCard.tsx`、`WorkspacePage.tsx`。
+- **测试**：叶子链数量/切换、前缀共享、切换不重拉快照、运行锁视觉、应用/丢弃、BUSY、a11y。
+- **风险**：链随末端节点变化导致卡片跳动；运行中切换不占并发。
+
+### M2-13 集成与验收证据
+
+- **需求 / 验收**：全部 M2 AC。
+- **依赖**：M2-01..12。
+- **目标**：端到端、迁移证据、F-06/F-13 回归、live CLI、门禁、CHANGELOG、`docs/dev/evidence/m2.md`、路线图状态。
+- **测试**：选题 → 应用 → 候选端口分支 → prompt → 应用 → 锁定 → 子分支；不同候选上下文；改挂（含同父换候选）；锁定节点不可执行；运行锁；重启中断；M1 迁移；M1 流式/权限/问题卡回归；绿色版检查。
+- **出口**：用户按 AC 验收；未通过不得标「已完成」；0.3.0 只在 S6 由用户确认。
+
+---
+
+## 4. 任务级门禁
+
+```bash
+gofmt -w main.go internal
+go vet . ./internal/...
+go test . ./internal/...
+wails3 generate bindings -ts -i -clean=true
+npm --prefix frontend run typecheck
+npm --prefix frontend run lint
+npm --prefix frontend run check:tokens
+npm --prefix frontend run test
+npm --prefix frontend run build
+wails3 build
+```
+
+- 不用 `go test ./...`。
+- 前端 bundle 首屏 ≤300KB gzip；引入 React Flow 后记录实际值。
+- live CLI 测试 `AUDIOUI_LIVE_CLI=1` 不进门禁，但 M2-07/M2-13 需记录结果。
+- 每个任务结束运行 `git status` 确认没有生成物、`data/`、`logs/`、密钥进入提交范围。
+
+---
+
+## 5. 常见返工点（新对话先读）
+
+1. 不要把链重新做成实体或持久化 `chains` 数组；链是派生路径。
+2. 不要恢复 `selectedTopic`/`SelectTopic`；候选端口连接即选择。
+3. 不要恢复一链一会话、resume、`ResumeFailureCard`、PromptDock。
+4. `parentCandidate` 只在父为 topic 时有意义；改挂到 prompt 时清空。
+5. 运行锁按「topic 根 → 运行节点」路径 + 共享祖先；不是整棵子树，也不是全工程。
+6. 上下文只带路径祖先与所选候选；不要带目标历史、兄弟、子节点、其他候选。
+7. token 预算不是字节；估算保守、运行后记录实际 usage。
+8. 所有写操作走 `service/workflow`；Agent 写图工具不开放。
+9. 文档、验收、CHANGELOG 与代码同次完成；不要「下个任务再补」。
+10. 不执行 commit/push，除非用户明确要求。
+11. 跨树改挂必须迁移子树 steps、检查源/目标树运行锁，失败整体回滚（`WORKSPACE_MOVE_FAILED`）。
+12. 不要把锁定节点做成可重跑；M2 一节点一轮，迭代新增下游节点或分支。
+13. 不要让 `SelectNode`/快捷栏切换递增 revision 或触发全量快照重拉。
+14. 派生链由 Go 快照返回；前端不要自行实现链派生规则。
+15. 同一父换候选也要确认，不要当成普通连接或幂等操作。
+
+---
+
+## 6. 状态表
+
+| 任务 | 状态 | 证据 |
+|---|---|---|
+| M2-00 设计收口 | 已完成 | ADR/文档/原型；用户确认开工 M2-01 |
+| M2-01 工程存储与迁移 | 已完成 | `internal/infra/persistence`、`internal/service/project`、`internal/handler/project_test.go`、绑定生成；用户确认开始 M2-02 |
+| M2-02 图命令层/改挂/运行锁 | 已完成 | 用户确认 AC-M2-1/6/11 通过；`internal/domain/entity/graph.go`、`internal/service/workflow`、`internal/infra/workspace/mover.go`、`internal/handler/workflow_test.go`、全量 Go/前端/Wails 门禁通过 |
+| M2-03 工作区与写作用域 | 待验收 | `internal/infra/paths/run_guard_test.go`、`internal/infra/workspace/view_test.go`、`internal/infra/agent/mcp/server_test.go`、`internal/service/permission/policy_test.go`；完整门禁见 M2-03 任务卡证据 |
+| M2-04 上下文构建器 | 未开始 | — |
+| M2-05 Pending 后端 | 未开始 | — |
+| M2-06 MCP 只读与 reply | 未开始 | — |
+| M2-07 运行管理 | 未开始 | — |
+| M2-08 前端工作台骨架 | 未开始 | — |
+| M2-09 画布与节点交互 | 未开始 | — |
+| M2-10 选题流程 | 未开始 | — |
+| M2-11 提示词流程 | 未开始 | — |
+| M2-12 待应用/快捷栏/运行锁 UI | 未开始 | — |
+| M2-13 集成与验收证据 | 未开始 | — |
+
+状态词表沿用 [路线图第 2.3 节](roadmap.md#23-状态词表)：未开始 / 进行中 / 待验收 / 已完成 / 阻塞 / 暂缓。只有用户可以把「待验收」改为「已完成」。

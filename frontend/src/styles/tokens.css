@@ -1,0 +1,38 @@
+:root {
+  --bg: #0a0e11;
+  --bg-elev: #0c1216;
+  --panel: #101a1f;
+  --panel-2: #0b1216;
+  --border: #1e2a30;
+  --border-strong: #2a3f48;
+  --text: #dfe7ea;
+  --text-dim: #9fb2b9;
+  --muted: #6f828a;
+  --accent: #5ad1e6;
+  --accent-soft: rgba(90, 209, 230, .09);
+  --ok: #6fd3a4;
+  --ok-soft: rgba(111, 211, 164, .10);
+  --warn: #d8b27a;
+  --warn-soft: rgba(216, 178, 122, .10);
+  --danger: #d98a8a;
+  --danger-soft: rgba(217, 138, 138, .10);
+  --grid: #16232a;
+  --edge: #3d6b78;
+  --glass: rgba(12, 18, 22, .92);
+  --shadow: 0 18px 48px rgba(0, 0, 0, .24);
+  --shadow-dialog: 0 30px 90px rgba(0, 0, 0, .60);
+  --backdrop: rgba(0, 0, 0, .62);
+
+  --radius-sm: 5px;
+  --radius: 9px;
+  --radius-lg: 14px;
+  --s1: 4px;
+  --s2: 8px;
+  --s3: 12px;
+  --s4: 16px;
+
+  --topbar-h: 52px;
+  --content-max: 1040px;
+  --font: "Inter", "Noto Sans SC", "Microsoft YaHei UI", system-ui, sans-serif;
+  --mono: "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+}
