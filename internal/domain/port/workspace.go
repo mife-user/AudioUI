@@ -74,3 +74,19 @@ type WorkspaceReader interface {
 	Grep(ctx context.Context, pattern, path string, options WorkspaceGrepOptions) (WorkspaceGrep, error)
 	Stat(ctx context.Context, path string) (WorkspaceStat, error)
 }
+
+// WorkspaceScope identifies the project and path behind a run-scoped overlay.
+// ChainPath is a copy ordered from the topic root to the target node.
+type WorkspaceScope struct {
+	ProjectID string
+	TreeID    string
+	NodeID    string
+	ChainPath []string
+}
+
+// RunWorkspaceReader lets consumers verify that a manifest belongs to the
+// same project and graph path as the run for which it is being constructed.
+type RunWorkspaceReader interface {
+	WorkspaceReader
+	Scope() WorkspaceScope
+}

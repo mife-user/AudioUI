@@ -2,7 +2,7 @@
 
 本地运行的、以节点图编排的内容生产工作台。用户在一张无限画布上完成选题、提示词、Agent 生成、渲染、配音和导出，再把素材交给剪映成片。
 
-> **状态**：M1 已完成（v0.2.0）· M2 图与提示词进行中（M2-02 已验收；M2-03 工作区与写作用域待验收）。
+> **状态**：M1 已完成（v0.2.0）· M2 图与提示词进行中（M2-00..04 已验收；M2-05 Pending 后端未开始）。
 > **平台**：Windows 11 · 绿色版单 exe · 数据全部落在 exe 目录。
 
 ---
@@ -101,7 +101,7 @@ bin/audio-ui.exe --self-check
 
 Agent 前提：使用原生 `claude.exe`（拒绝 `.cmd`），复用现有 `~/.claude` 配置（`--setting-sources=user`，因此 OAuth 登录、`settings.json` 里的供应商密钥/`apiKeyHelper`、用户 hooks 都会生效；项目级 settings 不加载）。应用数据、日志、workspace、运行记录仍在 exe 目录；Agent 自身凭据属适配器例外。切换供应商后需重启应用。
 
-M2 起每次节点执行启动一次性运行：App 从祖先链构建上下文（只含根 → 父节点的最新已应用轮次，不含目标自身历史/兄弟/子节点），运行之间不共享 Agent 记忆，不使用 resume。上下文预算由 `data/config.json` 的 `contextTokenBudget` 控制，默认 1,000,000 tokens；实际用量记录在运行记录中。topic/prompt 应用后锁定内容与执行，M2 每节点最多一个已应用轮次；继续迭代新增下游节点或从候选端口开分支。同一 topic 换候选按改挂确认并标记子树 stale。工作区共享只读资源固定为 exe 同级 `runtime/`；Agent 通过路径祖先 → runtime 的只读叠加视图读取，内置文件写入仅允许当前运行节点的 `steps/<nodeId>/`。
+M2 起每次节点执行启动一次性运行：App 从祖先链构建上下文（只含根 → 父节点的最新已应用轮次，不含目标自身历史/兄弟/子节点），运行之间不共享 Agent 记忆，不使用 resume。上下文预算由 `data/config.json` 的 `contextTokenBudget` 控制，默认 1,000,000 tokens；目标参数保持完整，工作区文件只提供路径与大小。M2-04 已实现上下文构建器，实际运行接线及用量记录在 M2-07。topic/prompt 应用后锁定内容与执行，M2 每节点最多一个已应用轮次；继续迭代新增下游节点或从候选端口开分支。同一 topic 换候选按改挂确认并标记子树 stale。工作区共享只读资源固定为 exe 同级 `runtime/`；Agent 通过路径祖先 → runtime 的只读叠加视图读取，内置文件写入仅允许当前运行节点的 `steps/<nodeId>/`。
 
 开发/诊断环境变量：`AUDIOUI_HOME` 覆盖便携根目录，`AUDIOUI_LOG_STDERR=1` 同时输出日志到 stderr，`AUDIOUI_CLAUDE_PATH` 覆盖原生 CLI 路径。
 

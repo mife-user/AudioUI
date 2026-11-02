@@ -38,6 +38,7 @@ type viewLayer struct {
 // View is the logical read-only overlay for one run path. Layers are ordered
 // from the current node through its ancestors, with root runtime last.
 type View struct {
+	projectID     string
 	treeDir       string
 	writeDir      string
 	chainPath     []string
@@ -96,6 +97,7 @@ func NewRunView(layout valueobject.Layout, projectID, treeID, nodeID string, cha
 	}
 
 	view := &View{
+		projectID: projectID,
 		treeDir:   runGuard.TreeDir(),
 		writeDir:  runGuard.WriteDir(),
 		chainPath: runGuard.ChainPath(),
@@ -195,6 +197,20 @@ func newViewLayer(root string) (viewLayer, error) {
 func (v *View) TreeDir() string     { return v.treeDir }
 func (v *View) WriteDir() string    { return v.writeDir }
 func (v *View) ChainPath() []string { return append([]string(nil), v.chainPath...) }
+
+// Scope is empty for the legacy direct view, which is not a run-scoped
+// overlay and must not be used to construct M2 path context.
+func (v *View) Scope() port.WorkspaceScope {
+	if v.projectID == "" || len(v.chainPath) == 0 {
+		return port.WorkspaceScope{}
+	}
+	return port.WorkspaceScope{
+		ProjectID: v.projectID,
+		TreeID:    v.chainPath[0],
+		NodeID:    v.chainPath[len(v.chainPath)-1],
+		ChainPath: v.ChainPath(),
+	}
+}
 
 func (v *View) ReadFile(ctx context.Context, input string, maxBytes int64) (port.WorkspaceRead, error) {
 	if err := ctx.Err(); err != nil {

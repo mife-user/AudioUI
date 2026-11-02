@@ -1,0 +1,105 @@
+{
+  "context": {
+    "version": 1,
+    "target": {
+      "treeId": "n_topic",
+      "chainPath": [
+        "n_topic",
+        "n_mid",
+        "n_target"
+      ],
+      "nodeId": "n_target",
+      "nodeType": "prompt",
+      "outputKind": "script"
+    },
+    "task": {
+      "instruction": "继续写中文脚本",
+      "outputKind": "script",
+      "constraints": {
+        "scenes": 3,
+        "duration": 90
+      }
+    },
+    "path": [
+      {
+        "nodeId": "n_topic",
+        "nodeType": "topic",
+        "title": "选题",
+        "params": {
+          "idea": "节奏",
+          "candidateCount": 3
+        },
+        "round": 1,
+        "artifactKind": "topics",
+        "artifactId": "sha256:9ed8c2239a8953fed4d831ba69b209822e6e6e6ddb073e26f973e1d5f0f45820",
+        "candidateNumber": 1,
+        "representation": "full",
+        "payload": {
+          "title": "候选甲",
+          "angle": "角度甲",
+          "hook": "开头甲"
+        }
+      },
+      {
+        "nodeId": "n_mid",
+        "nodeType": "prompt",
+        "title": "上游脚本",
+        "params": {
+          "instruction": "撰写上游",
+          "outputKind": "script"
+        },
+        "round": 2,
+        "artifactKind": "script",
+        "artifactId": "sha256:60f2b821dc4a16e2a532b46ffffd4f2c8af21ab53ff8d3292b04a98bb26053e5",
+        "representation": "full",
+        "payload": {
+          "title": "最新祖先轮次",
+          "scenes": [
+            {
+              "narration": "祖先正文",
+              "duration": 8
+            }
+          ]
+        }
+      }
+    ],
+    "workspace": {
+      "cwd": "trees/n_topic/",
+      "overlay": [
+        "steps/n_target/",
+        "steps/n_mid/",
+        "steps/n_topic/",
+        "\u003cexe\u003e/runtime/"
+      ],
+      "files": [
+        {
+          "path": "a.txt",
+          "size": 3
+        },
+        {
+          "path": "docs/note.md",
+          "size": 8
+        },
+        {
+          "path": "z.bin",
+          "size": 12
+        }
+      ],
+      "truncated": false
+    },
+    "contract": [
+      "只根据当前路径与任务工作；禁止直接修改工程图。",
+      "工作区文件仅提供逻辑路径与大小，不自动注入文件内容；二进制资源仅通过路径引用。",
+      "祖先产物的摘录或引用可用 read_artifact 按块读取（每次不超过 16 KiB）；topic 只返回当前路径所选候选。",
+      "有歧义时调用 ask_user；结构化输出使用 reply，payload 不超过 256 KiB。",
+      "reply 的 node_id 必须是 n_target，kind 必须是 script；产物须经用户应用。",
+      "script payload: {\"title\":\"...\",\"scenes\":[{\"narration\":\"...\",\"duration\":0}]}；至少一个场景。"
+    ]
+  },
+  "metadata": {
+    "contextVersion": 1,
+    "contextHash": "sha256:1ecc014ba620154ef6e7c44c0f51d08f5b3d6d1679bf44ba40d05c7dee20d494",
+    "estimatorVersion": 1,
+    "estimatedTokens": 1662
+  }
+}

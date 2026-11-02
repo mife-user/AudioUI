@@ -54,7 +54,7 @@ infra         json / claudecli / edgetts / renderer-bridge
 | `domain/entity` | Project、Graph、Node、Round、Run、Pending、Artifact；Chain 为派生视图，不持久化 |
 | `domain/valueobject` | NodeType、Hash、OutputKind、CandidateIndex、ChainPath、ContextVersion、TokenBudget、SceneDSL、Theme、EnvironmentInfo、LogEntry |
 | `domain/event` | 领域事件 |
-| `domain/port` | ProjectStore、ProjectSession、RunStore、PendingStore、ArtifactStore、ArtifactStoreProvider、ConfigStore、M1Migrator、WorkspaceMover、WorkspaceReader、GraphReader、ReplySink、TurnRunner、AgentDriver、RunToolServerFactory、ScopedPathResolver、EventBus、PermissionGate、QuestionGate、Media、CLIProbe、WebView2Probe、LogTailer |
+| `domain/port` | ProjectStore、ProjectSession、RunStore、PendingStore、ArtifactStore、ArtifactStoreProvider、ConfigStore、M1Migrator、WorkspaceMover、WorkspaceReader、RunWorkspaceReader、GraphReader、ReplySink、TurnRunner、AgentDriver、RunToolServerFactory、ScopedPathResolver、EventBus、PermissionGate、QuestionGate、Media、CLIProbe、WebView2Probe、LogTailer |
 | `service/project` | 工程生命周期、迁移、自动保存 |
 | `service/system` | M0 环境自检、最近日志聚合 |
 | `service/run` | 运行生命周期、一次性 Agent 会话、TurnGate、每运行 MCP/token、transcript |
@@ -102,6 +102,8 @@ infra         json / claudecli / edgetts / renderer-bridge
   → 用户点击应用
   → Workflow 校验 ancestorHash/paramsHash，写 artifact、追加轮次、锁定、下游 stale
 ```
+
+M2-04 的 `service/context.Builder` 从工程快照推导真实路径，并要求 `RunWorkspaceReader.Scope()` 与工程、树、目标和路径一致；祖先产物只取最新已应用轮次及对应 topic 候选。上下文只包含工作区文件清单，不读取文本或二进制文件正文。预算降级、三种哈希和清单限制见 ADR-026。`InputHashes` 不读取工作区，供后续待应用校验复用；`ContextEstimate.WithActualInputTokens` 计算实际用量是否超出本次预算，运行级采集与存储由 M2-07 实现。
 
 ### 6.2 渲染
 

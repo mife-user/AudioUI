@@ -433,7 +433,7 @@ v2 引入节点类型注册表：每个类型带 JSON Schema、端口、执行�
 ### 9.1 形态
 
 - Claude Code CLI，`stream-json`；每次节点执行启动**一次性运行**，结束即销毁。
-- App 在发送前构建上下文：祖先链最新轮次、任务参数、工作区清单、输出契约；运行之间不共享 Agent 记忆。
+- App 在发送前构建上下文：祖先链最新轮次、任务参数、工作区清单、输出契约；运行之间不共享 Agent 记忆。目标参数始终完整；超预算时从远到近降级祖先，仍超则拒绝。工作区文件只注入逻辑路径与大小，二进制资源仅引用。
 - MCP 服务运行在 App 内，监听本机 HTTP；**每次运行独立 token**，工具只能访问本链路。
 - App 通过 `control_request / can_use_tool` 处理权限确认。
 
@@ -462,7 +462,7 @@ v1 Claude：`ConversationRewind=false`，`FileRewind=true`。M2 不使用 Resume
 | `get_chain` / `get_graph` / `get_node` | 读取当前路径与节点摘要（含 `parentCandidate`，不含产物正文） |
 | `list_node_types` / `validate` | 类型与参数说明；只校验不写入 |
 | `reply(node_id, kind, payload)` | 生成待应用产物或聊天消息 |
-| `read_artifact(artifactId, offset, limit)` | 按块读取当前运行路径祖先产物（≤16 KiB/次） |
+| `read_artifact(artifactId, offset, limit)` | 按块读取当前运行路径祖先产物（≤16 KiB/次）；topic 只返回该路径所选候选 |
 | `read_file` / `list_dir` / `grep` / `stat` | 安全的只读文件操作 |
 | `ask_user` | 运行内向用户提问 |
 
@@ -572,7 +572,7 @@ steps/n_c → steps/n_b → steps/n_a → <exe>/runtime/
 |---|---|---|
 | stream-json 协议随版本变化 | Agent 面板失效 | 锁 CLI 版本；协议层隔离；失败回退外部终端 |
 | CLI 未安装 | 无法使用 Agent | 启动检测；给出安装指引 |
-| WebCodecs/H.264 不可用 | 无法导出 | 启动探测；回退 WebM |
+| WebCodecs/H.264 不可用 | 无法导出 | 启动探测；不可用时明确阻止 MP4 导出并提示，不以 WebM 替代 |
 | Wails v3 较新 | API 变动 | 锁版本；壳层隔离 |
 | 多运行内存与额度 | 卡顿/超支 | 并发上限 3；M2 单在途；上下文 token 预算 |
 | Agent 输出漂移 | 校验失败 | Schema 校验；结构化错误；人工修复 |

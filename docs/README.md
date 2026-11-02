@@ -13,8 +13,11 @@
 | [dev/process.md](dev/process.md) | 开发 / 产品 | 草案 | 阶段、工作分解、门禁、变更控制 |
 | [dev/roadmap.md](dev/roadmap.md) | 产品 / 开发 | 草案 | 需求优先级、批次、暂存需求池 |
 | [dev/m2-workplan.md](dev/m2-workplan.md) | 开发 | 草案 | M2 逐任务执行手册、开工协议、任务卡与状态 |
+| [dev/m2-backend-closure-plan.md](dev/m2-backend-closure-plan.md) | 开发 | 草案 | M2-05～07 后端闭环实现计划与已确认决策 |
 | [dev/evidence/m0.md](dev/evidence/m0.md) | 产品 / 测试 | 证据 | M0 自测与 GUI 冒烟记录 |
 | [dev/evidence/m1.md](dev/evidence/m1.md) | 产品 / 测试 | 证据 | M1 会话/权限/resume 冒烟记录 |
+| [dev/evidence/m2-03.md](dev/evidence/m2-03.md) | 产品 / 测试 | 证据 | M2-03 工作区与写作用域验收记录（用户已确认） |
+| [dev/evidence/m2-04.md](dev/evidence/m2-04.md) | 产品 / 测试 | 证据 | M2-04 上下文构建器验收记录（用户已确认通过） |
 | [agent-protocol.md](agent-protocol.md) | 开发 | 草案 | MCP 工具、能力位、权限、会话 |
 | [acceptance.md](acceptance.md) | 产品 / 测试 | 草案 | 验收标准与发布门禁 |
 | [decisions.md](decisions.md) | 开发 | 草案 | 架构决策记录 |

@@ -104,10 +104,12 @@ type Capabilities struct {
 | `get_node` | 读 | 当前路径节点参数与轮次元数据（kind/hash），不含产物正文 |
 | `list_node_types` | 读 | `topic` / `prompt` 的类型、参数说明、产出类型 |
 | `validate` | 读 | 只校验 kind/payload，不落盘 |
-| `read_artifact(artifactId, offset, limit)` | 读 | 当前运行路径祖先产物分块读取，单次 ≤16 KiB |
+| `read_artifact(artifactId, offset, limit)` | 读 | 当前运行路径祖先产物分块读取，单次 ≤16 KiB；`topics` 只返回该路径所选候选 |
 | `reply(node_id, kind, payload, request_id?)` | 写消息 | `message` 进对话；`topics`/`script` 生成待应用产物 |
 | `read_file` / `list_dir` / `grep` / `stat` | 读 | 当前运行路径的逻辑叠加视图：当前节点 → 路径祖先 → exe 同级只读 `runtime/`；大小/条数限制；不暴露物理 `steps/` 路径 |
 | `ask_user` | 交互 | 触发 QuestionCard，等待用户选择/输入 |
+
+`read_artifact` 对路径祖先的 `topics` 产物先按路径的 0 基 `parentCandidate` 取出对应候选，再以紧凑 JSON 的 UTF-8 字节作为分块视图；`offset`/`limit` 相对该视图，单次不超过 16 KiB。`artifactId` 仍是原始完整产物的标识，不是过滤后字节的哈希。候选缺失或越界返回 `CANDIDATE_INVALID`，不得回退到整份 `topics`；同一 ID 若有多种祖先匹配，也不能绕过这一限制。该规则由 M2-06 实现并测试。
 
 ### 4.2 后续批次
 
@@ -138,8 +140,11 @@ App 在启动运行前构建并作为首条消息注入：
 
 - `parentCandidate` 为 0 基候选序号（存储与 MCP 参数一致）；上下文中展示给 Agent 时显示为 1 基。
 - 不进上下文：目标自身历史、兄弟分支、子节点历史、其他 topic 树、其他候选、未应用产物。
-- 预算 1,000,000 tokens（`contextTokenBudget`）；超预算从最远祖先「全文 → 摘要 → 引用」降级，仍超返回 `CONTEXT_TOO_LARGE`。
-- 摘要含参数、2,000 tokens 摘录与哈希；引用只含参数与哈希，可通过 `read_artifact` 分块读取。
+- 工作区只注入当前运行路径叠加视图的逻辑文件路径与大小，包含可见的共享 runtime 项；不自动注入任何工作区文件正文，二进制资源仅通过路径引用。清单最多遍历 5,000 个文件/目录、深度 64，超限标记 `truncated`。
+- 预算 1,000,000 tokens（`contextTokenBudget`）；超预算从最远祖先逐个「全文 → 原文摘录 → 引用」降级，直接父最后；目标参数始终完整保留。仍超返回 `CONTEXT_TOO_LARGE`，附最终估算值与预算。
+- 摘录含参数、最多 2,000 估算 tokens 的 UTF-8 安全原文前缀与产物哈希，不调用模型生成摘要；引用保留路径/轮次元数据、参数及产物哈希，可通过 `read_artifact` 分块读取。
+- `estimatorVersion=1`：ASCII 字母、数字、下划线及连续水平空白分别按每 3 字节向上取整，ASCII 标点/换行各计 1，非 ASCII 按 UTF-8 字节数除以 2 向上取整；估算覆盖完整首条消息，包括元数据，不能保证等于实际 CLI 用量。实际 input tokens 和 `overBudget` 在 M2-07 运行完成后记录。
+- `contextHash` 为去掉元数据后的 `context` 主体经 Go `encoding/json` 紧凑序列化字节的 SHA-256；`ancestorHash` 为图路径祖先、已应用产物标识及所选候选的指纹，不含工作区；`paramsHash` 为目标完整参数的指纹（详见 ADR-026）。工作区清单路径/大小变化会改变 `contextHash`，但不会触发祖先哈希冲突；同大小内容变化与清单截断之外的变化不可由清单识别。
 - 上下文不含时间戳/runId；相同图、参数与工作区清单得到相同哈希。
 
 ### 5.2 reply 输入

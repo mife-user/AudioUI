@@ -6,10 +6,14 @@
 
 ## [Unreleased]
 
-M2 图与提示词（进行中：M2-00..02 完成；M2-03 工作区与写作用域待验收）。
+M2 图与提示词（进行中：M2-00..04 已验收；M2-05 Pending 后端未开始）。
 
 ### Added
 
+- M2-04：`service/context.Builder` 从真实路径读取祖先最新已应用产物和对应 topic 候选，生成确定性上下文与 `contextHash`/`ancestorHash`/`paramsHash`。
+- M2-04：保守 token 估算、祖先全文→2,000 tokens 原文摘录→引用降级、完整目标参数及 `CONTEXT_TOO_LARGE` 估算/预算详情；提供实际 usage 超预算比较值对象。
+- M2-04：`RunWorkspaceReader` 作用域校验与工作区逻辑文件清单；文件正文不注入上下文，二进制资源仅引用，清单上限和截断显式标记。
+- M2-04：golden、候选/路径隔离、预算与哈希、真实工作区叠加及文件引用测试；证据见 `docs/dev/evidence/m2-04.md`。
 - M2-02：`service/workflow` 图命令层——`AddNode`（topic 根 / 带父 prompt / 草稿）、`Connect`（改挂确认）、`MoveNode`（位置）、`UpdateNodeParams`、`SelectNode`、`EnsureExecutable`。
 - M2-02：单父树校验（无环、自连、topic 根、草稿父拒绝）、子树 `stale` 传播与 revision 规则；`SelectNode` 不递增 revision、不广播。
 - M2-02：topic 候选端口解析——0 基 `parentCandidate` 从最新已应用 `topics` 产物计数；非法候选返回 `CANDIDATE_INVALID`；父为 prompt/草稿时清空候选。
@@ -37,6 +41,7 @@ M2 图与提示词（进行中：M2-00..02 完成；M2-03 工作区与写作用�
 
 ### Changed
 
+- M2-06 设计：用户确认 `read_artifact` 读取 topic 产物时只返回当前路径所选候选；按过滤后 JSON 分块，暂未实现。
 - M2-02：活动工程以 `ProjectService` 为唯一内存源；workflow 命令通过 `ProjectSession.Save` 持久化并更新活动副本。
 - M2-03：共享只读运行时统一为 exe 同级 `runtime/`，`data/runtime/` 不使用；新增 ADR-025，绿色包、架构、产品、Agent 协议、验收与开发文档同步。
 - M2-01：应用启动时检查并执行 M1 迁移；`data/` 新增 `projects/` 与 `backup/m1/`，原 `sessions.json` 与旧 workspace 保留。
@@ -55,7 +60,7 @@ M2 图与提示词（进行中：M2-00..02 完成；M2-03 工作区与写作用�
 
 ### 说明
 
-- 本节只记录 M2 设计与已实现的 M2-01/M2-02 后端；画布、选题/提示词、运行与待应用 UI 仍待后续任务；完整验收证据在 M2-13 汇总。
+- 本节记录 M2 设计与 M2-01..04 已验收的后端；画布、选题/提示词、运行与待应用 UI 仍待后续任务；M2 整体验收证据在 M2-13 汇总。
 
 ---
 

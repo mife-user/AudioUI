@@ -2,8 +2,8 @@
 
 | 项 | 内容 |
 |---|---|
-| 状态 | 草案（M2 进行中：M2-00..02 完成；M2-03 待验收） |
-| 最后更新 | 2026-11-01 |
+| 状态 | 草案（M2 进行中：M2-00..04 已完成；M2-05 未开始） |
+| 最后更新 | 2026-11-02 |
 | 适用 | 每个新开对话只执行一个 M2 任务 |
 | 关联 | [路线图](roadmap.md)、[流程](process.md)、[PRD](../prd.md)、[架构](../architecture.md)、[协议](../agent-protocol.md)、[验收](../acceptance.md)、[ADR](../decisions.md) |
 
@@ -28,7 +28,7 @@
 | 11 | **锁定后不可再次执行**；M2 的 topic/prompt 每节点最多一个已应用轮次；迭代通过新增下游节点或候选端口分支。 |
 | 12 | **同一父换候选按改挂确认**并标记子树 stale；`SelectNode` 只持久化 `activeNodeId`，不递增图 revision、不广播；派生链由 Go 快照返回。 |
 
-权威文档：模型细节以 `decisions.md` ADR-019..024 为准；需求以 PRD、验收以 acceptance 为准。发现冲突先停下来问用户。
+权威文档：模型细节以 `decisions.md` ADR-019..026 为准；需求以 PRD、验收以 acceptance 为准。发现冲突先停下来问用户。
 
 ---
 
@@ -113,7 +113,8 @@ DoD：分层与不变量未破坏；新增/修改逻辑有测试；任务级门�
 
 ### M2-03 工作区与写作用域
 
-- **状态**：待验收。
+- **状态**：已完成（用户确认验收通过；2026-11-02）。
+- **验收记录**：[M2-03 验收证据](evidence/m2-03.md)（用户已确认验收完成）。
 - **需求 / 验收**：F-03、F-13；不变量 9；AC-M2-11（路径隔离）、AC-M1-2（权限回归）。
 - **依赖**：M2-01（已完成）；M2-02（已验收通过）。
 - **目标**：topic 树 cwd、`steps/<nodeId>`、路径叠加读取、内置文件读写白名单、Bash 残余风险登记；跨树 steps 移动沿用 M2-02 已实现的 mover。
@@ -132,19 +133,21 @@ DoD：分层与不变量未破坏；新增/修改逻辑有测试；任务级门�
 
 ### M2-04 上下文构建器
 
-- **需求 / 验收**：F-04/F-05；AC-M2-8、AC-M2-10、AC-M2-12。
-- **依赖**：M2-01、M2-02。
+- **状态**：已完成（用户审阅并确认验收通过；2026-11-02）。
+- **需求 / 验收**：F-04/F-05；AC-M2-8、AC-M2-10、AC-M2-12 的构建器部分。
+- **依赖**：M2-01、M2-02（已完成）。
 - **目标**：从 topic 根 → 目标节点构建路径上下文；候选解析；token 估算/降级；哈希；工作区清单。
-- **关键设计**：
-  - 路径：topic 根 → 目标；每个祖先取最新已应用轮次（M2 的 topic/prompt 每节点最多 1 轮）；topic 段只带该路径 `parentCandidate` 对应的候选。
-  - 目标只带当前参数；不含自身历史/兄弟/子节点/其他候选/其他树。
-  - 上下文段：运行目标、任务、路径、候选、工作区清单、契约、元数据；不含 runId/时间戳。
-  - 预算 1,000,000 tokens；超出从最远祖先「全文 → 摘要（2,000 tokens 摘录）→ 引用」；目标/直接父最后降级；仍超 `CONTEXT_TOO_LARGE`。
-  - `estimatorVersion=1`；保守估算；运行后记录 actual input tokens/overBudget。
-  - 输出 `contextHash`、`ancestorHash`、`paramsHash`。
-- **文件**：`internal/service/context/{builder,tokens}.go`；domain valueobject。
-- **测试**：golden 上下文；同输入同哈希；候选不同上下文不同；不含目标历史/兄弟；降级顺序；超限；中英混合估算。
-- **风险**：候选解析错位；预算估算偏差；工作区清单变化导致哈希变化。
+- **实现**：
+  - 推导真实路径，祖先只取最新已应用轮次；topic 只带所选候选，目标只带完整当前参数，不带自身历史、兄弟、子节点、其他候选或其他树。
+  - `RunWorkspaceReader.Scope()` 校验工程/树/目标/路径；清单仅包含逻辑路径与大小，不读取工作区文件内容；二进制资源仅引用。清单最多 5,000 个文件/目录、深度 64，截断显式标记。
+  - 默认预算 1,000,000 tokens；超出时从最远祖先逐个「全文 → 2,000 估算 tokens 原文摘录 → 引用」，直接父最后；目标参数始终完整；仍超返回 `CONTEXT_TOO_LARGE` 和估算值/预算。
+  - `estimatorVersion=1` 覆盖完整首条消息；`ContextEstimate.WithActualInputTokens` 可计算 `overBudget`；实际 CLI usage 采集与持久化留 M2-07 接线。
+  - `contextHash` 覆盖上下文主体和工作区清单，`ancestorHash` 覆盖图祖先与候选但不含工作区，`paramsHash` 覆盖目标参数；`InputHashes` 可供 M2-05 校验复用。详见 ADR-026。
+- **文件**：`internal/service/context/`；`internal/domain/valueobject/context.go`；`internal/domain/port/workspace.go`；`internal/infra/workspace/view.go`。
+- **测试**：golden、同输入同哈希、候选分支、路径隔离、降级顺序、完整目标、超限、混合文本估算、清单上限、真实叠加视图与文件正文隔离。
+- **证据与门禁**：[M2-04 自检证据](evidence/m2-04.md)；最终 Go 全量及 vet、前端门禁、临时副本绑定/构建通过；首屏 JS 83.53 kB gzip。
+- **未包含**：待应用校验接线（M2-05）、运行启动与实际 usage 采集/存储（M2-07）、GUI 与 live CLI 端到端验收（M2-13）。
+- **风险**：token 为启发式估算；清单只按路径与大小入 `contextHash`，无法识别同大小内容变化或截断范围外变化。
 
 ### M2-05 Pending 后端
 
@@ -164,16 +167,16 @@ DoD：分层与不变量未破坏；新增/修改逻辑有测试；任务级门�
 
 ### M2-06 MCP 只读图与结构化 reply
 
-- **需求 / 验收**：F-07；AC-M2-3、AC-06。
+- **需求 / 验收**：F-04、F-07；AC-M2-3、AC-M2-12、AC-06。
 - **依赖**：M2-02、M2-05。
 - **目标**：`get_chain`/`get_graph`/`get_node`/`list_node_types`/`validate`/`read_artifact`/`reply`；回合绑定；MCP 跨树访问拒绝；限额。
 - **关键设计**：
   - `reply.node_id` 必须是当前运行目标；kind 匹配：topic→topics、prompt→script；`scene_dsl` → `UNSUPPORTED_UNTIL_M3`。
-  - `get_graph` 返回 parent/parentCandidate 摘要；不返回 selectedTopic；`read_artifact` 只读路径祖先，≤16 KiB/次。
+  - `get_graph` 返回 parent/parentCandidate 摘要；不返回 selectedTopic；`read_artifact` 只读路径祖先，≤16 KiB/次。topic 产物必须先过滤为该路径所选候选的紧凑 JSON，再以其 UTF-8 字节分块；候选无效拒绝，不得回退为完整产物；原 `artifactId` 仍代表完整产物。
   - token 绑定 runId/treeId/nodeId；跨树 `CHAIN_SCOPE_DENIED`；每树 pending ≤50。
   - 不注册写图工具与 `apply_artifact`。
 - **文件**：`internal/infra/agent/mcp/server.go`、`internal/service/workflow` 读取适配、协议 fixture。
-- **测试**：工具列表、入参校验、跨树、回合过期、重复 request_id、无效 Schema、artifact 分块、限额。
+- **测试**：工具列表、入参校验、跨树、回合过期、重复 request_id、无效 Schema、artifact 分块、限额；topic 多候选分块只返回所选候选、无效候选拒绝、相同 ID 不能绕过过滤。
 - **风险**：SDK 工具描述漂移；token 作用域；reply 与 run 竞态。
 
 ### M2-07 运行管理与运行锁
@@ -301,9 +304,9 @@ wails3 build
 | M2-00 设计收口 | 已完成 | ADR/文档/原型；用户确认开工 M2-01 |
 | M2-01 工程存储与迁移 | 已完成 | `internal/infra/persistence`、`internal/service/project`、`internal/handler/project_test.go`、绑定生成；用户确认开始 M2-02 |
 | M2-02 图命令层/改挂/运行锁 | 已完成 | 用户确认 AC-M2-1/6/11 通过；`internal/domain/entity/graph.go`、`internal/service/workflow`、`internal/infra/workspace/mover.go`、`internal/handler/workflow_test.go`、全量 Go/前端/Wails 门禁通过 |
-| M2-03 工作区与写作用域 | 待验收 | `internal/infra/paths/run_guard_test.go`、`internal/infra/workspace/view_test.go`、`internal/infra/agent/mcp/server_test.go`、`internal/service/permission/policy_test.go`；完整门禁见 M2-03 任务卡证据 |
-| M2-04 上下文构建器 | 未开始 | — |
-| M2-05 Pending 后端 | 未开始 | — |
+| M2-03 工作区与写作用域 | 已完成 | [验收证据](evidence/m2-03.md)；用户确认通过（2026-11-02） |
+| M2-04 上下文构建器 | 已完成 | [验收证据](evidence/m2-04.md)；用户确认通过（2026-11-02） |
+| M2-05 Pending 后端 | 未开始 | —（本轮未开始） |
 | M2-06 MCP 只读与 reply | 未开始 | — |
 | M2-07 运行管理 | 未开始 | — |
 | M2-08 前端工作台骨架 | 未开始 | — |
