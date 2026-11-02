@@ -54,13 +54,13 @@ infra         json / claudecli / edgetts / renderer-bridge
 | `domain/entity` | Project、Graph、Node、Round、Run、Pending、Artifact；Chain 为派生视图，不持久化 |
 | `domain/valueobject` | NodeType、Hash、OutputKind、CandidateIndex、ChainPath、ContextVersion、TokenBudget、SceneDSL、Theme、EnvironmentInfo、LogEntry |
 | `domain/event` | 领域事件 |
-| `domain/port` | ProjectStore、ProjectSession/ProjectAccess、RunStore、PendingStore/Provider、ArtifactStore、ArtifactStoreProvider、ContextHasher、ConfigStore、M1Migrator、WorkspaceMover、WorkspaceReader、RunWorkspaceReader、GraphReader、ReplySink、TurnRunner、AgentDriver、RunToolServerFactory、ScopedPathResolver、EventBus、PermissionGate、QuestionGate、Media、CLIProbe、WebView2Probe、LogTailer |
+| `domain/port` | ProjectStore、ProjectSession/ProjectAccess、RunStore、PendingStore/Provider、ArtifactStore、ArtifactStoreProvider、ContextHasher、ConfigStore、M1Migrator、WorkspaceMover、WorkspaceReader、RunWorkspaceReader、GraphReader、ArtifactReader、ReplySink、RunLifecycle、TurnRunner、AgentDriver、RunToolServerFactory、ScopedPathResolver、EventBus、PermissionGate、QuestionGate、Media、CLIProbe、WebView2Probe、LogTailer |
 | `service/project` | 工程生命周期、迁移、自动保存 |
 | `service/system` | M0 环境自检、最近日志聚合 |
 | `service/run` | 运行生命周期、一次性 Agent 会话、TurnGate、每运行 MCP/token、transcript |
 | `service/context` | 路径上下文、候选解析、token 估算与预算、哈希、工作区清单 |
 | `service/permission` | 三档权限、120s 超时、allow-run、审计 |
-| `service/workflow` | 图命令、自由改挂、树校验、运行锁、待应用产物、轮次与锁定 |
+| `service/workflow` | 图命令、自由改挂、树校验、运行锁、待应用产物、轮次与锁定；提供 run-scope 图/节点/产物读取与 pending 创建适配 |
 | `service/render` | 渲染任务、轮次、缓存 |
 | `service/media` | TTS、音频探测、导出 |
 | `infra/media/edgetts` | TTS 适配器 |
@@ -71,7 +71,7 @@ infra         json / claudecli / edgetts / renderer-bridge
 | `infra/logging` | zap + lumberjack、日志 tail |
 | `infra/winmsg` | Wails 启动前的原生错误提示 |
 | `infra/agent/claudecli` | Claude SDK 适配、原生 CLI、一次性运行、工具注入、事件映射 |
-| `infra/agent/mcp` | HTTP MCP 服务、每运行 token、只读图工具、reply |
+| `infra/agent/mcp` | HTTP MCP 服务、每运行 token、路径范围只读图工具、结构化 reply、artifact 分块读取 |
 | `infra/agenthost` | Windows stdio 代理、隐藏窗口、Job Object |
 | `infra/persistence` | `project.json`、`runs.json`/`runs/`、`pending.json`、`pending.txn.json`、artifact、`config.json`、迁移 |
 | `infra/eventbus` | 预留；M2 的 Wails 事件桥仍在 `internal/app/eventbus.go` |
@@ -209,7 +209,8 @@ topic 树 cwd = `data/projects/<id>/trees/<rootTopicId>/`；MCP 逻辑读取顺�
 - 使用 Claude 适配器：`claude-agent-sdk-go v0.10.0` + 原生 `claude.exe` + `--strict-mcp-config`；不使用 SDK 的临时 MCP/stderr 文件。
 - Windows 通过 agent host 代理启动原生 CLI，`CREATE_NO_WINDOW` + Job Object 回收进程树。
 - 运行级会话：App 构建上下文，首条消息注入；不依赖 Agent 记忆，不使用 resume/fork；Adapter 细节留在 `infra/agent/claudecli`。
-- `RunSpec` 注入 M2 工具集与系统提示；`AgentRun` 表示运行内会话；不硬编码 M1 工具列表。
+- `RunSpec` 注入 M2 工具集与系统提示；`AgentRun` 表示运行内会话，不硬编码 M1 工具列表；MCP 工具按 runId/projectId/treeId/nodeId/chainPath 绑定；`get_graph`/`get_node` 只暴露路径快照，`read_artifact` 按祖先轮次授权并对 topic 产物过滤当前候选。
+- `RunLifecycle` 为工具调用提供活动运行租约；pending 创建期间运行终止等待该操作完成。实际 run manager 接线在 M2-07。
 - 权限由 `PreToolUse` 硬门禁 + `CanUseTool` 交互确认；审计独立 `logs/audit.log`，含 runId/treeId/nodeId/chainId。
 - 前端渲染器通过 `RendererPort` 桥接：事件下发任务，完成回调。
 - 能力位为 false 时走降级路径；M2 不依赖 Resume。

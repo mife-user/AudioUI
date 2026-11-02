@@ -6,7 +6,7 @@
 
 ## [Unreleased]
 
-M2 图与提示词（进行中：M2-00..05 已验收；M2-06 未开始）。
+M2 图与提示词（进行中：M2-00..05 已验收；M2-06 实现与自检完成、待验收）。
 
 ### Added
 
@@ -18,6 +18,10 @@ M2 图与提示词（进行中：M2-00..05 已验收；M2-06 未开始）。
 - M2-05：实现 `topics`/`script` Schema 校验、pending 查询、应用与丢弃；应用时校验哈希、写内容寻址 artifact、追加轮次、锁定节点并传播后代 stale。
 - M2-05：新增 `pending.txn.json` 跨文件事务日志与工程加载恢复；修复崩溃窗口下 project revision、pending 索引、原文与 artifact 的一致性。
 - M2-05：新增 request 冲突、Schema/限额、force 限制、discard 幂等、artifact kind 与事务恢复测试；任务自检证据见 `docs/dev/evidence/m2-05.md`。
+- M2-06：新增 run-scoped `get_chain/get_graph/get_node/list_node_types/validate/read_artifact/reply`；图与节点只暴露当前运行路径，保留 M1 MCP 工具兼容。
+- M2-06：结构化 reply 从 MCP 原始 arguments 读取并委托 workflow 创建 pending；无效 Schema 的 JSON payload 保留为 invalid pending，不提供写图或 apply 工具。
+- M2-06：新增路径祖先 artifact 授权、按 round kind 校验、topic 当前候选过滤、UTF-8 安全分块与冲突视图拒绝；单块上限 16 KiB。
+- M2-06：新增 scope/生命周期、raw payload、并发 reply、topic 候选过滤、artifact 分块与工具权限测试；自检证据见 `docs/dev/evidence/m2-06.md`。
 - M2-02：`service/workflow` 图命令层——`AddNode`（topic 根 / 带父 prompt / 草稿）、`Connect`（改挂确认）、`MoveNode`（位置）、`UpdateNodeParams`、`SelectNode`、`EnsureExecutable`。
 - M2-02：单父树校验（无环、自连、topic 根、草稿父拒绝）、子树 `stale` 传播与 revision 规则；`SelectNode` 不递增 revision、不广播。
 - M2-02：topic 候选端口解析——0 基 `parentCandidate` 从最新已应用 `topics` 产物计数；非法候选返回 `CANDIDATE_INVALID`；父为 prompt/草稿时清空候选。
@@ -45,7 +49,7 @@ M2 图与提示词（进行中：M2-00..05 已验收；M2-06 未开始）。
 
 ### Changed
 
-- M2-06 设计：用户确认 `read_artifact` 读取 topic 产物时只返回当前路径所选候选；按过滤后 JSON 分块，暂未实现。
+- M2-06：将 `read_artifact` 的 topic 读取视图定义为当前运行路径所选的单候选对象；分块作用于过滤后的 UTF-8 字节，不回退完整产物。
 - M2-02：活动工程以 `ProjectService` 为唯一内存源；workflow 命令通过 `ProjectSession.Save` 持久化并更新活动副本。
 - M2-03：共享只读运行时统一为 exe 同级 `runtime/`，`data/runtime/` 不使用；新增 ADR-025，绿色包、架构、产品、Agent 协议、验收与开发文档同步。
 - M2-01：应用启动时检查并执行 M1 迁移；`data/` 新增 `projects/` 与 `backup/m1/`，原 `sessions.json` 与旧 workspace 保留。
@@ -64,7 +68,7 @@ M2 图与提示词（进行中：M2-00..05 已验收；M2-06 未开始）。
 
 ### 说明
 
-- 本节记录 M2 设计与 M2-01..05 已验收的后端；画布、选题/提示词、运行与待应用 UI 仍待后续任务；M2 整体验收证据在 M2-13 汇总。
+- 本节记录 M2 设计与 M2-01..06 后端实现；M2-06 待用户验收；画布、选题/提示词 UI、运行生命周期接线与 M2 整体验收仍待后续任务。
 
 ---
 

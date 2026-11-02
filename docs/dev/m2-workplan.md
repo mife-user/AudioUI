@@ -2,7 +2,7 @@
 
 | 项 | 内容 |
 |---|---|
-| 状态 | 草案（M2 进行中：M2-00..05 已验收；M2-06 未开始） |
+| 状态 | 草案（M2 进行中：M2-00..05 已验收；M2-06 待验收） |
 | 最后更新 | 2026-11-02 |
 | 适用 | 每个新开对话只执行一个 M2 任务 |
 | 关联 | [路线图](roadmap.md)、[流程](process.md)、[PRD](../prd.md)、[架构](../architecture.md)、[协议](../agent-protocol.md)、[验收](../acceptance.md)、[ADR](../decisions.md) |
@@ -172,17 +172,22 @@ DoD：分层与不变量未破坏；新增/修改逻辑有测试；任务级门�
 
 ### M2-06 MCP 只读图与结构化 reply
 
-- **需求 / 验收**：F-04、F-07；AC-M2-3、AC-M2-12、AC-06。
-- **依赖**：M2-02、M2-05。
-- **目标**：`get_chain`/`get_graph`/`get_node`/`list_node_types`/`validate`/`read_artifact`/`reply`；回合绑定；MCP 跨树访问拒绝；限额。
-- **关键设计**：
-  - `reply.node_id` 必须是当前运行目标；kind 匹配：topic→topics、prompt→script；`scene_dsl` → `UNSUPPORTED_UNTIL_M3`。
-  - `get_graph` 返回 parent/parentCandidate 摘要；不返回 selectedTopic；`read_artifact` 只读路径祖先，≤16 KiB/次。topic 产物必须先过滤为该路径所选候选的紧凑 JSON，再以其 UTF-8 字节分块；候选无效拒绝，不得回退为完整产物；原 `artifactId` 仍代表完整产物。
-  - token 绑定 runId/treeId/nodeId；跨树 `CHAIN_SCOPE_DENIED`；每树 pending ≤50。
-  - 不注册写图工具与 `apply_artifact`。
-- **文件**：`internal/infra/agent/mcp/server.go`、`internal/service/workflow` 读取适配、协议 fixture。
-- **测试**：工具列表、入参校验、跨树、回合过期、重复 request_id、无效 Schema、artifact 分块、限额；topic 多候选分块只返回所选候选、无效候选拒绝、相同 ID 不能绕过过滤。
-- **风险**：SDK 工具描述漂移；token 作用域；reply 与 run 竞态。
+- **状态**：待验收；M2-07 才接入真实运行生命周期与节点执行入口。
+- **证据**：[M2-06 自检证据](evidence/m2-06.md)。
+- **需求 / 验收**：F-04、F-07；AC-M2-3、AC-M2-12、AC-06（MCP/后端组件级覆盖）。
+- **依赖**：M2-02、M2-05（均已验收）。
+- **实现**：
+  - 新增 `RunScope`、`GraphReader`、`ArtifactReader`、`ReplySink`、`RunLifecycle` 端口；scope 绑定 runId/projectId/treeId/nodeId/chainId/chainPath 与上下文哈希。活动运行租约必须覆盖工具读写，终止不能与 pending 提交竞态。
+  - `get_chain/get_graph/get_node/list_node_types/validate/read_artifact/reply` 仅在 run-scoped MCP 注册；M1 `New` 与 `reply(message)` 保留兼容。图/节点读取只返回当前运行路径，不暴露同树兄弟。
+  - `validate` 复用 M2-05 唯一 Schema 校验器且不落盘；`reply` 与 `validate` 通过 MCP 原始 arguments 取得 payload。结构化 reply 委托 workflow 创建 pending；Schema 无效时仍保留原文为 invalid；不注册写图或 apply 工具。
+  - `reply.node_id` 先校验运行活动，再校验目标：结束运行或路径内非目标节点返回 `TURN_NOT_ACTIVE`，路径外节点返回 `CHAIN_SCOPE_DENIED`。
+  - `read_artifact` 仅授权路径祖先轮次引用，授权以 `Round.Kind` 为准；topic 先过滤当前路径所选候选对象，再紧凑序列化并分页；跨祖先相同 ID 视图冲突时 fail closed。单次 ≤16 KiB，offset/nextOffset 按 UTF-8 字节边界计算；不回退完整 topic 产物。
+  - 新 MCP 工具加入自动允许列表，作用域仍由服务端强制校验；已存在文件/问题工具也在 scoped 服务中验证活动运行租约。
+- **文件**：`internal/domain/port/agent.go`、`internal/service/workflow/{agent_tools,pending}.go`、`internal/infra/agent/mcp/{server,scoped_tools}.go`、`internal/service/permission/policy.go`、`internal/app/{tools,agent,workflow,app}.go` 与测试；`docs/decisions.md` ADR-023、架构、Agent 协议、验收、CHANGELOG。
+- **测试**：完整工具清单与禁止工具；路径图/节点和工程/树 scope；过期运行与结束竞态；raw payload 保真、无效 Schema pending、幂等与并发重复回复；topic 多候选与相同 artifact ID 冲突；round kind 与 artifact meta 冲突；UTF-8 边界、空尾块、非法 offset/limit、16 KiB 上限；权限自动允许与 M1 文件工具回归。
+- **门禁**：`docs/dev/evidence/m2-06.md` 记录实际 Go、vet、bindings、前端、Wails 门禁结果。
+- **未包含**：真实 `RunService`/CLI 的生命周期实现与节点执行接线（M2-07）；前端、GUI/live CLI 端到端 AC 验收（M2-08..13）。
+- **风险**：`RunLifecycle` 的真实租约实现由 M2-07 接线；run-scoped MCP 构造与工具级测试不等于真实 CLI 生命周期验收。
 
 ### M2-07 运行管理与运行锁
 
@@ -312,7 +317,7 @@ wails3 build
 | M2-03 工作区与写作用域 | 已完成 | [验收证据](evidence/m2-03.md)；用户确认通过（2026-11-02） |
 | M2-04 上下文构建器 | 已完成 | [验收证据](evidence/m2-04.md)；用户确认通过（2026-11-02） |
 | M2-05 Pending 后端 | 已完成 | [自检与验收证据](evidence/m2-05.md)；用户已确认验收通过（2026-11-02） |
-| M2-06 MCP 只读与 reply | 未开始 | — |
+| M2-06 MCP 只读与 reply | 待验收 | [自检证据](evidence/m2-06.md) |
 | M2-07 运行管理 | 未开始 | — |
 | M2-08 前端工作台骨架 | 未开始 | — |
 | M2-09 画布与节点交互 | 未开始 | — |

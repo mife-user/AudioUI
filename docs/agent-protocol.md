@@ -99,17 +99,21 @@ type Capabilities struct {
 
 | 工具 | 读写 | 说明 |
 |---|---|---|
-| `get_chain` | 读 | 返回 runId、treeId、chainPath、目标节点、workspace |
-| `get_graph` | 读 | 当前 topic 树摘要（id/type/title/parent/parentCandidate/locked），不含产物正文 |
-| `get_node` | 读 | 当前路径节点参数与轮次元数据（kind/hash），不含产物正文 |
-| `list_node_types` | 读 | `topic` / `prompt` 的类型、参数说明、产出类型 |
-| `validate` | 读 | 只校验 kind/payload，不落盘 |
-| `read_artifact(artifactId, offset, limit)` | 读 | 当前运行路径祖先产物分块读取，单次 ≤16 KiB；`topics` 只返回该路径所选候选 |
-| `reply(node_id, kind, payload, request_id?)` | 写消息 | `message` 进对话；`topics`/`script` 生成待应用产物 |
+| `get_chain` | 读 | 返回 runId、treeId、chainId、chainPath、目标 nodeId 与 workspace |
+| `get_graph` | 读 | 仅返回当前运行路径节点摘要（id/type/title/parent/parentCandidate/locked/stale），不返回路径外节点或产物正文 |
+| `get_node(nodeId)` | 读 | 只读当前运行路径节点的参数与轮次元数据（n/kind/artifactId/pendingId/runId），不含产物正文 |
+| `list_node_types` | 读 | `topic` / `prompt` 的类型、参数名与产出类型 |
+| `validate(kind, payload)` | 读 | 复用 `topics`/`script` 唯一 Schema 校验器，不落盘；`scene_dsl` 返回 `UNSUPPORTED_UNTIL_M3` |
+| `read_artifact(artifactId, offset, limit)` | 读 | 当前运行路径祖先产物分块读取，单次 ≤16 KiB；`topics` 只返回该路径所选候选对象 |
+| `reply(node_id, kind, payload, request_id?)` | 写消息 | `message` 的 payload 为 `{"text":"..."}` 并进入对话；`topics`/`script` 委托 workflow 创建待应用产物 |
 | `read_file` / `list_dir` / `grep` / `stat` | 读 | 当前运行路径的逻辑叠加视图：当前节点 → 路径祖先 → exe 同级只读 `runtime/`；大小/条数限制；不暴露物理 `steps/` 路径 |
 | `ask_user` | 交互 | 触发 QuestionCard，等待用户选择/输入 |
 
-`read_artifact` 对路径祖先的 `topics` 产物先按路径的 0 基 `parentCandidate` 取出对应候选，再以紧凑 JSON 的 UTF-8 字节作为分块视图；`offset`/`limit` 相对该视图，单次不超过 16 KiB。`artifactId` 仍是原始完整产物的标识，不是过滤后字节的哈希。候选缺失或越界返回 `CANDIDATE_INVALID`，不得回退到整份 `topics`；同一 ID 若有多种祖先匹配，也不能绕过这一限制。该规则由 M2-06 实现并测试。
+`get_graph` 和 `get_node` 必须先校验 runId/projectId/treeId/nodeId/chainPath 与当前工程图一致；两者只暴露 `chainPath` 中的节点，路径外（即使同树）统一返回 `CHAIN_SCOPE_DENIED`。路径快照与当前图不一致时 fail closed。`reply` 先校验运行活动状态：运行已结束或 node_id 是路径内非目标节点时返回 `TURN_NOT_ACTIVE`；路径外 node_id 返回 `CHAIN_SCOPE_DENIED`。运行生命周期端口须持有活动运行租约直到写操作结束，避免终止与 pending 提交竞态。
+
+`read_artifact` 仅授权当前运行路径祖先节点任一轮次引用的 artifact；目标节点自身、兄弟、其他树或未引用的 ID 均返回 `CHAIN_SCOPE_DENIED`。授权后以轮次 `kind` 为准（不信任 CAS 首写 `meta.kind`）；同一 artifact ID 若在多个祖先引用但过滤视图不一致，拒绝读取。对 `topics` 轮次，先按路径下一个节点的 0 基 `parentCandidate` 取出单个候选对象，紧凑 JSON 序列化后再分页；不返回 `topics` 外层数组，也不得回退完整产物。`artifactId` 仍标识原始完整产物，其哈希不等于过滤后字节的哈希。缺失/越界候选返回 `CANDIDATE_INVALID`。
+
+`offset`/`limit` 是过滤后 UTF-8 字节视图的零基字节偏移与最大字节数；`limit` 必须大于 0，超过 16 KiB 时按 16 KiB 处理。offset 必须在数据范围内且位于 UTF-8 字符边界；返回 `nextOffset` 为实际下一字节偏移，不拆分字符；limit 小到无法容纳下一个字符时返回 `ARTIFACT_LIMIT_INVALID`。`offset == totalBytes` 返回空块和 `eof=true`。`reply`/`validate` 的 `payload` 使用 MCP 原始 arguments 读取；Schema 无效但 JSON 合法的结构化 payload 进入 M2-05 校验并按原始 payload 留在 invalid pending，传输层 JSON 无法解析时由 MCP 协议拒绝。
 
 ### 4.2 后续批次
 
@@ -337,6 +341,12 @@ workspace:changed { v, revision, reason }
 | `PENDING_ALREADY_APPLIED` | pending 已应用 |
 | `PENDING_LIMIT_REACHED` | topic 树已有 50 条活动 pending |
 | `PENDING_PAYLOAD_TOO_LARGE` | payload 超过 256 KiB |
+| `ARTIFACT_NOT_FOUND` | 已授权的祖先轮次引用了缺失产物 |
+| `ARTIFACT_CORRUPT` | 产物哈希、内容或 Schema 校验失败 |
+| `ARTIFACT_OFFSET_INVALID` | artifact 偏移越界或落在 UTF-8 字符内部 |
+| `ARTIFACT_LIMIT_INVALID` | artifact limit 非正数或无法容纳下一个 UTF-8 字符 |
+| `OUTPUT_KIND_INVALID` | 产出类型无效 |
+| `INVALID_INPUT` | MCP 工具参数缺失或格式错误 |
 | `REQUEST_ID_CONFLICT` | 同一运行的 request_id 被不同请求内容复用 |
 | `BASE_ROUND_CHANGED` | 旧版错误码，M2 由 `CONTEXT_CHANGED` 取代 |
 | `QUESTION_TIMEOUT` | ask_user 超时 |

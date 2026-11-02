@@ -26,7 +26,7 @@ type agentSetup struct {
 	audit      *audit.Logger
 }
 
-func newAgentSetup(layout valueobject.Layout, version string, logger *zap.Logger, bus *wailsEventBus) (*agentSetup, error) {
+func newAgentSetup(layout valueobject.Layout, version string, logger *zap.Logger, bus *wailsEventBus, runTools port.RunToolService) (*agentSetup, error) {
 	guard, err := paths.NewGuard(layout.Root, layout.WorkspaceDir)
 	if err != nil {
 		return nil, err
@@ -61,7 +61,7 @@ func newAgentSetup(layout valueobject.Layout, version string, logger *zap.Logger
 		},
 	})
 	store := persistence.NewSessionStore(layout.SessionsFile)
-	tools := &toolServerFactory{root: layout.Root, workspace: layout.WorkspaceDir, version: version}
+	tools := &toolServerFactory{root: layout.Root, workspace: layout.WorkspaceDir, version: version, runTools: runTools}
 
 	var driver port.AgentDriver
 	if nativeErr == nil {

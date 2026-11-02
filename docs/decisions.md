@@ -202,10 +202,11 @@
 - **决策**：
   - M2 工具面：`get_chain`、`get_graph`、`get_node`、`list_node_types`、`validate`、`read_artifact`、`reply`、`read_file`、`list_dir`、`grep`、`stat`、`ask_user`。
   - 不提供 `create_node`、`connect`、`update_params`、`delete_*`、`apply_artifact`；写图工具登记 RM-016。
-  - `reply` 的 `node_id` 必须是当前运行目标节点；kind 与节点类型匹配；`topics`/`script` 校验后生成 pending；`scene_dsl` 在 M2 返回 `UNSUPPORTED_UNTIL_M3`。
-  - `get_graph` 返回树的节点与 `parent`/`parentCandidate` 摘要；路径链由 App 派生，不返回 selectedTopic。
-  - `read_artifact` 只允许当前运行路径上的祖先产物，按 offset/limit 分块返回，单次 ≤16 KiB，用于预算降级后的按需读取。用户确认：`topics` 仅返回该路径所选候选的 JSON，偏移和长度作用于过滤后的 UTF-8 字节；候选缺失/越界时拒绝，绝不回退到整份产物。`artifactId` 仍标识原始完整产物，其哈希不等于过滤后字节的哈希；在 M2-06 实现。
-  - 每运行独立 bearer token，绑定 runId/treeId（topic 根）/nodeId；跨树访问返回 `CHAIN_SCOPE_DENIED`；payload ≤256 KiB；每个 topic 树的 pending 上限 50。
+  - `reply` 的 `node_id` 必须是当前运行目标节点；运行已结束或节点在路径中但不是目标返回 `TURN_NOT_ACTIVE`，路径外节点返回 `CHAIN_SCOPE_DENIED`；kind 与节点类型匹配；`topics`/`script` 校验后生成 pending；`scene_dsl` 在 M2 返回 `UNSUPPORTED_UNTIL_M3`。结构化 payload 从 MCP 原始 arguments 提取，Schema 无效但 JSON 合法时保留原文为 invalid pending。
+  - `get_graph` 只返回当前运行 `chainPath` 节点的摘要，不暴露同树兄弟或其他树；`get_node` 只读路径内节点参数与轮次元数据；路径快照与当前工程图不一致时 fail closed。
+  - `read_artifact` 只允许路径祖先任一轮次引用，按 round kind 而非 CAS 首写 meta 校验；topic 产物先取下游边所选的单候选对象并紧凑序列化，再按 UTF-8 字节分页。单次 ≤16 KiB；offset 必须位于字符边界；重复 artifact ID 的视图冲突时拒绝；不得回退完整 topics。过滤后视图的哈希不代替原始 `artifactId`。
+  - MCP 工具调用绑定 runId/projectId/treeId/nodeId/chainPath；活动运行租约覆盖读取/写入，运行终止不得与 pending 写入竞态。
+  - 每运行独立 bearer token；结构化 payload ≤256 KiB；每个 topic 树的活动 pending 上限 50。
   - 只读图工具返回摘要与引用，不返回大块产物正文。
 - **理由**：上下文注入已满足主流程；只读工具用于补查；禁止写图保持不变量 5/8。
 - **代价**：Agent 不能主动建图或改参数；需要用户手工操作。

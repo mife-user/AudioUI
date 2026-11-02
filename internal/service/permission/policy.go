@@ -70,7 +70,7 @@ func (p *Policy) Check(_ context.Context, tool string, input map[string]any) por
 		return port.PolicyResult{Decision: port.PolicyAllow, Tier: valueobject.PermissionAutoAllow, Reason: "当前路径只读工具", Paths: paths}
 	case "bash":
 		return p.checkBash(input)
-	case "reply", "ask_user", "get_chain", "read_file", "list_dir", "stat":
+	case "reply", "ask_user", "get_chain", "get_graph", "get_node", "list_node_types", "validate", "read_artifact", "read_file", "list_dir", "stat":
 		if name == "read_file" || name == "list_dir" || name == "stat" {
 			// MCP's WorkspaceReader owns logical overlay validation. Resolving the
 			// same logical path as a physical built-in path would reject valid

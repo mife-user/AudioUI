@@ -3,10 +3,88 @@ package port
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"time"
 
+	"audio-ui/internal/domain/entity"
 	"audio-ui/internal/domain/valueobject"
 )
+
+var (
+	ErrTurnNotActive    = errors.New("TURN_NOT_ACTIVE")
+	ErrChainScopeDenied = errors.New("CHAIN_SCOPE_DENIED")
+	ErrArtifactNotFound = errors.New("ARTIFACT_NOT_FOUND")
+	ErrArtifactCorrupt  = errors.New("ARTIFACT_CORRUPT")
+)
+
+type RunScope struct {
+	RunID        string
+	ProjectID    string
+	TreeID       string
+	NodeID       string
+	ChainID      string
+	ChainPath    []string
+	ContextHash  string
+	AncestorHash string
+	ParamsHash   string
+}
+
+type RunGraphNode struct {
+	ID              string               `json:"id"`
+	Type            valueobject.NodeType `json:"type"`
+	Title           string               `json:"title"`
+	Parent          string               `json:"parent,omitempty"`
+	ParentCandidate *int                 `json:"parentCandidate,omitempty"`
+	Locked          bool                 `json:"locked"`
+	Stale           bool                 `json:"stale"`
+}
+
+type RunRound struct {
+	N          int                    `json:"n"`
+	Kind       valueobject.OutputKind `json:"kind"`
+	ArtifactID string                 `json:"artifactId"`
+	PendingID  string                 `json:"pendingId"`
+	RunID      string                 `json:"runId"`
+}
+
+type RunNode struct {
+	RunGraphNode
+	Params entity.NodeParams `json:"params"`
+	Rounds []RunRound        `json:"rounds"`
+}
+
+type RunGraph struct {
+	Nodes []RunGraphNode `json:"nodes"`
+}
+
+type RunArtifact struct {
+	Kind valueobject.OutputKind
+	Data []byte
+}
+
+type GraphReader interface {
+	ReadRunGraph(ctx context.Context, scope RunScope) (RunGraph, error)
+	ReadRunNode(ctx context.Context, scope RunScope, nodeID string) (RunNode, error)
+}
+
+type ArtifactReader interface {
+	ReadRunArtifact(ctx context.Context, scope RunScope, artifactID string) (RunArtifact, error)
+}
+
+type ReplySink interface {
+	CreateRunPending(ctx context.Context, scope RunScope, kind valueobject.OutputKind, payload []byte, requestID string) (entity.Pending, error)
+}
+
+type RunToolService interface {
+	GraphReader
+	ArtifactReader
+	ReplySink
+}
+
+type RunLifecycle interface {
+	// WithActiveRun holds a run lease until operation returns so termination cannot race writes.
+	WithActiveRun(ctx context.Context, scope RunScope, operation func() error) error
+}
 
 // AgentDriver starts and resumes a concrete agent implementation.
 type AgentDriver interface {
@@ -88,7 +166,7 @@ type ToolServerFactory interface {
 // regression coverage.
 type RunToolServerFactory interface {
 	ToolServerFactory
-	NewForRun(chainID, displayID string, questionGate QuestionGate, onReply func(string), reader WorkspaceReader) (ToolServer, error)
+	NewForRun(scope RunScope, workspace, displayID string, questionGate QuestionGate, onReply func(string), reader WorkspaceReader, lifecycle RunLifecycle) (ToolServer, error)
 }
 
 type AgentPermissionController interface {

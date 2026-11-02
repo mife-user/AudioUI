@@ -41,6 +41,12 @@ func TestPolicyTiers(t *testing.T) {
 		{"mcp__audioui__grep", map[string]any{"pattern": "x", "path": "."}, port.PolicyAllow},
 		{"mcp__audioui__read_file", map[string]any{"path": "notes.md"}, port.PolicyAllow},
 		{"mcp__audioui__ask_user", map[string]any{}, port.PolicyAllow},
+		{"mcp__audioui__get_chain", map[string]any{}, port.PolicyAllow},
+		{"mcp__audioui__get_graph", map[string]any{}, port.PolicyAllow},
+		{"mcp__audioui__get_node", map[string]any{"nodeId": "n_target"}, port.PolicyAllow},
+		{"mcp__audioui__list_node_types", map[string]any{}, port.PolicyAllow},
+		{"mcp__audioui__validate", map[string]any{"kind": "script"}, port.PolicyAllow},
+		{"mcp__audioui__read_artifact", map[string]any{"artifactId": "sha256:..."}, port.PolicyAllow},
 		{"Unknown", map[string]any{}, port.PolicyConfirm},
 	}
 	for _, item := range cases {

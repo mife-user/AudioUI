@@ -18,6 +18,8 @@ import (
 
 type CreatePendingInput struct {
 	RunID        string
+	ProjectID    string
+	TreeID       string
 	ChainID      string
 	ChainPath    []string
 	NodeID       string
@@ -61,6 +63,9 @@ func (s *Service) CreatePending(ctx context.Context, input CreatePendingInput) (
 		if err != nil {
 			return err
 		}
+		if input.ProjectID != "" && input.ProjectID != project.ID {
+			return port.ErrChainScopeDenied
+		}
 		node, err := requireNode(graph, input.NodeID, "node")
 		if err != nil {
 			return err
@@ -80,7 +85,16 @@ func (s *Service) CreatePending(ctx context.Context, input CreatePendingInput) (
 			return err
 		}
 		root, ok := graph.Node(path[0])
-		if !ok || root.Type != valueobject.NodeTypeTopic || !slices.Equal(path, input.ChainPath) {
+		if !ok || root.Type != valueobject.NodeTypeTopic {
+			return fmt.Errorf("%w: pending path does not match node %s", ErrNotInChain, node.ID)
+		}
+		if input.TreeID != "" && root.ID != input.TreeID {
+			return port.ErrChainScopeDenied
+		}
+		if !slices.Equal(path, input.ChainPath) {
+			if input.ProjectID != "" {
+				return port.ErrChainScopeDenied
+			}
 			return fmt.Errorf("%w: pending path does not match node %s", ErrNotInChain, node.ID)
 		}
 		if input.ChainID != "c_"+node.ID {

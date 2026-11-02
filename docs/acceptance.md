@@ -33,7 +33,7 @@
 |---|---|
 | AC-M2-1 | Given 空画布，When 新增/连接/改挂节点，Then 单父、无环、非自身、topic 根校验生效，改挂移动整个子树 |
 | AC-M2-2 | Given 提示词节点已应用首轮，When 尝试编辑内容或再次执行，Then 编辑与执行均被拒绝；可新增提示词节点或分支继续 |
-| AC-M2-3 | Given 一次运行返回结构化结果，When 未点击应用，Then 节点内容不变 |
+| AC-M2-3 | Given 一次运行通过 MCP `reply` 返回结构化结果，When 未点击应用，Then 仅创建 pending、节点内容不变；Schema 无效时原始 payload 与校验错误仍可查询，Agent 不能应用或改图 |
 | AC-M2-4 | Given 点击应用，When 上下文与参数校验通过，Then 产生新轮次且下游标记为待刷新 |
 | AC-M2-5 | Given 多条叶子链，When 切换链路，Then 视图切换且不占并发；另一链运行中执行返回 `BUSY` |
 | AC-M2-6 | Given 已有父的提示词节点，When 端口拖拽改挂（含跨 topic 树或同一 topic 换候选），Then 提示影响面；确认后移动子树（同父换候选不移动子树）并迁移 steps；自连、成环、topic 作子节点被拒；源/目标树运行锁均生效 |
@@ -42,7 +42,7 @@
 | AC-M2-9 | Given 运行中关闭应用，When 重启，Then 该运行标记 `interrupted`，历史可回看，不自动 resume |
 | AC-M2-10 | Given 上下文估算超过 `contextTokenBudget`（默认 1,000,000），When 执行，Then 按祖先从远到近降级、直接父最后；目标参数保持完整；仍超则拒绝并返回估算值与预算 |
 | AC-M2-11 | Given 运行/排队路径，When 编辑该路径节点、改挂或新增子节点，Then 拒绝；路径外兄弟分支可编辑；Agent 内置 Read/Glob/Grep 只可读该运行路径的祖先/当前节点 steps，Write/Edit 只可写当前运行节点 steps；MCP 文件读取只返回当前路径叠加及 exe 同级 runtime 的可见内容，兄弟节点、其他 topic 树与越界内容不可见 |
-| AC-M2-12 | Given topic 的多个候选端口，When 分别连接分支并执行，Then 每条分支的上下文取对应候选；同一候选的分支共享该候选；按引用读取 topic 产物时也只返回该路径所选候选 |
+| AC-M2-12 | Given topic 的多个候选端口，When 分别连接分支并执行，Then 每条分支的上下文取对应候选；同一候选的分支共享该候选；`read_artifact` 只返回该路径所选候选对象，按 UTF-8 字节边界分块，路径外或重复 ID 视图冲突时拒绝 |
 
 > M2 的 topic/prompt 节点应用后即锁定内容与执行，每节点最多一个已应用轮次；继续迭代通过新增下游节点或候选端口分支。`SelectNode` 与快捷栏切换只改视图，不递增图 revision、不广播快照。
 
@@ -122,7 +122,7 @@
 | 上下文 | 路径祖先、候选解析、token 估算、预算降级、哈希 | Go test + golden |
 | 运行 | 一次性会话、TurnGate、中断标记、运行路径锁、每运行 token | Go test + live CLI |
 | 图 | 改挂/子树移动、候选端口、单父/无环/运行锁 | Go test |
-| 协议 | stream-json 事件解析、权限应答、reply/read_artifact | 回放 fixture + MCP 集成 |
+| 协议 | stream-json 事件解析、权限应答、MCP 工具清单/作用域、reply 原始 payload 与 pending、read_artifact 候选过滤/UTF-8 分块/限额/歧义拒绝 | 回放 fixture + MCP 集成 |
 | 渲染 | DSL 解析、golden frame | 截图对比 |
 | 集成 | 工程读写、队列、删除、回收 | Go test + 临时目录 |
 | 手工 | 画布、控制台、导出、剪映导入 | 冒烟清单 |

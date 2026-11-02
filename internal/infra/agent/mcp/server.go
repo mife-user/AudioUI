@@ -33,6 +33,9 @@ type Options struct {
 	QuestionGate    port.QuestionGate
 	OnReply         func(text string)
 	WorkspaceReader port.WorkspaceReader
+	RunScope        *port.RunScope
+	RunTools        port.RunToolService
+	RunLifecycle    port.RunLifecycle
 }
 
 type Server struct {
@@ -47,6 +50,14 @@ type Server struct {
 }
 
 func New(options Options) (*Server, error) {
+	if options.RunScope != nil {
+		scope := *options.RunScope
+		scope.ChainPath = append([]string(nil), options.RunScope.ChainPath...)
+		options.RunScope = &scope
+		if err := validateRunToolOptions(options); err != nil {
+			return nil, err
+		}
+	}
 	reader := options.WorkspaceReader
 	var err error
 	if reader == nil {
@@ -223,8 +234,12 @@ type AskUserOutput struct {
 }
 
 func (s *Server) registerTools() {
-	sdkmcp.AddTool(s.sdk, &sdkmcp.Tool{Name: "get_chain", Description: "Return the active AudioUI chain and workspace."}, s.getChain)
-	sdkmcp.AddTool(s.sdk, &sdkmcp.Tool{Name: "reply", Description: "Send a chat message to the AudioUI session. Only kind=message is supported in M1."}, s.reply)
+	if s.options.RunScope == nil {
+		sdkmcp.AddTool(s.sdk, &sdkmcp.Tool{Name: "get_chain", Description: "Return the active AudioUI chain and workspace."}, s.getChain)
+		sdkmcp.AddTool(s.sdk, &sdkmcp.Tool{Name: "reply", Description: "Send a chat message to the AudioUI session. Only kind=message is supported in M1."}, s.reply)
+	} else {
+		s.registerRunTools()
+	}
 	sdkmcp.AddTool(s.sdk, &sdkmcp.Tool{Name: "read_file", Description: "Read a UTF-8 text file inside the workspace."}, s.readFile)
 	sdkmcp.AddTool(s.sdk, &sdkmcp.Tool{Name: "list_dir", Description: "List a directory inside the workspace."}, s.listDir)
 	sdkmcp.AddTool(s.sdk, &sdkmcp.Tool{Name: "grep", Description: "Search text files inside the workspace with a regular expression."}, s.grep)
@@ -257,7 +272,12 @@ func (s *Server) reply(_ context.Context, _ *sdkmcp.CallToolRequest, input Reply
 
 func (s *Server) readFile(ctx context.Context, _ *sdkmcp.CallToolRequest, input ReadFileInput) (*sdkmcp.CallToolResult, ReadFileOutput, error) {
 	const maxBytes = int64(256 * 1024)
-	read, err := s.reader.ReadFile(ctx, input.Path, maxBytes)
+	var read port.WorkspaceRead
+	err := s.withActiveRun(ctx, func() error {
+		var err error
+		read, err = s.reader.ReadFile(ctx, input.Path, maxBytes)
+		return err
+	})
 	if err != nil {
 		return nil, ReadFileOutput{}, err
 	}
@@ -274,7 +294,12 @@ func (s *Server) listDir(ctx context.Context, _ *sdkmcp.CallToolRequest, input L
 		input.Path = "."
 	}
 	const maxEntries = 200
-	listing, err := s.reader.ListDir(ctx, input.Path, maxEntries)
+	var listing port.WorkspaceList
+	err := s.withActiveRun(ctx, func() error {
+		var err error
+		listing, err = s.reader.ListDir(ctx, input.Path, maxEntries)
+		return err
+	})
 	if err != nil {
 		return nil, ListDirOutput{}, err
 	}
@@ -296,10 +321,15 @@ func (s *Server) grep(ctx context.Context, _ *sdkmcp.CallToolRequest, input Grep
 	if len(input.Pattern) > 256 {
 		return nil, GrepOutput{}, errors.New("pattern too long")
 	}
-	search, err := s.reader.Grep(ctx, input.Pattern, input.Path, port.WorkspaceGrepOptions{
-		MaxHits:      200,
-		MaxFiles:     5000,
-		MaxFileBytes: 512 * 1024,
+	var search port.WorkspaceGrep
+	err := s.withActiveRun(ctx, func() error {
+		var err error
+		search, err = s.reader.Grep(ctx, input.Pattern, input.Path, port.WorkspaceGrepOptions{
+			MaxHits:      200,
+			MaxFiles:     5000,
+			MaxFileBytes: 512 * 1024,
+		})
+		return err
 	})
 	if err != nil {
 		return nil, GrepOutput{}, err
@@ -312,7 +342,12 @@ func (s *Server) grep(ctx context.Context, _ *sdkmcp.CallToolRequest, input Grep
 }
 
 func (s *Server) stat(ctx context.Context, _ *sdkmcp.CallToolRequest, input StatInput) (*sdkmcp.CallToolResult, StatOutput, error) {
-	stat, err := s.reader.Stat(ctx, input.Path)
+	var stat port.WorkspaceStat
+	err := s.withActiveRun(ctx, func() error {
+		var err error
+		stat, err = s.reader.Stat(ctx, input.Path)
+		return err
+	})
 	if err != nil {
 		return nil, StatOutput{}, err
 	}
@@ -334,10 +369,15 @@ func (s *Server) askUser(ctx context.Context, _ *sdkmcp.CallToolRequest, input A
 	if len(input.Options) == 0 && !input.AllowOther {
 		return nil, AskUserOutput{}, errors.New("ask_user needs options or allowOther")
 	}
-	answer, err := s.options.QuestionGate.Ask(ctx, valueobject.QuestionRequest{
-		Question:   input.Question,
-		Options:    input.Options,
-		AllowOther: input.AllowOther,
+	var answer valueobject.QuestionAnswer
+	err := s.withActiveRun(ctx, func() error {
+		var err error
+		answer, err = s.options.QuestionGate.Ask(ctx, valueobject.QuestionRequest{
+			Question:   input.Question,
+			Options:    input.Options,
+			AllowOther: input.AllowOther,
+		})
+		return err
 	})
 	if err != nil {
 		return nil, AskUserOutput{}, err

@@ -15,6 +15,7 @@ import (
 
 type workflowSetup struct {
 	handler *handler.WorkflowService
+	service *workflow.Service
 }
 
 func newWorkflowSetup(layout valueobject.Layout, projectService *project.Service) *workflowSetup {
@@ -28,7 +29,7 @@ func newWorkflowSetup(layout valueobject.Layout, projectService *project.Service
 		Artifacts:     artifactStores,
 		ContextHasher: workflowContextHasher{builder: contextBuilder},
 	})
-	return &workflowSetup{handler: handler.NewWorkflowService(service)}
+	return &workflowSetup{handler: handler.NewWorkflowService(service), service: service}
 }
 
 type workflowContextHasher struct {

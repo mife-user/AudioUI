@@ -88,7 +88,7 @@ func Run(cfg Config) int {
 	workflowSetup := newWorkflowSetup(layout, projectSetup.service)
 
 	bus := newWailsEventBus()
-	agentSetup, err := newAgentSetup(layout, cfg.Version, logger.Zap, bus)
+	agentSetup, err := newAgentSetup(layout, cfg.Version, logger.Zap, bus, workflowSetup.service)
 	if err != nil {
 		logger.Zap.Error("agent setup failed", zap.Error(err))
 		winmsg.Error("AudioUI 启动失败", "Agent 初始化失败: "+err.Error())

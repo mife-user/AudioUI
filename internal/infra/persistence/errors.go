@@ -24,7 +24,7 @@ var (
 	ErrCorruptPendingTransaction  = errors.New("PENDING_TRANSACTION_CORRUPT")
 	ErrPendingTransactionConflict = errors.New("PENDING_TRANSACTION_CONFLICT")
 	ErrPendingConflict            = errors.New("PENDING_CONFLICT")
-	ErrArtifactNotFound           = errors.New("ARTIFACT_NOT_FOUND")
-	ErrArtifactCorrupt            = errors.New("ARTIFACT_CORRUPT")
+	ErrArtifactNotFound           = port.ErrArtifactNotFound
+	ErrArtifactCorrupt            = port.ErrArtifactCorrupt
 	ErrArtifactInvalid            = errors.New("ARTIFACT_INVALID")
 )
