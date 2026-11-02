@@ -263,14 +263,44 @@
   /* ---------- console ---------- */
   .console {
     width: var(--console-w); flex: 0 0 var(--console-w);
-    background: var(--bg-elev); border-left: 1px solid var(--border);
+    background: var(--bg-elev); border-left: 1px solid var(--border-strong);
     display: flex; flex-direction: column; min-height: 0;
   }
   .console-head {
-    height: 40px; flex: 0 0 40px; display: flex; align-items: center; gap: var(--s2);
-    padding: 0 var(--s3); border-bottom: 1px solid var(--border);
+    height: 44px; flex: 0 0 44px; display: flex; align-items: center; gap: var(--s2);
+    padding: 0 var(--s3); border-bottom: 1px solid var(--border-strong);
+    background: var(--panel);
   }
-  .console-title { font-size: 10px; letter-spacing: .12em; color: var(--muted); font-family: var(--mono); }
+  .console-title {
+    font-size: 11px; font-weight: 700; letter-spacing: .12em;
+    color: var(--accent); font-family: var(--mono);
+  }
+  .console-rail { display: none; }
+  .console.collapsed { width: 46px; min-width: 46px; flex: 0 0 46px; }
+  .console.collapsed .console-head,
+  .console.collapsed .console-meta,
+  .console.collapsed .pin-card,
+  .console.collapsed .tabs,
+  .console.collapsed .panel { display: none; }
+  .console.collapsed .console-rail {
+    flex: 1; min-height: 0; display: flex; flex-direction: column;
+    align-items: center; gap: var(--s2); padding: var(--s2) 4px;
+  }
+  .console-rail .rail-pending {
+    min-width: 20px; height: 20px; display: grid; place-items: center;
+    border: 1px solid var(--warn); border-radius: 999px;
+    background: var(--warn-soft); color: var(--warn);
+    font: 10px var(--mono);
+  }
+  .console-rail .rail-chain {
+    max-height: 128px; overflow: hidden; color: var(--text-dim);
+    font-size: 10px; writing-mode: vertical-rl; text-orientation: mixed;
+  }
+  .console-rail .console-rail-title {
+    color: var(--accent); font: 700 10px var(--mono);
+    letter-spacing: .12em; writing-mode: vertical-rl; text-orientation: upright;
+  }
+  .console-rail .btn { margin-top: auto; padding: 4px 7px; font-size: 11px; }
   .console-state { font-size: 11.5px; color: var(--text-dim); }
   .console-head .btn { margin-left: auto; padding: 3px 7px; font-size: 11px; }
   .console-meta {
@@ -391,8 +421,19 @@
 
   @media (max-width: 1279px) {
     .workspace { flex-direction: column; }
-    .console { width: auto; flex: 0 0 260px; border-left: 0; border-top: 1px solid var(--border); }
+    .console { width: auto; flex: 0 0 260px; border-left: 0; border-top: 1px solid var(--border-strong); }
     .console-meta { display: none; }
+    .console.collapsed { width: auto; min-width: 0; flex: 0 0 46px; }
+    .console.collapsed .console-rail {
+      flex-direction: row; align-items: center; padding: 0 var(--s3);
+    }
+    .console.collapsed .console-rail .rail-chain {
+      min-width: 0; max-height: none; flex: 1;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      writing-mode: horizontal-tb;
+    }
+    .console.collapsed .console-rail .console-rail-title { writing-mode: horizontal-tb; }
+    .console.collapsed .console-rail .btn { margin: 0 0 0 auto; }
   }
   @media (prefers-reduced-motion: reduce) {
     * { transition: none !important; animation: none !important; }
@@ -566,12 +607,19 @@
       </div>
     </section>
 
-    <aside class="console" aria-label="Agent 控制台">
+    <aside class="console" id="agentConsole" aria-label="Agent 控制台">
+      <div class="console-rail" role="group" aria-label="收起的 Agent 控制台">
+        <span class="dot" id="consoleRailDot" role="img" aria-label="Agent 空闲"></span>
+        <span class="rail-pending" id="consoleRailPendingCount" aria-label="待处理 1 项">1</span>
+        <span class="rail-chain" id="consoleRailChainName">路径 候选1 → 分镜 A</span>
+        <span class="console-rail-title" aria-hidden="true">AGENT</span>
+        <button class="btn ghost" id="expandConsole" type="button" title="展开控制台" aria-label="展开 Agent 控制台" aria-expanded="false" aria-controls="agentConsole">›</button>
+      </div>
       <div class="console-head">
         <span class="dot" id="consoleDot"></span>
         <span class="console-title">AGENT</span>
         <span class="console-state" id="consoleState">空闲</span>
-        <button class="btn ghost" title="收起控制台">‹</button>
+        <button class="btn ghost" id="collapseConsole" type="button" title="收起控制台" aria-label="收起 Agent 控制台" aria-expanded="true" aria-controls="agentConsole">‹</button>
       </div>
       <div class="console-meta">
         <span class="chain-name" id="consoleChainName">路径 候选1 → 分镜 A</span>
@@ -683,6 +731,19 @@
     toast.classList.add("show");
     clearTimeout(toastTimer);
     toastTimer = setTimeout(function () { toast.classList.remove("show"); }, 2600);
+  }
+
+  function setConsoleCollapsed(collapsed) {
+    var consolePanel = document.getElementById("agentConsole");
+    if (!consolePanel) return;
+    consolePanel.classList.toggle("collapsed", collapsed);
+    var expanded = String(!collapsed);
+    var collapseButton = document.getElementById("collapseConsole");
+    var expandButton = document.getElementById("expandConsole");
+    if (collapseButton) collapseButton.setAttribute("aria-expanded", expanded);
+    if (expandButton) expandButton.setAttribute("aria-expanded", expanded);
+    var focusTarget = collapsed ? expandButton : collapseButton;
+    if (focusTarget) focusTarget.focus();
   }
 
   var runState = null;
@@ -818,11 +879,22 @@
     });
     var chainName = document.getElementById("consoleChainName");
     var chainIdEl = document.getElementById("consoleChainId");
+    var railChainName = document.getElementById("consoleRailChainName");
     if (activeCard) {
-      if (chainName) chainName.textContent = activeCard.getAttribute("data-label");
+      var selectedChainName = activeCard.getAttribute("data-label");
+      if (chainName) chainName.textContent = selectedChainName;
+      if (railChainName) {
+        railChainName.textContent = selectedChainName;
+        railChainName.title = selectedChainName;
+      }
       if (chainIdEl) chainIdEl.textContent = "c_" + nodeDemoId(node);
     } else {
-      if (chainName) chainName.textContent = "草稿 · 未连接";
+      var draftChainName = "草稿 · 未连接";
+      if (chainName) chainName.textContent = draftChainName;
+      if (railChainName) {
+        railChainName.textContent = draftChainName;
+        railChainName.title = draftChainName;
+      }
       if (chainIdEl) chainIdEl.textContent = "—";
     }
     renderEdges();
@@ -981,6 +1053,11 @@
     document.getElementById("pendingCard").hidden = !pendingOpen;
     document.getElementById("pendingEmpty").hidden = pendingOpen;
     document.getElementById("pendingCount").textContent = pendingOpen ? "1" : "0";
+    var railPendingCount = document.getElementById("consoleRailPendingCount");
+    if (railPendingCount) {
+      railPendingCount.textContent = pendingOpen ? "1" : "0";
+      railPendingCount.setAttribute("aria-label", pendingOpen ? "待处理 1 项" : "没有待处理产物");
+    }
     document.getElementById("consoleBadge").textContent = pendingOpen ? "待处理 1" : "待处理 0";
     document.getElementById("consoleBadge").hidden = !pendingOpen;
     document.getElementById("pinCard").hidden = !pendingOpen;
@@ -1077,10 +1154,15 @@
     var state = document.getElementById("agentState");
     var consoleState = document.getElementById("consoleState");
     var dot = document.getElementById("agentDot");
+    var railDot = document.getElementById("consoleRailDot");
     var toggle = document.getElementById("toggleRun");
     if (state) state.textContent = on ? "Agent 运行中" : "Agent 空闲";
     if (consoleState) consoleState.textContent = on ? "运行中" : "空闲";
     if (dot) dot.classList.toggle("warn", on);
+    if (railDot) {
+      railDot.classList.toggle("warn", on);
+      railDot.setAttribute("aria-label", on ? "Agent 运行中" : "Agent 空闲");
+    }
     if (toggle) {
       toggle.textContent = on ? "结束运行" : "模拟运行";
       toggle.setAttribute("aria-pressed", String(on));
@@ -1186,6 +1268,13 @@
     updateQuickbarCount();
     showToast("运行已结束：路径锁释放（演示）");
   }
+
+  document.getElementById("collapseConsole").addEventListener("click", function () {
+    setConsoleCollapsed(true);
+  });
+  document.getElementById("expandConsole").addEventListener("click", function () {
+    setConsoleCollapsed(false);
+  });
 
   document.getElementById("toggleRun").addEventListener("click", function () {
     if (runState) {
