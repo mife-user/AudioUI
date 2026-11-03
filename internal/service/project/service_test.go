@@ -143,6 +143,49 @@ func TestServiceOpenSwitchesAndPersists(t *testing.T) {
 	}
 }
 
+func TestProjectChangeCallbackCarriesCommittedIdentityAndRevision(t *testing.T) {
+	layout := testLayout(t.TempDir())
+	var changes []struct {
+		id       string
+		revision int64
+	}
+	service := New(Options{
+		Layout: layout, Config: persistence.NewConfigStore(layout.ConfigFile),
+		Projects: persistence.NewProjectStore(layout),
+		OnChange: func(id string, revision int64) {
+			changes = append(changes, struct {
+				id       string
+				revision int64
+			}{id: id, revision: revision})
+		},
+	})
+	if err := service.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	first, err := service.New(context.Background(), "甲")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := service.New(context.Background(), "乙")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Open(context.Background(), first.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Open(context.Background(), first.ID); err != nil {
+		t.Fatal(err)
+	}
+	if len(changes) != 3 || changes[0].id != first.ID || changes[1].id != second.ID || changes[2].id != first.ID {
+		t.Fatalf("project callbacks = %+v", changes)
+	}
+	for _, change := range changes {
+		if change.revision != 1 {
+			t.Fatalf("project callback revision = %+v, want initial graph revision 1", change)
+		}
+	}
+}
+
 func TestProjectSwitchIsRejectedWhileRunIsActive(t *testing.T) {
 	service := newTestService(testLayout(t.TempDir()))
 	if err := service.Start(context.Background()); err != nil {

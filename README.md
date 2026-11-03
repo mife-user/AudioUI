@@ -19,9 +19,11 @@
 | [M0 启动自检壳](docs/design/m0-startup-shell.html) | M0 临时界面原型 |
 | [M1 会话页](docs/design/m1-session-shell.html) | M1 临时会话/控制台原型（M2 已删除） |
 | [M2 工作台](docs/design/m2-workspace.html) | M2 画布、草稿节点、运行分组原型 |
+| [M2 选题闭环演示](docs/design/m2-topic-closure-demo.html) | 工作台至选题分支的本地交互演示 |
 | [开发流程](docs/dev/process.md) | 阶段、工作分解、门禁、变更控制 |
 | [路线图](docs/dev/roadmap.md) | 需求优先级、里程碑批次、暂存需求池 |
 | [M2 逐任务执行手册](docs/dev/m2-workplan.md) | M2 开工协议、任务卡、DoR/DoD 与状态 |
+| [M2 选题闭环计划](docs/dev/m2-topic-closure-plan.md) | 工作台、画布、选题与待应用的逐项实现和验收计划 |
 | [Agent 协议](docs/agent-protocol.md) | MCP 工具、能力位、权限、会话、分叉与删除 |
 | [验收标准](docs/acceptance.md) | Given-When-Then、测试矩阵、发布门禁 |
 | [决策记录](docs/decisions.md) | ADR 列表 |

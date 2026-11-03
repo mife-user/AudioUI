@@ -59,8 +59,8 @@ func newPendingHarness(t *testing.T, project entity.Project) *pendingHarness {
 		Pending:       pendingStoreProvider{store: pendingStore},
 		Artifacts:     &fakeArtifactProvider{store: artifactStore},
 		ContextHasher: hasher,
-		OnChange: func(revision int64, reason string) {
-			*changes = append(*changes, changeCall{revision: revision, reason: reason})
+		OnChange: func(projectID string, revision int64, reason string) {
+			*changes = append(*changes, changeCall{projectID: projectID, revision: revision, reason: reason})
 		},
 	})
 	return &pendingHarness{service: service, session: session, pending: pendingStore, artifacts: artifactStore, hasher: hasher, changes: changes}
@@ -118,8 +118,46 @@ func TestCreatePendingPreservesInvalidOutputAndRequestIdentity(t *testing.T) {
 	if err != nil || !bytes.Equal(detail.RawPayload, invalidPayload) {
 		t.Fatalf("raw payload changed: %q err=%v", detail.RawPayload, err)
 	}
-	if len(*h.changes) != 2 || (*h.changes)[1].reason != ChangeReasonPending {
+	if len(*h.changes) != 2 || (*h.changes)[1].projectID != h.session.project.ID || (*h.changes)[1].reason != ChangeReasonPending {
 		t.Fatalf("pending change events = %+v", *h.changes)
+	}
+}
+
+func TestWorkspaceViewContainsDerivedChainsPendingAndProjectRunLocks(t *testing.T) {
+	h := newPendingHarness(t, baseProject())
+	input := pendingInput("r_workspace", "n_a", []string{"n_topic", "n_a"}, valueobject.OutputKindScript, validScriptPayload())
+	pending, err := h.service.CreatePending(context.Background(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	view, err := h.service.WorkspaceView(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.Project.ID != h.session.project.ID || view.Project.Revision != h.session.project.Revision {
+		t.Fatalf("workspace project = %+v", view.Project)
+	}
+	if len(view.Chains) != 2 || view.Chains[0].ID != "c_n_b" || view.Chains[1].ID != "c_n_c" {
+		t.Fatalf("derived chains = %+v", view.Chains)
+	}
+	if len(view.Pending) != 1 || view.Pending[0].ID != pending.ID {
+		t.Fatalf("pending summaries = %+v", view.Pending)
+	}
+	if err := h.service.AcquireRunLock(context.Background(), "r_workspace_lock", "n_topic", "n_a", []string{"n_topic", "n_a"}); err != nil {
+		t.Fatal(err)
+	}
+	view, err = h.service.WorkspaceView(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(view.LockedNodeIDs) != 2 || view.LockedNodeIDs[0] != "n_a" || view.LockedNodeIDs[1] != "n_topic" {
+		t.Fatalf("project locked nodes = %+v", view.LockedNodeIDs)
+	}
+	if len(view.RunLocks) != 1 || view.RunLocks[0].RunID != "r_workspace_lock" || len(view.RunLocks[0].ChainPath) != 2 {
+		t.Fatalf("workspace run locks = %+v", view.RunLocks)
+	}
+	if got := (*h.changes)[len(*h.changes)-1]; got.projectID != h.session.project.ID || got.reason != ChangeReasonRunLock {
+		t.Fatalf("run lock event = %+v", got)
 	}
 }
 

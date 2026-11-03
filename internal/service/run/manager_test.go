@@ -78,9 +78,191 @@ func TestStartRunUsesOneShotSpecAndPersistsTerminalUsage(t *testing.T) {
 		t.Fatalf("missing run events: %d", len(events))
 	}
 	for _, event := range events {
-		if event.RunID != record.ID || event.TreeID != "n_topic" || event.NodeID != "n_topic" || !slices.Equal(event.ChainPath, []string{"n_topic"}) {
+		if event.RunID != record.ID || event.ProjectID != "p_test" || event.TreeID != "n_topic" || event.NodeID != "n_topic" || !slices.Equal(event.ChainPath, []string{"n_topic"}) {
 			t.Fatalf("run event identity missing: %+v", event)
 		}
+	}
+}
+
+func TestStartHandlesRunEndingBeforeDriverStartReturns(t *testing.T) {
+	h := newRunHarness(t)
+	h.driver.startEvents = []valueobject.AgentEvent{{
+		Type:  valueobject.EventStatus,
+		State: &valueobject.AgentState{Status: valueobject.SessionIdle},
+	}}
+	record, err := h.manager.Start(context.Background(), "n_topic")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, func() bool { return !h.manager.IsBusy() })
+	stored, err := h.store.Load(context.Background(), record.ID)
+	if err != nil || stored.Status != valueobject.RunSucceeded {
+		t.Fatalf("early terminal run = %+v, err=%v", stored.RunSummary, err)
+	}
+	events := h.publisher.snapshot()
+	if len(events) < 3 || events[len(events)-1].Status != valueobject.RunSucceeded {
+		t.Fatalf("early terminal events = %+v", events)
+	}
+}
+
+func TestRunSnapshotRecoversTranscriptRequestsAndTerminalSequence(t *testing.T) {
+	h := newRunHarness(t)
+	record, err := h.manager.Start(context.Background(), "n_topic")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.driver.spec.EventSink(valueobject.AgentEvent{
+		Type:    valueobject.EventMessage,
+		Message: &valueobject.TranscriptItem{ID: "stream", Kind: valueobject.TranscriptMessage, Role: "assistant", Text: "hello ", Streaming: true},
+	})
+	h.driver.spec.EventSink(valueobject.AgentEvent{
+		Type:    valueobject.EventMessage,
+		Message: &valueobject.TranscriptItem{ID: "stream", Kind: valueobject.TranscriptMessage, Role: "assistant", Text: "world", Streaming: true},
+	})
+	h.driver.spec.EventSink(valueobject.AgentEvent{
+		Type:       valueobject.EventPermission,
+		Permission: &valueobject.PermissionRequest{ID: "perm_one", Tool: "Write", Paths: []string{"a.txt"}},
+	})
+	h.driver.spec.EventSink(valueobject.AgentEvent{
+		Type:     valueobject.EventQuestion,
+		Question: &valueobject.QuestionRequest{ID: "question_one", Question: "Continue?", Options: []string{"yes"}},
+	})
+	snapshot, err := h.manager.GetSnapshot(context.Background(), record.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.ProjectID != "p_test" || snapshot.RunID != record.ID || snapshot.LastSeq == 0 {
+		t.Fatalf("run snapshot identity/sequence = %+v", snapshot)
+	}
+	if len(snapshot.Run.Transcript) != 1 || snapshot.Run.Transcript[0].Text != "hello world" {
+		t.Fatalf("snapshot transcript = %+v", snapshot.Run.Transcript)
+	}
+	if len(snapshot.Permissions) != 1 || snapshot.Permissions[0].ID != "perm_one" || len(snapshot.Questions) != 1 || snapshot.Questions[0].ID != "question_one" {
+		t.Fatalf("snapshot requests = permissions %+v questions %+v", snapshot.Permissions, snapshot.Questions)
+	}
+	beforeResolveSeq := snapshot.LastSeq
+	if err := h.manager.RespondPermission(record.ID, "perm_one", valueobject.DecisionAllow); err != nil {
+		t.Fatal(err)
+	}
+	h.permissions.resolved("permission", "perm_one")
+	resolved, err := h.manager.GetSnapshot(context.Background(), record.ID)
+	if err != nil || resolved.LastSeq != beforeResolveSeq+1 || len(resolved.Permissions) != 0 {
+		t.Fatalf("permission response snapshot = %+v, err=%v", resolved, err)
+	}
+	if err := h.manager.RespondQuestion(record.ID, "question_one", valueobject.QuestionAnswer{Answer: "yes", Via: "option"}); err != nil {
+		t.Fatal(err)
+	}
+	h.permissions.resolved("question", "question_one")
+	snapshot, err = h.manager.GetSnapshot(context.Background(), record.ID)
+	if err != nil || len(snapshot.Permissions) != 0 || len(snapshot.Questions) != 0 {
+		t.Fatalf("resolved request snapshot = %+v, err=%v", snapshot, err)
+	}
+	actual := 24
+	h.driver.spec.EventSink(valueobject.AgentEvent{Type: valueobject.EventStatus, State: &valueobject.AgentState{Status: valueobject.SessionIdle}, ActualInputTokens: &actual})
+	waitFor(t, func() bool { return !h.manager.IsBusy() })
+	snapshot, err = h.manager.GetSnapshot(context.Background(), record.ID)
+	if err != nil || snapshot.Run.Status != valueobject.RunSucceeded || len(snapshot.Permissions) != 0 || len(snapshot.Questions) != 0 {
+		t.Fatalf("terminal snapshot = %+v, err=%v", snapshot, err)
+	}
+	events := h.publisher.snapshot()
+	if len(events) == 0 || snapshot.LastSeq != events[len(events)-1].Seq {
+		t.Fatalf("terminal lastSeq=%d, final event=%+v", snapshot.LastSeq, events)
+	}
+	for i, event := range events {
+		if event.Seq != uint64(i+1) || event.ProjectID != "p_test" {
+			t.Fatalf("event sequence/identity at %d = %+v", i, event)
+		}
+	}
+	restarted := New(Options{
+		Projects:  h.projects,
+		RunStores: &fakeRunStores{stores: map[string]*memoryRunStore{"p_test": h.store}},
+	})
+	historical, err := restarted.GetSnapshot(context.Background(), record.ID)
+	if err != nil || historical.Run.Status != valueobject.RunSucceeded || historical.LastSeq != 0 || len(historical.Permissions) != 0 || len(historical.Questions) != 0 {
+		t.Fatalf("restarted historical snapshot = %+v, err=%v", historical, err)
+	}
+}
+
+func TestConcurrentStreamEventsMatchSnapshotSequenceAtomically(t *testing.T) {
+	h := newRunHarness(t)
+	record, err := h.manager.Start(context.Background(), "n_topic")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const fragments = 64
+	var writers sync.WaitGroup
+	for i := 0; i < fragments; i++ {
+		writers.Add(1)
+		go func() {
+			defer writers.Done()
+			h.driver.spec.EventSink(valueobject.AgentEvent{
+				Type:    valueobject.EventMessage,
+				Message: &valueobject.TranscriptItem{ID: "concurrent", Kind: valueobject.TranscriptMessage, Role: "assistant", Text: "x", Streaming: true},
+			})
+		}()
+	}
+	writers.Wait()
+	snapshot, err := h.manager.GetSnapshot(context.Background(), record.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot.Run.Transcript) != 1 || len(snapshot.Run.Transcript[0].Text) != fragments {
+		t.Fatalf("stream snapshot transcript = %+v", snapshot.Run.Transcript)
+	}
+	events := h.publisher.snapshot()
+	if len(events) != fragments+2 || snapshot.LastSeq != events[len(events)-1].Seq {
+		t.Fatalf("snapshot seq=%d, event count=%d, last=%+v", snapshot.LastSeq, len(events), events[len(events)-1])
+	}
+	for i, event := range events {
+		if event.Seq != uint64(i+1) {
+			t.Fatalf("event sequence[%d] = %d", i, event.Seq)
+		}
+	}
+}
+
+func TestRunEventPublisherCanReenterRequestResolution(t *testing.T) {
+	h := newRunHarness(t)
+	record, err := h.manager.Start(context.Background(), "n_topic")
+	if err != nil {
+		t.Fatal(err)
+	}
+	publisher := &resolvingRunPublisher{manager: h.manager, result: make(chan error, 1)}
+	h.manager.opts.Publisher = publisher
+	done := make(chan struct{})
+	go func() {
+		h.driver.spec.EventSink(valueobject.AgentEvent{
+			Type:       valueobject.EventPermission,
+			Permission: &valueobject.PermissionRequest{ID: "perm_reentrant", Tool: "Write"},
+		})
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("event publisher reentry deadlocked request resolution")
+	}
+	if err := <-publisher.result; err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := h.manager.GetSnapshot(context.Background(), record.ID)
+	if err != nil || len(snapshot.Permissions) != 0 {
+		t.Fatalf("reentrant resolution snapshot = %+v, err=%v", snapshot, err)
+	}
+}
+
+func TestRunSnapshotRejectsActiveRunOutsideCurrentProject(t *testing.T) {
+	h := newRunHarness(t)
+	record, err := h.manager.Start(context.Background(), "n_topic")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.projects.project.ID = "p_other"
+	if _, err := h.manager.GetSnapshot(context.Background(), record.ID); !errors.Is(err, ErrRunNotFound) {
+		t.Fatalf("cross-project snapshot error = %v, want RUN_NOT_FOUND", err)
+	}
+	h.projects.project.ID = "p_test"
+	if err := h.manager.Interrupt(context.Background(), record.ID); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -582,15 +764,19 @@ func (p *fakeRunPermissions) Close() {
 }
 
 type fakeDriver struct {
-	spec     port.DriverSpec
-	session  *fakeAgentSession
-	startErr error
+	spec        port.DriverSpec
+	session     *fakeAgentSession
+	startEvents []valueobject.AgentEvent
+	startErr    error
 }
 
 func (d *fakeDriver) Start(_ context.Context, spec port.DriverSpec) (port.AgentSession, error) {
 	d.spec = spec
 	if d.startErr != nil {
 		return nil, d.startErr
+	}
+	for _, event := range d.startEvents {
+		spec.EventSink(event)
 	}
 	return d.session, nil
 }
@@ -616,6 +802,21 @@ func (s *fakeAgentSession) Close() error { s.closed = true; return nil }
 type fakeRunPublisher struct {
 	mu     sync.Mutex
 	events []valueobject.RunEvent
+}
+
+type resolvingRunPublisher struct {
+	manager *Manager
+	result  chan error
+	once    sync.Once
+}
+
+func (p *resolvingRunPublisher) PublishRun(event valueobject.RunEvent) {
+	if event.Type != valueobject.EventPermission || event.Permission == nil {
+		return
+	}
+	p.once.Do(func() {
+		p.result <- p.manager.RespondPermission(event.RunID, event.Permission.ID, valueobject.DecisionAllow)
+	})
 }
 
 func (p *fakeRunPublisher) snapshot() []valueobject.RunEvent {

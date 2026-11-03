@@ -159,6 +159,7 @@ type RunEvent struct {
 	Version           int                `json:"v"`
 	Seq               uint64             `json:"seq"`
 	RunID             string             `json:"runId"`
+	ProjectID         string             `json:"projectId"`
 	TreeID            string             `json:"treeId"`
 	ChainID           string             `json:"chainId"`
 	NodeID            string             `json:"nodeId"`
@@ -174,6 +175,15 @@ type RunEvent struct {
 	PendingID         string             `json:"pendingId,omitempty"`
 	Error             *AgentError        `json:"error,omitempty"`
 	ActualInputTokens *int               `json:"actualInputTokens,omitempty"`
+}
+
+// WorkspaceChanged is the process-local invalidation event for workspace
+// snapshots. ProjectRevision is the durable graph/pending revision.
+type WorkspaceChanged struct {
+	ProjectID       string `json:"projectId"`
+	Revision        uint64 `json:"revision"`
+	Reason          string `json:"reason"`
+	ProjectRevision int64  `json:"projectRevision"`
 }
 
 const (

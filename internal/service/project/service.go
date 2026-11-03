@@ -26,6 +26,7 @@ type Options struct {
 	Config   port.ConfigStore
 	Projects port.ProjectStore
 	Migrator port.M1Migrator
+	OnChange func(projectID string, projectRevision int64)
 	Logf     func(format string, args ...any)
 }
 
@@ -150,6 +151,9 @@ func (s *Service) New(ctx context.Context, name string) (entity.Project, error) 
 	s.mu.Lock()
 	s.active = &project
 	s.mu.Unlock()
+	if s.opts.OnChange != nil {
+		s.opts.OnChange(project.ID, project.Revision)
+	}
 	return project.Clone(), nil
 }
 
@@ -164,6 +168,12 @@ func (s *Service) Open(ctx context.Context, id string) (entity.Project, error) {
 	if err := s.ensureCanSwitch(id); err != nil {
 		return entity.Project{}, err
 	}
+	s.mu.Lock()
+	previousID := ""
+	if s.active != nil {
+		previousID = s.active.ID
+	}
+	s.mu.Unlock()
 	if err := s.configError(); err != nil {
 		return entity.Project{}, err
 	}
@@ -179,6 +189,9 @@ func (s *Service) Open(ctx context.Context, id string) (entity.Project, error) {
 	s.mu.Lock()
 	s.active = &project
 	s.mu.Unlock()
+	if previousID != project.ID && s.opts.OnChange != nil {
+		s.opts.OnChange(project.ID, project.Revision)
+	}
 	return project.Clone(), nil
 }
 

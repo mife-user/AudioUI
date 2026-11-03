@@ -3,6 +3,7 @@ package workflow
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sort"
 
 	"audio-ui/internal/domain/entity"
@@ -10,11 +11,13 @@ import (
 )
 
 type runLock struct {
-	RunID   string
-	TreeID  string
-	NodeID  string
-	Path    []string
-	Members map[string]struct{}
+	RunID           string
+	ProjectID       string
+	ProjectRevision int64
+	TreeID          string
+	NodeID          string
+	Path            []string
+	Members         map[string]struct{}
 }
 
 // AcquireRunLock records the topic-root-to-target path of an in-flight run.
@@ -37,7 +40,7 @@ func (s *Service) AcquireRunLock(ctx context.Context, runID, treeID, nodeID stri
 	if len(chainPath) == 0 || chainPath[0] != treeID || chainPath[len(chainPath)-1] != nodeID {
 		return fmt.Errorf("%w: chainPath must run from tree root to target", ErrNotInChain)
 	}
-	_, graph, err := s.loadCurrent(ctx)
+	project, graph, err := s.loadCurrent(ctx)
 	if err != nil {
 		return err
 	}
@@ -62,7 +65,11 @@ func (s *Service) AcquireRunLock(ctx context.Context, runID, treeID, nodeID stri
 			return fmt.Errorf("%w: chainPath is not a parent path", ErrNotInChain)
 		}
 	}
-	s.recordRunLock(runID, treeID, nodeID, chainPath)
+	if existing, ok := s.locks[runID]; ok && existing.ProjectID == project.ID && existing.TreeID == treeID && existing.NodeID == nodeID && slices.Equal(existing.Path, chainPath) {
+		return nil
+	}
+	s.recordRunLock(runID, project.ID, project.Revision, treeID, nodeID, chainPath)
+	s.changedWithReason(project.ID, project.Revision, ChangeReasonRunLock)
 	return nil
 }
 
@@ -105,7 +112,8 @@ func (s *Service) BeginRun(ctx context.Context, runID, nodeID string) (entity.Pr
 	if err := validateRunPath(graph, root, nodeID, chainPath); err != nil {
 		return entity.Project{}, nil, err
 	}
-	s.recordRunLock(runID, root, nodeID, chainPath)
+	s.recordRunLock(runID, project.ID, project.Revision, root, nodeID, chainPath)
+	s.changedWithReason(project.ID, project.Revision, ChangeReasonRunLock)
 	return project.Clone(), append([]string(nil), chainPath...), nil
 }
 
@@ -134,7 +142,7 @@ func validateRunPath(graph *entity.Graph, treeID, nodeID string, chainPath []str
 	return nil
 }
 
-func (s *Service) recordRunLock(runID, treeID, nodeID string, chainPath []string) {
+func (s *Service) recordRunLock(runID, projectID string, projectRevision int64, treeID, nodeID string, chainPath []string) {
 	members := make(map[string]struct{}, len(chainPath))
 	for _, id := range chainPath {
 		members[id] = struct{}{}
@@ -143,8 +151,8 @@ func (s *Service) recordRunLock(runID, treeID, nodeID string, chainPath []string
 		s.locks = make(map[string]runLock)
 	}
 	s.locks[runID] = runLock{
-		RunID: runID, TreeID: treeID, NodeID: nodeID,
-		Path: append([]string(nil), chainPath...), Members: members,
+		RunID: runID, ProjectID: projectID, ProjectRevision: projectRevision,
+		TreeID: treeID, NodeID: nodeID, Path: append([]string(nil), chainPath...), Members: members,
 	}
 }
 
@@ -154,7 +162,12 @@ func (s *Service) ReleaseRunLock(ctx context.Context, runID string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	lock, exists := s.locks[runID]
+	if !exists {
+		return nil
+	}
 	delete(s.locks, runID)
+	s.changedWithReason(lock.ProjectID, lock.ProjectRevision, ChangeReasonRunLock)
 	return nil
 }
 
@@ -162,8 +175,22 @@ func (s *Service) ReleaseRunLock(ctx context.Context, runID string) error {
 func (s *Service) LockedNodeIDs() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.lockedNodeIDsLocked("")
+}
+
+// LockedNodeIDsForProject returns only locks associated with one project.
+func (s *Service) LockedNodeIDsForProject(projectID string) []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.lockedNodeIDsLocked(projectID)
+}
+
+func (s *Service) lockedNodeIDsLocked(projectID string) []string {
 	union := make(map[string]struct{})
 	for _, lock := range s.locks {
+		if projectID != "" && lock.ProjectID != projectID {
+			continue
+		}
 		for id := range lock.Members {
 			union[id] = struct{}{}
 		}

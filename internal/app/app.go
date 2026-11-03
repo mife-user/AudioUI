@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"audio-ui/internal/infra/logging"
 	"audio-ui/internal/infra/paths"
 	"audio-ui/internal/infra/winmsg"
+	"audio-ui/internal/service/project"
 	"audio-ui/internal/service/system"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -84,10 +86,18 @@ func Run(cfg Config) int {
 	systemService := system.New(layout, cfg.Version, cliProbe, webviewProbe, logger.Tailer)
 	systemHandler := handler.NewSystemService(systemService)
 
-	projectSetup := newProjectSetup(layout, logger.Zap)
-	workflowSetup := newWorkflowSetup(layout, projectSetup.service)
-
 	bus := newWailsEventBus()
+	workspaceCoordinator := newWorkspaceCoordinator(bus)
+	projectSetup := newProjectSetup(layout, logger.Zap, workspaceCoordinator.ProjectChanged)
+	workflowSetup := newWorkflowSetup(layout, projectSetup.service, workspaceCoordinator.WorkflowChanged)
+	if activeProject, err := projectSetup.service.Current(context.Background()); err == nil {
+		workspaceCoordinator.Initialize(activeProject.ID, activeProject.Revision)
+	} else {
+		workspaceCoordinator.Initialize("", 0)
+		if !errors.Is(err, project.ErrNoActiveProject) {
+			logger.Zap.Warn("workspace initial project unavailable", zap.Error(err))
+		}
+	}
 	agentSetup := newAgentSetup(layout)
 	runSetup, err := newRunSetup(layout, cfg.Version, logger.Zap, bus, projectSetup.service, workflowSetup.service)
 	if err != nil {
@@ -95,6 +105,7 @@ func Run(cfg Config) int {
 		winmsg.Error("AudioUI 启动失败", "运行管理初始化失败: "+err.Error())
 		return 1
 	}
+	workspaceHandler := handler.NewWorkspaceService(workflowSetup.service, runSetup.manager, workspaceCoordinator)
 
 	var mainWindow atomic.Pointer[application.WebviewWindow]
 	var pendingFocus atomic.Bool
@@ -108,6 +119,7 @@ func Run(cfg Config) int {
 			application.NewService(workflowSetup.handler),
 			application.NewService(agentSetup.handler),
 			application.NewService(runSetup.handler),
+			application.NewService(workspaceHandler),
 		},
 		Assets: application.AssetOptions{
 			Handler: application.AssetFileServerFS(cfg.Assets),

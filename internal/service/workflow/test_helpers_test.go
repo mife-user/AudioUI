@@ -98,8 +98,9 @@ func (m *fakeMover) MoveSubtree(ctx context.Context, projectID, sourceRootID, ta
 }
 
 type changeCall struct {
-	revision int64
-	reason   string
+	projectID string
+	revision  int64
+	reason    string
 }
 
 func intPtr(value int) *int {
@@ -188,8 +189,8 @@ func newHarness(t *testing.T, project entity.Project) *harness {
 			"n_topic": 3, "n_topic2": 3,
 		}},
 		Workspace: mover,
-		OnChange: func(revision int64, reason string) {
-			*changes = append(*changes, changeCall{revision: revision, reason: reason})
+		OnChange: func(projectID string, revision int64, reason string) {
+			*changes = append(*changes, changeCall{projectID: projectID, revision: revision, reason: reason})
 		},
 	})
 	return &harness{service: service, session: session, mover: mover, changes: changes}

@@ -19,6 +19,7 @@ const (
 	ChangeReasonGraph   = "graph"
 	ChangeReasonPending = "pending"
 	ChangeReasonRun     = "run"
+	ChangeReasonRunLock = "run_lock"
 )
 
 type Options struct {
@@ -28,7 +29,7 @@ type Options struct {
 	Pending       port.PendingStoreProvider
 	Artifacts     port.ArtifactStoreProvider
 	ContextHasher port.ContextHasher
-	OnChange      func(revision int64, reason string)
+	OnChange      func(projectID string, revision int64, reason string)
 }
 
 type Service struct {
@@ -119,7 +120,7 @@ func (s *Service) AddNode(ctx context.Context, input AddNodeInput) (entity.Proje
 	if err != nil {
 		return entity.Project{}, err
 	}
-	s.changed(saved.Revision)
+	s.changed(saved.ID, saved.Revision)
 	return saved, nil
 }
 
@@ -215,7 +216,7 @@ func (s *Service) Connect(ctx context.Context, parentID, childID string, parentC
 		}
 		return entity.Project{}, err
 	}
-	s.changed(saved.Revision)
+	s.changed(saved.ID, saved.Revision)
 	return saved, nil
 }
 
@@ -245,7 +246,7 @@ func (s *Service) MoveNode(ctx context.Context, id string, x, y float64) (entity
 	if err != nil {
 		return entity.Project{}, err
 	}
-	s.changed(saved.Revision)
+	s.changed(saved.ID, saved.Revision)
 	return saved, nil
 }
 
@@ -289,7 +290,7 @@ func (s *Service) UpdateNodeParams(ctx context.Context, id, title string, params
 	if err != nil {
 		return entity.Project{}, err
 	}
-	s.changed(saved.Revision)
+	s.changed(saved.ID, saved.Revision)
 	return saved, nil
 }
 
@@ -345,17 +346,27 @@ func (s *Service) SelectNode(ctx context.Context, id string) (entity.Project, er
 	return saved, nil
 }
 
-func (s *Service) changed(revision int64) {
-	s.changedWithReason(revision, ChangeReasonGraph)
+func (s *Service) changed(projectID string, revision int64) {
+	s.changedWithReason(projectID, revision, ChangeReasonGraph)
 }
 
-func (s *Service) changedPending(revision int64) {
-	s.changedWithReason(revision, ChangeReasonPending)
+func (s *Service) changedPending(projectID string, revision int64) {
+	s.changedWithReason(projectID, revision, ChangeReasonPending)
 }
 
-func (s *Service) changedWithReason(revision int64, reason string) {
+func (s *Service) changedWithReason(projectID string, revision int64, reason string) {
+	s.changedForProject(projectID, revision, reason)
+}
+
+func (s *Service) changedForProject(projectID string, revision int64, reason string) {
+	for runID, lock := range s.locks {
+		if lock.ProjectID == projectID {
+			lock.ProjectRevision = revision
+			s.locks[runID] = lock
+		}
+	}
 	if s.opts.OnChange != nil {
-		s.opts.OnChange(revision, reason)
+		s.opts.OnChange(projectID, revision, reason)
 	}
 }
 

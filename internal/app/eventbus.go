@@ -9,11 +9,12 @@ import (
 )
 
 type wailsEventBus struct {
-	mu          sync.Mutex
-	app         *application.App
-	pending     []valueobject.AgentEvent
-	pendingRuns []valueobject.RunEvent
-	started     bool
+	mu               sync.Mutex
+	app              *application.App
+	pending          []valueobject.AgentEvent
+	pendingRuns      []valueobject.RunEvent
+	pendingWorkspace []valueobject.WorkspaceChanged
+	started          bool
 }
 
 func newWailsEventBus() *wailsEventBus {
@@ -27,18 +28,29 @@ func (b *wailsEventBus) SetApp(app *application.App) {
 }
 
 func (b *wailsEventBus) Start() {
-	b.mu.Lock()
-	b.started = true
-	pending := b.pending
-	pendingRuns := b.pendingRuns
-	b.pending = nil
-	b.pendingRuns = nil
-	b.mu.Unlock()
-	for _, event := range pending {
-		b.emit(event)
-	}
-	for _, event := range pendingRuns {
-		b.emitRun(event)
+	for {
+		b.mu.Lock()
+		pending := b.pending
+		pendingRuns := b.pendingRuns
+		pendingWorkspace := b.pendingWorkspace
+		b.pending = nil
+		b.pendingRuns = nil
+		b.pendingWorkspace = nil
+		if len(pending) == 0 && len(pendingRuns) == 0 && len(pendingWorkspace) == 0 {
+			b.started = true
+			b.mu.Unlock()
+			return
+		}
+		b.mu.Unlock()
+		for _, event := range pending {
+			b.emit(event)
+		}
+		for _, event := range pendingRuns {
+			b.emitRun(event)
+		}
+		for _, event := range pendingWorkspace {
+			b.emitWorkspace(event)
+		}
 	}
 }
 
@@ -70,6 +82,20 @@ func (b *wailsEventBus) PublishRun(event valueobject.RunEvent) {
 	b.emitRun(event)
 }
 
+func (b *wailsEventBus) PublishWorkspace(event valueobject.WorkspaceChanged) {
+	b.mu.Lock()
+	if b.app == nil || !b.started {
+		b.pendingWorkspace = append(b.pendingWorkspace, event)
+		if len(b.pendingWorkspace) > 1000 {
+			b.pendingWorkspace = b.pendingWorkspace[len(b.pendingWorkspace)-1000:]
+		}
+		b.mu.Unlock()
+		return
+	}
+	b.mu.Unlock()
+	b.emitWorkspace(event)
+}
+
 func (b *wailsEventBus) emit(event valueobject.AgentEvent) {
 	b.mu.Lock()
 	app := b.app
@@ -89,4 +115,14 @@ func (b *wailsEventBus) emitRun(event valueobject.RunEvent) {
 		return
 	}
 	app.Event.Emit("run:"+string(event.Type), event)
+}
+
+func (b *wailsEventBus) emitWorkspace(event valueobject.WorkspaceChanged) {
+	b.mu.Lock()
+	app := b.app
+	b.mu.Unlock()
+	if app == nil {
+		return
+	}
+	app.Event.Emit("workspace:changed", event)
 }

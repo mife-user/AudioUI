@@ -97,7 +97,7 @@ infra         json / claudecli / edgetts / renderer-bridge
   → RunService 获取全局 TurnGate，Workflow 原子验证并锁定 topic 根到目标节点的路径快照
   → ContextService 从同一工程快照构建路径上下文（候选端口解析 + 最新轮次 + 任务 + 工作区清单 + 契约）
   → 创建 per-run MCP 配置、MCP 服务、权限/问题 broker 和一次性 Agent 会话
-  → 持久化运行记录并发布带 runId/treeId/chainPath/seq 的 `run:<type>` 事件
+  → 持久化运行记录并发布带 projectId/runId/treeId/chainPath/seq 的 `run:<type>` 事件
   → 适配器解析 stream-json
   → reply(kind) 经 Workflow 校验后写入 pending（无效也保留原文）
   → UI 提示待应用
@@ -137,14 +137,21 @@ UI / handler
   → 校验：单父树、无环、自连、topic 根、候选端口、锁定与运行路径
   → Connect 需要改挂时确认；跨树先移动子树 steps（可回滚）
   → 成功后 revision+1（SelectNode 除外）并原子保存 project.json
-  → OnChange(revision, "graph")；SelectNode 不广播
+  → OnChange(projectId, revision, "graph")；SelectNode 不广播
 ```
 
-- 图写入只在 `service/workflow`，handler 只做参数转换；`ProjectSession.Save` 是唯一持久化入口。
+- 图写入只在 `service/workflow`，handler 只做参数转换；`ProjectSession.Save` 是唯一持久化入口。变更回调带写入快照所属的 projectId，不在 workflow 锁内二次查询当前工程。
 - `parentCandidate` 为 0 基；候选数量从父 topic 最新已应用 `topics` 产物读取，不复制到 project.json。
 - `AcquireRunLock` 记录 topic 根 → 运行节点的真实父子路径；路径节点与共享祖先只读，路径外分支可编辑。`EnsureExecutable` 拒绝内容锁定、运行路径与草稿节点。
 - `SelectNode` 只写 `activeNodeId`，不递增 revision、不触发 `OnChange`。
-- 链由 `entity.Graph.LeafChains` 派生（`c_<tail>`），不落盘；快照在 M2-08 接入。
+- 链由 `entity.Graph.LeafChains` 派生（`c_<tail>`），不落盘；M2-08A 的 `WorkspaceView` 与 `GetWorkspaceSnapshot` 组合节点、pending 摘要、run 摘要、派生链和路径锁。
+
+### 6.5 工作台快照与事件同步
+
+- `workspace:changed` 的工程 ID 来自 project 生命周期回调、workflow 已保存的工程副本或运行锁记录；原因限定为 `project`、`graph`、`pending`、`run_lock`。事件携带当前持久化 `projectRevision`。
+- 外层工作台 `revision` 由应用进程内协调器递增，不落盘，也不替代 `project.revision`。快照组装前后核对工作台版本和工程 ID；读取期间发生相关变化时重试，持续变化则返回 `WORKSPACE_CHANGED`。
+- workflow 在同一命令锁下读取图、pending 索引、`Graph.LeafChains` 与锁集合；pending 摘要不含正文。运行历史通过明确的 projectId 读取，并叠加活动运行内存状态；锁已取得但运行记录尚未落盘时提供临时 starting 摘要。
+- `GetRunSnapshot` 在同一 run 状态锁下复制记录、事件 `lastSeq` 和未决权限/问题请求。事件序号与 transcript、请求、pending ID、状态更新一起提交；Wails 发布在 run 状态锁释放后进行，事件发布按 run 序号串行化。序号不写入 `runs.json`。
 
 ## 7. 存储
 
@@ -217,7 +224,7 @@ topic 树 cwd = `data/projects/<id>/trees/<rootTopicId>/`；MCP 逻辑读取顺�
 - `RunSpec` 注入 M2 工具集与系统提示；`AgentRun` 表示运行内会话，不硬编码 M1 工具列表；MCP 工具按 runId/projectId/treeId/nodeId/chainPath 绑定；`get_graph`/`get_node` 只暴露路径快照，`read_artifact` 按祖先轮次授权并对 topic 产物过滤当前候选。
 - `RunLifecycle` 为 MCP 工具调用提供活动运行租约；Agent 事件和权限应答也受运行租约保护。终止先拒绝新租约，等待已开始的操作结束，再关闭 CLI/MCP、删配置并释放图锁与全局 TurnGate。
 - 每运行创建独立权限/问题 broker；权限由 `PreToolUse` 硬门禁 + `CanUseTool` 交互确认。审计独立 `logs/audit.log`，含 runId/treeId/nodeId/chainId。
-- `RunService` 暴露启动、历史列表/详情、中断、权限应答和问题应答；工程切换在运行期间返回 `BUSY`。M2-08 再接入前端 store 与事件订阅。
+- `RunService` 暴露启动、历史列表/详情、`GetRunSnapshot`、中断、权限应答和问题应答；工程切换在运行期间返回 `BUSY`。M2-08B 接入前端 store 与事件订阅。
 - 前端渲染器通过 `RendererPort` 桥接：事件下发任务，完成回调。
 - 能力位为 false 时走降级路径；M2 不依赖 Resume。
 
