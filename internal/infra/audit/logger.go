@@ -36,6 +36,9 @@ func (l *Logger) Record(ctx context.Context, record port.AuditRecord) error {
 	payload := map[string]any{
 		"ts":         time.Now().Format(time.RFC3339),
 		"event":      record.Event,
+		"run_id":     record.RunID,
+		"tree_id":    record.TreeID,
+		"node_id":    record.NodeID,
 		"chain_id":   record.ChainID,
 		"session_id": record.SessionID,
 		"request_id": record.RequestID,

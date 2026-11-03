@@ -19,7 +19,8 @@
 | [dev/evidence/m2-03.md](dev/evidence/m2-03.md) | 产品 / 测试 | 证据 | M2-03 工作区与写作用域验收记录（用户已确认） |
 | [dev/evidence/m2-04.md](dev/evidence/m2-04.md) | 产品 / 测试 | 证据 | M2-04 上下文构建器验收记录（用户已确认通过） |
 | [dev/evidence/m2-05.md](dev/evidence/m2-05.md) | 产品 / 测试 | 证据 | M2-05 Pending 后端自检与验收记录（用户已确认通过） |
-| [dev/evidence/m2-06.md](dev/evidence/m2-06.md) | 产品 / 测试 | 证据 | M2-06 MCP 只读图、结构化 reply 与 artifact 分块自检记录（待用户验收） |
+| [dev/evidence/m2-06.md](dev/evidence/m2-06.md) | 产品 / 测试 | 证据 | M2-06 MCP 只读图、结构化 reply 与 artifact 分块自检及验收记录 |
+| [dev/evidence/m2-07.md](dev/evidence/m2-07.md) | 产品 / 测试 | 证据 | M2-07 运行管理与运行锁自检及验收记录 |
 | [agent-protocol.md](agent-protocol.md) | 开发 | 草案 | MCP 工具、能力位、权限、会话 |
 | [acceptance.md](acceptance.md) | 产品 / 测试 | 草案 | 验收标准与发布门禁 |
 | [decisions.md](decisions.md) | 开发 | 草案 | 架构决策记录 |

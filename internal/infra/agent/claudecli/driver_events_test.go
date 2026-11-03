@@ -39,6 +39,58 @@ func lastEvent(t *testing.T, rec *eventRecorder) valueobject.AgentEvent {
 	return rec.events[len(rec.events)-1]
 }
 
+func TestActualInputTokenUsageIncludesCachedInput(t *testing.T) {
+	message := struct {
+		Usage struct {
+			InputTokens              int `json:"input_tokens"`
+			CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+			CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+		} `json:"usage"`
+	}{}
+	message.Usage.InputTokens = 20
+	message.Usage.CacheCreationInputTokens = 5
+	message.Usage.CacheReadInputTokens = 15
+	actual := actualInputTokenUsage(message)
+	if actual == nil || *actual != 40 {
+		t.Fatalf("actual input tokens = %v, want 40", actual)
+	}
+}
+
+func TestFirstAssistantUsageWinsAcrossToolTurns(t *testing.T) {
+	session := &agentSession{}
+	first := struct {
+		Usage struct {
+			InputTokens              int `json:"input_tokens"`
+			CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+			CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+		} `json:"usage"`
+	}{}
+	first.Usage.InputTokens = 25
+	first.Usage.CacheCreationInputTokens = 5
+	session.captureFirstInputUsage(first)
+
+	later := struct {
+		Usage struct {
+			InputTokens int `json:"input_tokens"`
+		} `json:"usage"`
+	}{}
+	later.Usage.InputTokens = 900
+	session.captureFirstInputUsage(later)
+
+	actual := session.firstInputUsage()
+	if actual == nil || *actual != 30 {
+		t.Fatalf("first request input tokens = %v, want 30", actual)
+	}
+}
+
+func TestMissingAssistantUsageRemainsUnknown(t *testing.T) {
+	session := &agentSession{}
+	session.captureFirstInputUsage(struct{}{})
+	if actual := session.firstInputUsage(); actual != nil {
+		t.Fatalf("missing usage was reported as %d", *actual)
+	}
+}
+
 func TestStreamDeltasShareMessageID(t *testing.T) {
 	rec := &eventRecorder{}
 	session := newEventSession(rec)

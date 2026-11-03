@@ -43,6 +43,7 @@ type View struct {
 	writeDir      string
 	chainPath     []string
 	layers        []viewLayer
+	runGuard      *paths.RunGuard
 	allowAbsolute bool
 }
 
@@ -102,6 +103,7 @@ func NewRunView(layout valueobject.Layout, projectID, treeID, nodeID string, cha
 		writeDir:  runGuard.WriteDir(),
 		chainPath: runGuard.ChainPath(),
 		layers:    make([]viewLayer, 0, len(chainPath)+1),
+		runGuard:  runGuard,
 	}
 	for i := len(chainPath) - 1; i >= 0; i-- {
 		stepDir, stepErr := projectPaths.StepDir(treeID, chainPath[i])
@@ -197,6 +199,13 @@ func newViewLayer(root string) (viewLayer, error) {
 func (v *View) TreeDir() string     { return v.treeDir }
 func (v *View) WriteDir() string    { return v.writeDir }
 func (v *View) ChainPath() []string { return append([]string(nil), v.chainPath...) }
+func (v *View) CWD() string         { return v.treeDir }
+func (v *View) Resolver() port.ScopedPathResolver {
+	if v.runGuard == nil {
+		return nil
+	}
+	return v.runGuard
+}
 
 // Scope is empty for the legacy direct view, which is not a run-scoped
 // overlay and must not be used to construct M2 path context.

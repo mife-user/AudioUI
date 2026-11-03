@@ -90,6 +90,17 @@ func TestPermissionTimeoutDenies(t *testing.T) {
 	}
 }
 
+func TestClosedRunBrokerRejectsNewRequests(t *testing.T) {
+	service := newTestService(t, time.Second, &fakeAudit{})
+	service.Close()
+	if _, err := service.Request(context.Background(), valueobject.PermissionRequest{Tool: "Write"}); err == nil || err.Error() != "PERMISSION_BROKER_CLOSED" {
+		t.Fatalf("Request after Close error = %v", err)
+	}
+	if _, err := service.Ask(context.Background(), valueobject.QuestionRequest{Question: "continue?"}); err == nil || err.Error() != "QUESTION_GATE_CLOSED" {
+		t.Fatalf("Ask after Close error = %v", err)
+	}
+}
+
 func TestAuditFailureFailsClosed(t *testing.T) {
 	audit := &fakeAudit{err: errors.New("audit down")}
 	service := newTestService(t, time.Second, audit)

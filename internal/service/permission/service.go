@@ -24,6 +24,9 @@ var (
 
 type Options struct {
 	ChainID   string
+	RunID     string
+	TreeID    string
+	NodeID    string
 	SessionID string
 	Paths     port.PathResolver
 	Audit     port.AuditSink
@@ -42,6 +45,7 @@ type Service struct {
 	allowedSession map[string]bool
 	sessionID      string
 	onResolved     func(kind, id string)
+	closed         bool
 	counter        atomic.Uint64
 }
 
@@ -124,6 +128,9 @@ func (s *Service) Check(ctx context.Context, tool string, input map[string]any) 
 	}
 	err := s.audit(ctx, port.AuditRecord{
 		Event:     "permission",
+		RunID:     s.options.RunID,
+		TreeID:    s.options.TreeID,
+		NodeID:    s.options.NodeID,
 		ChainID:   s.options.ChainID,
 		SessionID: s.currentSessionID(),
 		Tool:      tool,
@@ -160,6 +167,10 @@ func (s *Service) Request(ctx context.Context, request valueobject.PermissionReq
 	}
 	pending := &pendingPermission{request: request, result: make(chan valueobject.PermissionDecision, 1)}
 	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return valueobject.DecisionDeny, errors.New("PERMISSION_BROKER_CLOSED")
+	}
 	s.pending[request.ID] = pending
 	s.mu.Unlock()
 
@@ -204,6 +215,10 @@ func (s *Service) Ask(ctx context.Context, request valueobject.QuestionRequest) 
 	}
 	pending := &pendingQuestion{request: request, result: make(chan valueobject.QuestionAnswer, 1)}
 	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return valueobject.QuestionAnswer{}, errors.New("QUESTION_GATE_CLOSED")
+	}
 	if len(s.questions) > 0 {
 		s.mu.Unlock()
 		return valueobject.QuestionAnswer{}, errors.New("QUESTION_BUSY: only one question may be pending")
@@ -245,6 +260,7 @@ func (s *Service) ResolveQuestion(id string, answer valueobject.QuestionAnswer) 
 
 func (s *Service) Close() {
 	s.mu.Lock()
+	s.closed = true
 	pending := s.pending
 	questions := s.questions
 	s.pending = map[string]*pendingPermission{}
@@ -269,6 +285,9 @@ func (s *Service) finishPermission(ctx context.Context, request valueobject.Perm
 	effective := decision
 	record := port.AuditRecord{
 		Event:     "permission",
+		RunID:     s.options.RunID,
+		TreeID:    s.options.TreeID,
+		NodeID:    s.options.NodeID,
 		ChainID:   s.options.ChainID,
 		SessionID: s.currentSessionID(),
 		RequestID: request.ID,
@@ -285,6 +304,9 @@ func (s *Service) finishPermission(ctx context.Context, request valueobject.Perm
 		effective = valueobject.DecisionDeny
 		_ = s.audit(context.Background(), port.AuditRecord{
 			Event:     "permission",
+			RunID:     s.options.RunID,
+			TreeID:    s.options.TreeID,
+			NodeID:    s.options.NodeID,
 			ChainID:   s.options.ChainID,
 			SessionID: s.currentSessionID(),
 			RequestID: request.ID,

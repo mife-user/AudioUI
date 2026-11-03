@@ -90,3 +90,15 @@ type RunWorkspaceReader interface {
 	WorkspaceReader
 	Scope() WorkspaceScope
 }
+
+// RunWorkspace combines the path-scoped MCP overlay with the physical cwd and
+// the stricter resolver used by native Agent tools.
+type RunWorkspace interface {
+	RunWorkspaceReader
+	CWD() string
+	Resolver() ScopedPathResolver
+}
+
+type RunWorkspaceProvider interface {
+	OpenRun(ctx context.Context, projectID, treeID, nodeID string, chainPath []string) (RunWorkspace, error)
+}

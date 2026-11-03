@@ -88,10 +88,11 @@ func Run(cfg Config) int {
 	workflowSetup := newWorkflowSetup(layout, projectSetup.service)
 
 	bus := newWailsEventBus()
-	agentSetup, err := newAgentSetup(layout, cfg.Version, logger.Zap, bus, workflowSetup.service)
+	agentSetup := newAgentSetup(layout)
+	runSetup, err := newRunSetup(layout, cfg.Version, logger.Zap, bus, projectSetup.service, workflowSetup.service)
 	if err != nil {
-		logger.Zap.Error("agent setup failed", zap.Error(err))
-		winmsg.Error("AudioUI 启动失败", "Agent 初始化失败: "+err.Error())
+		logger.Zap.Error("run setup failed", zap.Error(err))
+		winmsg.Error("AudioUI 启动失败", "运行管理初始化失败: "+err.Error())
 		return 1
 	}
 
@@ -106,6 +107,7 @@ func Run(cfg Config) int {
 			application.NewService(projectSetup.handler),
 			application.NewService(workflowSetup.handler),
 			application.NewService(agentSetup.handler),
+			application.NewService(runSetup.handler),
 		},
 		Assets: application.AssetOptions{
 			Handler: application.AssetFileServerFS(cfg.Assets),
@@ -130,9 +132,11 @@ func Run(cfg Config) int {
 			winmsg.Error("AudioUI 运行错误", err.Error())
 		},
 		OnShutdown: func() {
+			runSetup.manager.Close()
 			agentSetup.session.Close()
-			agentSetup.permission.Close()
-			_ = agentSetup.audit.Close()
+			if runSetup.audit != nil {
+				_ = runSetup.audit.Close()
+			}
 		},
 	})
 
@@ -151,7 +155,6 @@ func Run(cfg Config) int {
 	bus.SetApp(app)
 	app.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
 		bus.Start()
-		go agentSetup.session.Start(context.Background())
 		if pendingFocus.Swap(false) {
 			window.Restore()
 			window.Show()

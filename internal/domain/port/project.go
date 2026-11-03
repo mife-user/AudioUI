@@ -36,6 +36,11 @@ type RunStore interface {
 	Save(ctx context.Context, run entity.RunRecord) error
 }
 
+// RunStoreProvider returns the run history store for a project.
+type RunStoreProvider interface {
+	ForProject(ctx context.Context, projectID string) (RunStore, error)
+}
+
 // PendingStore manages pending.json and pending/<pendingId>.json for one project.
 type PendingStore interface {
 	List(ctx context.Context) ([]entity.Pending, error)

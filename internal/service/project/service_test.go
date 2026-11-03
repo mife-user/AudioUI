@@ -143,6 +143,38 @@ func TestServiceOpenSwitchesAndPersists(t *testing.T) {
 	}
 }
 
+func TestProjectSwitchIsRejectedWhileRunIsActive(t *testing.T) {
+	service := newTestService(testLayout(t.TempDir()))
+	if err := service.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	first, err := service.New(context.Background(), "甲")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := service.New(context.Background(), "乙")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Open(context.Background(), first.ID); err != nil {
+		t.Fatal(err)
+	}
+	service.SetRunActiveCheck(func() bool { return true })
+	if _, err := service.Open(context.Background(), second.ID); !errors.Is(err, ErrRunInProgress) {
+		t.Fatalf("Open error = %v, want ErrRunInProgress", err)
+	}
+	if _, err := service.New(context.Background(), "丙"); !errors.Is(err, ErrRunInProgress) {
+		t.Fatalf("New error = %v, want ErrRunInProgress", err)
+	}
+	if _, err := service.Open(context.Background(), first.ID); err != nil {
+		t.Fatalf("reopening the active project should be safe: %v", err)
+	}
+	current, err := service.Current(context.Background())
+	if err != nil || current.ID != first.ID {
+		t.Fatalf("current project = %q, err=%v", current.ID, err)
+	}
+}
+
 func TestServiceRejectsInvalidNames(t *testing.T) {
 	service := newTestService(testLayout(t.TempDir()))
 	if err := service.Start(context.Background()); err != nil {
