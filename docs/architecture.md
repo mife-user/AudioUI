@@ -54,7 +54,7 @@ infra         json / claudecli / edgetts / renderer-bridge
 | `domain/entity` | Project、Graph、Node、Round、Run、Pending、Artifact；Chain 为派生视图，不持久化 |
 | `domain/valueobject` | NodeType、Hash、OutputKind、CandidateIndex、ChainPath、ContextVersion、TokenBudget、SceneDSL、Theme、EnvironmentInfo、LogEntry |
 | `domain/event` | 领域事件 |
-| `domain/port` | ProjectStore、ProjectSession/ProjectAccess、RunStore、PendingStore/Provider、ArtifactStore、ArtifactStoreProvider、ContextHasher、ConfigStore、M1Migrator、WorkspaceMover、WorkspaceReader、RunWorkspaceReader、GraphReader、ArtifactReader、ReplySink、RunLifecycle、TurnRunner、AgentDriver、RunToolServerFactory、ScopedPathResolver、EventBus、PermissionGate、QuestionGate、Media、CLIProbe、WebView2Probe、LogTailer |
+| `domain/port` | ProjectStore、ProjectSession/ProjectAccess、RunStore/Provider、PendingStore/Provider、ArtifactStore/Provider、ContextHasher/RunContextBuilder、ConfigStore、M1Migrator、WorkspaceMover、WorkspaceReader/RunWorkspace/Provider、GraphReader、ArtifactReader、ReplySink、RunLifecycle/PendingObserver、RunEventPublisher、AgentDriver、RunToolServerFactory、RunPermissionFactory、RunConfigPaths、ScopedPathResolver、EventBus、PermissionGate、QuestionGate、Media、CLIProbe、WebView2Probe、LogTailer |
 | `service/project` | 工程生命周期、迁移、自动保存 |
 | `service/system` | M0 环境自检、最近日志聚合 |
 | `service/run` | 运行生命周期、一次性 Agent 会话、TurnGate、每运行 MCP/token、transcript |
@@ -94,8 +94,10 @@ infra         json / claudecli / edgetts / renderer-bridge
 
 ```
 节点「执行」
-  → ContextService 从 topic 根到父构建路径上下文（候选端口解析 + 最新轮次 + 任务 + 工作区清单 + 契约）
-  → RunService 获取全局 TurnGate，记录 chainPath，启动一次性 Agent 会话
+  → RunService 获取全局 TurnGate，Workflow 原子验证并锁定 topic 根到目标节点的路径快照
+  → ContextService 从同一工程快照构建路径上下文（候选端口解析 + 最新轮次 + 任务 + 工作区清单 + 契约）
+  → 创建 per-run MCP 配置、MCP 服务、权限/问题 broker 和一次性 Agent 会话
+  → 持久化运行记录并发布带 runId/treeId/chainPath/seq 的 `run:<type>` 事件
   → 适配器解析 stream-json
   → reply(kind) 经 Workflow 校验后写入 pending（无效也保留原文）
   → UI 提示待应用
@@ -103,7 +105,7 @@ infra         json / claudecli / edgetts / renderer-bridge
   → Workflow 校验 ancestorHash/paramsHash，写 artifact、追加轮次、锁定、下游 stale
 ```
 
-M2-04 的 `service/context.Builder` 从工程快照推导真实路径，并要求 `RunWorkspaceReader.Scope()` 与工程、树、目标和路径一致；祖先产物只取最新已应用轮次及对应 topic 候选。上下文只包含工作区文件清单，不读取文本或二进制文件正文。预算降级、三种哈希和清单限制见 ADR-026。`InputHashes` 不读取工作区，供后续待应用校验复用；`ContextEstimate.WithActualInputTokens` 计算实际用量是否超出本次预算，运行级采集与存储由 M2-07 实现。
+M2-04 的 `service/context.Builder` 从工程快照推导真实路径，并要求 `RunWorkspaceReader.Scope()` 与工程、树、目标和路径一致；祖先产物只取最新已应用轮次及对应 topic 候选。上下文只包含工作区文件清单，不读取文本或二进制文件正文。预算降级、三种哈希和清单限制见 ADR-026。`InputHashes` 不读取工作区，供待应用校验复用；M2-07 记录首个 `AssistantMessage.Usage` 的首次请求 input tokens、估算、预算与是否超预算。缺少该 usage 时不伪造 0。
 
 ### 6.2 渲染
 
@@ -172,7 +174,7 @@ UI / handler
 
 共享只读运行时固定为 exe 同级 `runtime/`，随绿色包分发；应用不创建或修改该目录，MCP 逻辑读取视图把它作为最低优先级。`data/runtime/` 不使用（RM-013 已按用户决策纳入 M2-03）。
 
-M2 收口后 `sessions.json` 不再写入；M2 开发期 M1 会话服务仍会读取/写入它，迁移不删除原文件。M2 首次启动把当时的 `activeChainId` 导入为只读运行。Agent profile（默认 `~/.claude`）是适配器例外，不属于应用数据。
+M2 收口后 `sessions.json` 不再写入；M2 开发期保留 M1 Wails binding 以便前端迁移，旧会话服务已禁用且不会启动 Agent，迁移不删除原文件。M2 首次启动把当时的 `activeChainId` 导入为只读运行。Agent profile（默认 `~/.claude`）是适配器例外，不属于应用数据。
 
 - 原子写入：临时文件 + `Sync` + 重命名；新建工程与迁移先在 `data/projects/` 下的隐藏 staging 目录（`.creating-*` / `.m1-migration-*`）写完整目录，再整体重命名到 `projects/<id>`。
 - 工程级锁：单实例锁；所有写命令按 `workflow.mu → ProjectSession` 操作锁排序。`ProjectSession.WithExclusive` 与 `New/Open` 共用操作锁，pending 多文件事务期间工程不能切换。
@@ -181,6 +183,9 @@ M2 收口后 `sessions.json` 不再写入；M2 开发期 M1 会话服务仍会�
 - pending 原文与索引分离；创建/应用/丢弃先原子写 `pending.txn.json` 和必需原文/CAS，再保存带目标 revision 的 `project.json`，最后更新 `pending.json` 并删除日志。工程加载/打开按 base/target revision 回滚未提交事务或幂等重放已提交事务；日志损坏、revision 无法判定或恢复失败时拒绝暴露工程。原文上限 256 KiB，无效 Schema 也保留原文；`pending` 与 `invalid` 计入每树 50 条上限，应用/丢弃释放名额。
 - 结构化产物规范化使用保留 `json.Number` 精度的确定性 JSON；payload SHA-256 为 CAS ID。`Round.Kind` 是当前产物种类的授权真相，CAS `meta.json` 仅为首次写入元数据；元数据种类不一致时按轮次种类校验 payload。
 - `contextTokenBudget` 默认 1,000,000；上下文估算与实际 usage 记入 run。
+- 运行管理启动时扫描所有工程，把残留 `starting`/`running` 记录标记为 `interrupted` 并删除其 per-run MCP 配置；运行记录继续保留作历史。
+- 每次运行的 MCP 配置位于 `data/agent/<projectId>/<runId>/mcp.json`；终态清理整个 run 目录。`runs.json` 仍只存摘要，运行详情最多保存 500 条 transcript 项与不超过 16 KiB 的上下文预览。
+- 运行看门狗按 60 分钟无有效进展计时；流式消息、工具/权限/问题事件和活动 MCP 请求会重置计时，不按固定总时长终止仍在工作的运行。
 - 工程 ID、节点 ID、运行 ID、pending ID 只使用 `[a-z0-9_]`，由程序生成；迁移使用确定性 ID。
 
 ### 7.1 M1 迁移
@@ -210,8 +215,9 @@ topic 树 cwd = `data/projects/<id>/trees/<rootTopicId>/`；MCP 逻辑读取顺�
 - Windows 通过 agent host 代理启动原生 CLI，`CREATE_NO_WINDOW` + Job Object 回收进程树。
 - 运行级会话：App 构建上下文，首条消息注入；不依赖 Agent 记忆，不使用 resume/fork；Adapter 细节留在 `infra/agent/claudecli`。
 - `RunSpec` 注入 M2 工具集与系统提示；`AgentRun` 表示运行内会话，不硬编码 M1 工具列表；MCP 工具按 runId/projectId/treeId/nodeId/chainPath 绑定；`get_graph`/`get_node` 只暴露路径快照，`read_artifact` 按祖先轮次授权并对 topic 产物过滤当前候选。
-- `RunLifecycle` 为工具调用提供活动运行租约；pending 创建期间运行终止等待该操作完成。实际 run manager 接线在 M2-07。
-- 权限由 `PreToolUse` 硬门禁 + `CanUseTool` 交互确认；审计独立 `logs/audit.log`，含 runId/treeId/nodeId/chainId。
+- `RunLifecycle` 为 MCP 工具调用提供活动运行租约；Agent 事件和权限应答也受运行租约保护。终止先拒绝新租约，等待已开始的操作结束，再关闭 CLI/MCP、删配置并释放图锁与全局 TurnGate。
+- 每运行创建独立权限/问题 broker；权限由 `PreToolUse` 硬门禁 + `CanUseTool` 交互确认。审计独立 `logs/audit.log`，含 runId/treeId/nodeId/chainId。
+- `RunService` 暴露启动、历史列表/详情、中断、权限应答和问题应答；工程切换在运行期间返回 `BUSY`。M2-08 再接入前端 store 与事件订阅。
 - 前端渲染器通过 `RendererPort` 桥接：事件下发任务，完成回调。
 - 能力位为 false 时走降级路径；M2 不依赖 Resume。
 
@@ -258,7 +264,7 @@ topic 树 cwd = `data/projects/<id>/trees/<rootTopicId>/`；MCP 逻辑读取顺�
 - domain：纯单元测试。
 - M0：路径解析/创建、CLI 探测、WebView2 探测、日志 tail、版本一致性；`--self-check` 无 GUI 自检。
 - M1：路径 guard、权限三档/超时/审计、MCP token/工具、事件映射回放、原生 CLI 解析、Windows host。
-- M2：工程读写/迁移、树与命令层、自由改挂与子树移动（含跨树迁移与回滚）、候选端口解析、运行路径锁、上下文构建与 token 预算、运行生命周期与 TurnGate、pending 应用、MCP 跨树访问拒绝、事件缺口、前端叶子链与运行分组。
+- M2：工程读写/迁移、树与命令层、自由改挂与子树移动（含跨树迁移与回滚）、候选端口解析、运行路径锁、上下文构建与 token 预算、运行生命周期与 TurnGate、重启中断恢复、pending 应用、MCP 跨树访问拒绝、事件缺口、前端叶子链与运行分组。
 - 协议：stream-json/control 事件回放测试。
 - 渲染：golden frame 对比。
 - 集成：工程读写、队列、删除、回收。

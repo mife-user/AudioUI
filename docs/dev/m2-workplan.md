@@ -2,8 +2,8 @@
 
 | 项 | 内容 |
 |---|---|
-| 状态 | 草案（M2 进行中：M2-00..05 已验收；M2-06 待验收） |
-| 最后更新 | 2026-11-02 |
+| 状态 | 草案（M2 进行中：M2-00..07 已验收；M2-08 及后续待开发） |
+| 最后更新 | 2026-11-03 |
 | 适用 | 每个新开对话只执行一个 M2 任务 |
 | 关联 | [路线图](roadmap.md)、[流程](process.md)、[PRD](../prd.md)、[架构](../architecture.md)、[协议](../agent-protocol.md)、[验收](../acceptance.md)、[ADR](../decisions.md) |
 
@@ -172,8 +172,8 @@ DoD：分层与不变量未破坏；新增/修改逻辑有测试；任务级门�
 
 ### M2-06 MCP 只读图与结构化 reply
 
-- **状态**：待验收；M2-07 才接入真实运行生命周期与节点执行入口。
-- **证据**：[M2-06 自检证据](evidence/m2-06.md)。
+- **状态**：已完成（用户于 2026-11-03 确认验收）。GUI/live CLI 与 M2 整体端到端验收仍按后续任务范围推进。
+- **证据**：[M2-06 自检与验收证据](evidence/m2-06.md)。
 - **需求 / 验收**：F-04、F-07；AC-M2-3、AC-M2-12、AC-06（MCP/后端组件级覆盖）。
 - **依赖**：M2-02、M2-05（均已验收）。
 - **实现**：
@@ -187,23 +187,29 @@ DoD：分层与不变量未破坏；新增/修改逻辑有测试；任务级门�
 - **测试**：完整工具清单与禁止工具；路径图/节点和工程/树 scope；过期运行与结束竞态；raw payload 保真、无效 Schema pending、幂等与并发重复回复；topic 多候选与相同 artifact ID 冲突；round kind 与 artifact meta 冲突；UTF-8 边界、空尾块、非法 offset/limit、16 KiB 上限；权限自动允许与 M1 文件工具回归。
 - **门禁**：`docs/dev/evidence/m2-06.md` 记录实际 Go、vet、bindings、前端、Wails 门禁结果。
 - **未包含**：真实 `RunService`/CLI 的生命周期实现与节点执行接线（M2-07）；前端、GUI/live CLI 端到端 AC 验收（M2-08..13）。
-- **风险**：`RunLifecycle` 的真实租约实现由 M2-07 接线；run-scoped MCP 构造与工具级测试不等于真实 CLI 生命周期验收。
+- **风险/边界**：真实运行租约已由 M2-07 接线并验收；GUI/live CLI 与 M2 整体端到端验收仍属于后续任务。
 
 ### M2-07 运行管理与运行锁
 
+- **状态**：已完成（用户于 2026-11-03 确认验收）。GUI/live CLI 与 AC-M2-9/11 的后续端到端验收按 M2-13 推进。
+- **证据**：[M2-07 自检与验收证据](evidence/m2-07.md)。
 - **需求 / 验收**：F-06、F-13；AC-06、AC-13、AC-M1-1/2/5、AC-M2-9、AC-M2-11。
 - **依赖**：M2-03、M2-04、M2-06。
 - **目标**：一次性 driver、per-run MCP/token/permission、TurnGate、run store、runId/treeId/chainPath 事件、运行路径锁、重启中断。
 - **关键设计**：
   - `RunSpec`：runId/treeId/nodeId/chainPath/workspace/context/version/hash/tools/system prompt/MCP/gates。
   - per-run MCP 配置 `data/agent/<projectId>/<runId>/mcp.json`；结束删除；token 不落日志。
-  - 全局 TurnGate（M2 1 个）；所有终态释放；带 runId owner；看门狗 `RUN_TIMEOUT`。
+  - 全局 TurnGate（M2 1 个）；所有终态释放；带 runId owner；60 分钟无有效进展时 `RUN_TIMEOUT`，流式、工具、权限/问题和 MCP 活动会重置看门狗。
   - 运行锁在启动时记录路径快照；路径节点只读；共享祖先只读。
   - 重启把 starting/running 标记 interrupted；transcript ≤500；运行记录全部保留。
   - driver 的 allowed tools/system prompt 按运行注入，删除 M1 硬编码。
-- **文件**：`internal/service/run/{manager,gate}.go`（取代 session）、`internal/infra/agent/claudecli/driver.go`、app wiring、eventbus。
-- **测试**：gate 所有释放路径；跨树 BUSY；per-run token/配置/权限与审计；运行锁；锁定节点不可执行；重启中断；transcript 截断；live CLI（opt-in）。
-- **风险**：gate 泄漏；进程泄漏；权限服务 per-run；上下文与运行锁竞态。
+  - 终止会等待 Agent 事件、权限应答与 MCP 活动操作租约归还；transcript 限制为最近 500 条。
+  - 从首个 `AssistantMessage.Usage` 读取首次请求 input tokens（含缓存 token），不把多轮累计 `ResultMessage.Usage` 当作上下文用量；缺失时保持未知。与估算/预算一并持久化；预览最大 16 KiB。
+- **文件**：`internal/service/run/{manager,gate}.go`、run handler、`internal/infra/paths/run_config.go`、run store/workspace provider、Claude driver、permission/audit、workflow 运行锁、Wails app wiring/eventbus。
+- **测试**：TurnGate 所有权与释放、运行成功/usage、BUSY、Send 失败资源释放、活动租约终止、跨工程重启恢复、配置目录路径安全、工程切换保护、审计身份字段、首次 usage 与缺失 usage、60 分钟无进展及有效事件重置；live CLI（需用户另行明确同意外部访问和潜在费用）。
+- **门禁**：`docs/dev/evidence/m2-07.md` 记录实际 Go/vet、bindings、前端、Wails 门禁与 live CLI 结果。
+- **未包含**：前端事件桥与运行工作台（M2-08）；GUI 手工验收、启用真实 Claude CLI 的端到端验收与 AC-M2-9/11 完整抽查（M2-13）。
+- **风险**：真实 CLI 与 UI 的集成验收仍未执行；Bash 命令隔离保留 RM-017 的协作式门禁边界。
 
 ### M2-08 前端工作台骨架
 
@@ -317,8 +323,8 @@ wails3 build
 | M2-03 工作区与写作用域 | 已完成 | [验收证据](evidence/m2-03.md)；用户确认通过（2026-11-02） |
 | M2-04 上下文构建器 | 已完成 | [验收证据](evidence/m2-04.md)；用户确认通过（2026-11-02） |
 | M2-05 Pending 后端 | 已完成 | [自检与验收证据](evidence/m2-05.md)；用户已确认验收通过（2026-11-02） |
-| M2-06 MCP 只读与 reply | 待验收 | [自检证据](evidence/m2-06.md) |
-| M2-07 运行管理 | 未开始 | — |
+| M2-06 MCP 只读与 reply | 已完成 | [自检与验收证据](evidence/m2-06.md)；用户于 2026-11-03 确认验收 |
+| M2-07 运行管理 | 已完成 | [自检与验收证据](evidence/m2-07.md)；用户于 2026-11-03 确认验收 |
 | M2-08 前端工作台骨架 | 未开始 | — |
 | M2-09 画布与节点交互 | 未开始 | — |
 | M2-10 选题流程 | 未开始 | — |

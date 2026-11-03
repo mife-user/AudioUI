@@ -268,26 +268,29 @@ Schema（M2 最小）：
 | `result` | `RunCompleted`（含 usage） |
 | 错误/断连 | `RunErrored` |
 
-Wails 事件：
+当前运行由 Wails `RunService` 一次启动并发送首条上下文消息；`Start` 仅在 MCP/权限/driver 完成初始化并成功提交首条消息后返回。M2 同时只允许一个在途运行，竞争请求立即返回 `BUSY`。运行历史经 `ListRuns`/`GetRun` 读取；`Interrupt`、`RespondPermission` 与 `RespondQuestion` 按 runId 定位活动运行。启动时，所有工程中遗留的 `starting`/`running` 记录转为 `interrupted`，不会恢复 Agent 会话。
+
+实际运行的 Wails 事件统一按 `run:<type>` 发布，每条事件都有运行身份与单调序号：
 
 ```text
-run:changed       { v, revision, runId, treeId, nodeId, chainPath, status }
-agent:status      { v, seq, runId, treeId, state }
-agent:message     { v, seq, runId, treeId, message }
-agent:tool        { v, seq, runId, treeId, tool }
-agent:permission  { v, seq, runId, treeId, permission }
-agent:question    { v, seq, runId, treeId, question }
-agent:error       { v, seq, runId, treeId, error: { code, message, recoverable } }
-workspace:changed { v, revision, reason }
+run:status           { v, seq, runId, treeId, chainId, nodeId, chainPath, type, status, error? }
+run:message          { v, seq, runId, treeId, chainId, nodeId, chainPath, type, message }
+run:tool             { v, seq, runId, treeId, chainId, nodeId, chainPath, type, tool }
+run:permission       { v, seq, runId, treeId, chainId, nodeId, chainPath, type, permission }
+run:question         { v, seq, runId, treeId, chainId, nodeId, chainPath, type, question }
+run:error            { v, seq, runId, treeId, chainId, nodeId, chainPath, type, error }
+run:pending          { v, seq, runId, treeId, chainId, nodeId, chainPath, type, pendingId }
+run:request_resolved { v, seq, runId, treeId, chainId, nodeId, chainPath, type, resolvedKind, resolvedId }
 ```
 
 - `chainPath` 是运行时的 topic 根 → 目标节点路径快照；链本身是派生视图。
-- 每运行独立 `seq`，单调递增；前端按 run 保存。
-- 前端先 `GetRun`/`GetWorkspaceSnapshot` 拉快照，再接收事件；发现 seq/revision 缺口重新拉取。
+- envelope 的 `v=1`；`seq` 每个 run 独立、单调递增；消费者按 runId 丢弃其他运行或重复序号的事件。
+- 终态 `status` 含 `succeeded`、`failed`、`interrupted`；`error` 使用稳定错误码。`actualInputTokens` 表示首个 `AssistantMessage.Usage` 中的首次请求用量（包括缓存 token），随终态事件发送；没有该 usage 时字段缺失，不用 `ResultMessage` 多轮累计量替代。
+- MCP `reply` 创建 pending 后发布 `run:pending`；权限与问题请求解决后发布 `run:request_resolved`。
+- 前端接线属于 M2-08；接入时先 `GetRun`/`GetWorkspaceSnapshot` 拉快照，再订阅运行事件并处理序号缺口。
 - 事件 payload 版本 `v=1`。
-- `run:changed` 不携带 transcript；transcript 由 `GetRun` 获取。
-- `workspace:changed.reason` 取 `project`（新建/打开/切换工程）、`graph`（节点、参数、位置、锁定、stale）、`pending`（待应用新增/应用/丢弃）、`run`（运行开始/结束导致路径锁变化）。
-- `run:changed` 的 `chainPath` 是运行时快照；前端据此与快照中的运行状态绘制路径锁。
+- 运行事件不携带完整 transcript；transcript 由 `GetRun` 获取。
+- `workspace:changed.reason` 取 `project`（新建/打开/切换工程）、`graph`（节点、参数、位置、锁定、stale）、`pending`（待应用新增/应用/丢弃）；运行开始/结束的路径锁变化由带 `chainPath` 的 `run:status` 表达。
 - `SelectNode` 只持久化 `activeNodeId`，不递增 revision、不广播；选中与路径高亮由前端本地更新。
 
 ### 10.1 工作台快照最小字段

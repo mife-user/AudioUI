@@ -2,16 +2,16 @@
 
 | 项 | 内容 |
 |---|---|
-| 状态 | 草案 |
-| 最后更新 | 2026-11-02 |
+| 状态 | 计划（M2-05、M2-06、M2-07 已验收；M2-06/M2-07 于 2026-11-03 由用户确认） |
+| 最后更新 | 2026-11-03 |
 | 范围 | M2-05 Pending 后端、M2-06 MCP 只读与结构化回复、M2-07 运行管理 |
 | 关联 | [M2 逐任务执行手册](m2-workplan.md)、[路线图](roadmap.md)、[开发流程](process.md)、[验收标准](../acceptance.md) |
 
-> 本文用于保存用户确认的计划与决策，不代表 M2-05～07 已开工、实现或验收。三个任务仍按 M2 执行手册分别开工、测试并交用户验收；依赖任务通过后再进入下一项。
+> 本文用于保存用户确认的计划与决策；当前任务状态以 [M2 逐任务执行手册](m2-workplan.md) 为准。M2-05、M2-06、M2-07 已验收；M2-06 组件级实现曾作为 M2-07 前置继续推进。
 
 ## 1. 背景与现状
 
-M2-00～04 已由用户验收；M2-05～13 未开始。用户选择把关联最紧密的 M2-05 待应用后端、M2-06 MCP 只读与结构化回复、M2-07 运行管理作为一组规划。三项按依赖顺序执行，但仍遵循 `docs/dev/m2-workplan.md`：**每项单独开工、完成代码/文档/测试后交用户验收，依赖通过后才开始下一项**。本文件只保存计划，不改变任务状态，不升版本。
+M2-00～07 已由用户验收；M2-08～13 未开始。用户选择把关联最紧密的 M2-05 待应用后端、M2-06 MCP 只读与结构化回复、M2-07 运行管理作为一组规划。M2-06 组件级实现作为 M2-07 前置继续推进；GUI/live CLI 与端到端验收仍按后续任务范围覆盖。本文件只保存计划，当前状态以 M2 执行手册为准，不升版本。
 
 现有基础：`internal/infra/persistence/{pending,artifacts,runs}.go` 已有存储；`internal/service/workflow` 已有图命令与运行路径锁；`internal/service/context/builder.go` 的 `Build`/`InputHashes` 已实现路径上下文与指纹；`internal/infra/agent/mcp/server.go` 仍是 M1 工具集；`internal/service/session` 和 `internal/app/agent.go` 仍使用 M1 会话。复用现有端口和组件，不重新实现它们。
 
@@ -61,7 +61,7 @@ M2-00～04 已由用户验收；M2-05～13 未开始。用户选择把关联最�
 3. 运行状态按 `starting → running → succeeded/failed/interrupted` 落入既有 `RunStore`；实现停止、退出、错误与超时的唯一终结路径。无论进程启动失败、发送失败、流结束、权限等待、中断或取消，均取消在途请求、关闭 CLI/MCP、清除临时配置、释放路径锁及 gate；清理使用独立于已取消请求的上下文并保证幂等。运行结束后 token 失效；仅运行期间所需的 `data/agent/<projectId>/<runId>/mcp.json` 临时含 token，禁止写入日志/运行历史，异常退出后下次启动清理残留。
 4. 每个运行独立注入 `permission.Service` 和 `RunGuard`，扩展审计记录携带 runId/treeId/nodeId/chainId；保留允许决策审计失败即拒绝、权限/问题 120 秒规则及 RM-017 风险边界。
 5. 扩展 `internal/infra/agent/claudecli/driver.go` 与 domain 事件：解析流、工具、权限、问题、完成/错误与 usage；每运行独立 seq、带身份与路径快照；复用 `internal/app/eventbus.go` 发布，运行记录 transcript 上限 500。使用 SDK 首个主运行 `AssistantMessage.Usage` 计算首次请求输入 token（含 cache read/creation），避免把多轮累计值误当上下文大小；缺失则显式未知，不伪造 0；`ResultMessage.Usage` 可作为独立累计值，复用 `ContextEstimate.WithActualInputTokens` 比较预算。测试多事件重复 usage 不重复计数。
-6. 启动/打开每个工程时将持久化 `starting/running` 标为 `interrupted`，不自动重跑；保留旧 M1 历史与迁移备份。调整 `internal/app/{agent,workflow,app,eventbus}.go` 的组装与关闭路径；新增或扩展 run handler，提供按 node 启动、按 runId 查询/列表/停止/回答权限和问题的后端接口，绑定目标与作用域，不增加自由提示词输入。停用旧 M1 执行；新运行通过后端接口验证。M2-08 删除旧前端前，暂保留旧 `AgentService` 的绑定兼容外壳，读取历史仍可用，旧发送/新会话明确返回停用错误且不启动或 resume 进程，保证现有前端可编译、应用可启动；不新增界面。广播 revision 和 `workspace:changed`/`run:changed` 与现有协议一致；不提前实现 M2-08 的快照/UI。
+6. 启动/打开每个工程时将持久化 `starting/running` 标为 `interrupted`，不自动重跑；保留旧 M1 历史与迁移备份。调整 `internal/app/{agent,workflow,app,eventbus}.go` 的组装与关闭路径；新增或扩展 run handler，提供按 node 启动、按 runId 查询/列表/停止/回答权限和问题的后端接口，绑定目标与作用域，不增加自由提示词输入。停用旧 M1 执行；新运行通过后端接口验证。M2-08 删除旧前端前，暂保留旧 `AgentService` 的绑定兼容外壳，读取历史仍可用，旧发送/新会话明确返回停用错误且不启动或 resume 进程，保证现有前端可编译、应用可启动；不新增界面。发布携带 runId 与路径快照的 `run:<type>` 事件；starting/running/terminal status 事件也作为运行路径锁变更信号，前端接入留 M2-08。
 
 **主要文件**：`internal/service/run/`、`internal/domain/{port,entity,valueobject}`、`internal/infra/agent/{claudecli,mcp}`、`internal/infra/persistence/runs.go`、`internal/service/{workflow,project,permission}`、`internal/infra/audit/logger.go`、`internal/handler/`、`internal/app/` 及对应测试。
 

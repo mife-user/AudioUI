@@ -18,6 +18,7 @@ var (
 	ErrProjectIDInvalid     = errors.New("PROJECT_ID_INVALID")
 	ErrNoActiveProject      = errors.New("NO_ACTIVE_PROJECT")
 	ErrActiveProjectChanged = errors.New("ACTIVE_PROJECT_CHANGED")
+	ErrRunInProgress        = errors.New("BUSY: cannot switch projects while a run is active")
 )
 
 type Options struct {
@@ -37,6 +38,7 @@ type Service struct {
 	active    *entity.Project
 	config    valueobject.AppConfig
 	configErr error
+	runActive func() bool
 }
 
 func New(opts Options) *Service {
@@ -44,6 +46,14 @@ func New(opts Options) *Service {
 		opts.Logf = func(string, ...any) {}
 	}
 	return &Service{opts: opts}
+}
+
+// SetRunActiveCheck prevents switching projects while a project-scoped run is
+// using its graph, workspace, and lock snapshot.
+func (s *Service) SetRunActiveCheck(check func() bool) {
+	s.mu.Lock()
+	s.runActive = check
+	s.mu.Unlock()
 }
 
 // Start loads config, runs the one-time M1 migration and restores the last
@@ -106,6 +116,9 @@ func (s *Service) List(ctx context.Context) ([]entity.ProjectSummary, error) {
 func (s *Service) New(ctx context.Context, name string) (entity.Project, error) {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
+	if err := s.ensureCanSwitch(""); err != nil {
+		return entity.Project{}, err
+	}
 
 	name = strings.TrimSpace(name)
 	if name == "" || utf8.RuneCountInString(name) > valueobject.MaxProjectNameLength {
@@ -148,6 +161,9 @@ func (s *Service) Open(ctx context.Context, id string) (entity.Project, error) {
 	if err := valueobject.ValidateID(id); err != nil {
 		return entity.Project{}, fmt.Errorf("%w: %v", ErrProjectIDInvalid, err)
 	}
+	if err := s.ensureCanSwitch(id); err != nil {
+		return entity.Project{}, err
+	}
 	if err := s.configError(); err != nil {
 		return entity.Project{}, err
 	}
@@ -164,6 +180,20 @@ func (s *Service) Open(ctx context.Context, id string) (entity.Project, error) {
 	s.active = &project
 	s.mu.Unlock()
 	return project.Clone(), nil
+}
+
+func (s *Service) ensureCanSwitch(targetID string) error {
+	s.mu.Lock()
+	check := s.runActive
+	activeID := ""
+	if s.active != nil {
+		activeID = s.active.ID
+	}
+	s.mu.Unlock()
+	if check != nil && check() && (targetID == "" || targetID != activeID) {
+		return ErrRunInProgress
+	}
+	return nil
 }
 
 func (s *Service) Current(ctx context.Context) (entity.Project, error) {

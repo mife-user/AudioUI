@@ -69,18 +69,7 @@ func (d *Driver) options(spec port.DriverSpec, ref json.RawMessage) ([]claudecod
 		// project and local settings stay out of the agent session.
 		claudecode.WithSettingSources(claudecode.SettingSourceUser),
 		claudecode.WithPermissionMode(claudecode.PermissionModeDefault),
-		claudecode.WithTools("Read", "Glob", "Grep", "Write", "Edit", "Bash"),
-		claudecode.WithAllowedTools(
-			"mcp__audioui__get_chain",
-			"mcp__audioui__reply",
-			"mcp__audioui__read_file",
-			"mcp__audioui__list_dir",
-			"mcp__audioui__grep",
-			"mcp__audioui__stat",
-			"mcp__audioui__ask_user",
-		),
 		claudecode.WithIncludePartialMessages(true),
-		claudecode.WithAppendSystemPrompt("You are AudioUI's local content agent. Work only inside the provided workspace. Use ask_user when a decision is needed. Use reply(kind=message) for chat output; graph tools are not available in M1."),
 		claudecode.WithStderrCallback(func(line string) {
 			d.Logf("claude stderr: %s", sanitize(line))
 		}),
@@ -121,6 +110,15 @@ func (d *Driver) options(spec port.DriverSpec, ref json.RawMessage) ([]claudecod
 				},
 			},
 		}),
+	}
+	if len(spec.BuiltinTools) > 0 {
+		opts = append(opts, claudecode.WithTools(spec.BuiltinTools...))
+	}
+	if len(spec.AllowedTools) > 0 {
+		opts = append(opts, claudecode.WithAllowedTools(spec.AllowedTools...))
+	}
+	if strings.TrimSpace(spec.SystemPrompt) != "" {
+		opts = append(opts, claudecode.WithAppendSystemPrompt(spec.SystemPrompt))
 	}
 
 	args := map[string]*string{"mcp-config": &spec.MCPConfigPath}
@@ -183,6 +181,7 @@ type agentSession struct {
 	cancel          context.CancelFunc
 	streamID        string
 	streamFinalized bool
+	inputUsage      *int
 	mu              sync.Mutex
 	closed          bool
 }
@@ -246,6 +245,7 @@ func (s *agentSession) handle(msg claudecode.Message) {
 	case *claudecode.StreamEvent:
 		s.handleStreamEvent(m)
 	case *claudecode.AssistantMessage:
+		s.captureFirstInputUsage(m)
 		for _, block := range m.Content {
 			switch b := block.(type) {
 			case *claudecode.TextBlock:
@@ -298,14 +298,40 @@ func (s *agentSession) handle(msg claudecode.Message) {
 			}
 		}
 		status := valueobject.SessionIdle
+		// ResultMessage.Usage can accumulate across tool turns. The context
+		// budget compares against the first AssistantMessage usage instead.
+		actualInputTokens := s.firstInputUsage()
 		if m.IsError {
 			s.emit(valueobject.AgentEvent{Version: 1, Type: valueobject.EventError, Error: &valueobject.AgentError{
 				Code: "TURN_FAILED", Message: strings.Join(m.Errors, "; "), Recoverable: true,
-			}})
+			}, ActualInputTokens: actualInputTokens})
 			status = valueobject.SessionError
 		}
-		s.emit(valueobject.AgentEvent{Version: 1, Type: valueobject.EventStatus, State: &valueobject.AgentState{Status: status}})
+		s.emit(valueobject.AgentEvent{Version: 1, Type: valueobject.EventStatus, State: &valueobject.AgentState{Status: status}, ActualInputTokens: actualInputTokens})
 	}
+}
+
+func (s *agentSession) captureFirstInputUsage(message any) {
+	actual := actualInputTokenUsage(message)
+	if actual == nil {
+		return
+	}
+	s.mu.Lock()
+	if s.inputUsage == nil {
+		usage := *actual
+		s.inputUsage = &usage
+	}
+	s.mu.Unlock()
+}
+
+func (s *agentSession) firstInputUsage() *int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.inputUsage == nil {
+		return nil
+	}
+	usage := *s.inputUsage
+	return &usage
 }
 
 func (s *agentSession) handleStreamEvent(event *claudecode.StreamEvent) {
@@ -406,6 +432,43 @@ func errorString(err error) string {
 		return "stream ended"
 	}
 	return err.Error()
+}
+
+func actualInputTokenUsage(message any) *int {
+	data, err := json.Marshal(message)
+	if err != nil {
+		return nil
+	}
+	var envelope map[string]json.RawMessage
+	if json.Unmarshal(data, &envelope) != nil {
+		return nil
+	}
+	usageData, ok := envelope["usage"]
+	if !ok {
+		return nil
+	}
+	var usage map[string]json.RawMessage
+	if json.Unmarshal(usageData, &usage) != nil {
+		return nil
+	}
+	fields := []string{"input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens", "inputTokens", "cacheCreationInputTokens", "cacheReadInputTokens"}
+	total := 0
+	found := false
+	for _, name := range fields {
+		raw, exists := usage[name]
+		if !exists {
+			continue
+		}
+		var count int
+		if json.Unmarshal(raw, &count) == nil && count >= 0 {
+			total += count
+			found = true
+		}
+	}
+	if !found {
+		return nil
+	}
+	return &total
 }
 
 func now() string {

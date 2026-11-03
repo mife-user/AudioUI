@@ -130,24 +130,50 @@ type SessionsFile struct {
 type AgentEventType string
 
 const (
-	EventStatus     AgentEventType = "status"
-	EventMessage    AgentEventType = "message"
-	EventTool       AgentEventType = "tool"
-	EventPermission AgentEventType = "permission"
-	EventQuestion   AgentEventType = "question"
-	EventError      AgentEventType = "error"
+	EventStatus          AgentEventType = "status"
+	EventMessage         AgentEventType = "message"
+	EventTool            AgentEventType = "tool"
+	EventPermission      AgentEventType = "permission"
+	EventQuestion        AgentEventType = "question"
+	EventError           AgentEventType = "error"
+	EventPending         AgentEventType = "pending"
+	EventRequestResolved AgentEventType = "request_resolved"
 )
 
 type AgentEvent struct {
-	Version    int                `json:"v"`
-	Seq        uint64             `json:"seq,omitempty"`
-	Type       AgentEventType     `json:"type"`
-	State      *AgentState        `json:"state,omitempty"`
-	Message    *TranscriptItem    `json:"message,omitempty"`
-	Tool       *TranscriptItem    `json:"tool,omitempty"`
-	Permission *PermissionRequest `json:"permission,omitempty"`
-	Question   *QuestionRequest   `json:"question,omitempty"`
-	Error      *AgentError        `json:"error,omitempty"`
+	Version           int                `json:"v"`
+	Seq               uint64             `json:"seq,omitempty"`
+	Type              AgentEventType     `json:"type"`
+	State             *AgentState        `json:"state,omitempty"`
+	Message           *TranscriptItem    `json:"message,omitempty"`
+	Tool              *TranscriptItem    `json:"tool,omitempty"`
+	Permission        *PermissionRequest `json:"permission,omitempty"`
+	Question          *QuestionRequest   `json:"question,omitempty"`
+	Error             *AgentError        `json:"error,omitempty"`
+	ActualInputTokens *int               `json:"actualInputTokens,omitempty"`
+}
+
+// RunEvent is the run-scoped event envelope consumed by the M2 workspace.
+// Every event carries enough identity to reject updates from another run.
+type RunEvent struct {
+	Version           int                `json:"v"`
+	Seq               uint64             `json:"seq"`
+	RunID             string             `json:"runId"`
+	TreeID            string             `json:"treeId"`
+	ChainID           string             `json:"chainId"`
+	NodeID            string             `json:"nodeId"`
+	ChainPath         []string           `json:"chainPath"`
+	Type              AgentEventType     `json:"type"`
+	Status            RunStatus          `json:"status,omitempty"`
+	Message           *TranscriptItem    `json:"message,omitempty"`
+	Tool              *TranscriptItem    `json:"tool,omitempty"`
+	Permission        *PermissionRequest `json:"permission,omitempty"`
+	Question          *QuestionRequest   `json:"question,omitempty"`
+	ResolvedKind      string             `json:"resolvedKind,omitempty"`
+	ResolvedID        string             `json:"resolvedId,omitempty"`
+	PendingID         string             `json:"pendingId,omitempty"`
+	Error             *AgentError        `json:"error,omitempty"`
+	ActualInputTokens *int               `json:"actualInputTokens,omitempty"`
 }
 
 const (

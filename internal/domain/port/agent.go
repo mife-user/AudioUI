@@ -86,6 +86,10 @@ type RunLifecycle interface {
 	WithActiveRun(ctx context.Context, scope RunScope, operation func() error) error
 }
 
+type RunPendingObserver interface {
+	RecordRunPending(ctx context.Context, scope RunScope, pending entity.Pending) error
+}
+
 // AgentDriver starts and resumes a concrete agent implementation.
 type AgentDriver interface {
 	Start(ctx context.Context, spec DriverSpec) (AgentSession, error)
@@ -102,6 +106,8 @@ type DriverSpec struct {
 	ChainID        string
 	Workspace      string
 	SystemPrompt   string
+	BuiltinTools   []string
+	AllowedTools   []string
 	MCPConfigPath  string
 	MCPURL         string
 	MCPToken       string
@@ -169,6 +175,27 @@ type RunToolServerFactory interface {
 	NewForRun(scope RunScope, workspace, displayID string, questionGate QuestionGate, onReply func(string), reader WorkspaceReader, lifecycle RunLifecycle) (ToolServer, error)
 }
 
+// RunPermissionController is a fresh permission/question broker for one run.
+type RunPermissionController interface {
+	PermissionGate
+	ToolPolicy
+	QuestionGate
+	ResolvePermission(id string, decision valueobject.PermissionDecision) error
+	ResolveQuestion(id string, answer valueobject.QuestionAnswer) error
+	SetResolvedCallback(callback func(kind, id string))
+	Close()
+}
+
+type RunPermissionFactory interface {
+	NewRunPermissions(scope RunScope, paths ScopedPathResolver, publish func(valueobject.AgentEvent)) (RunPermissionController, error)
+}
+
+// RunConfigPaths owns the short-lived per-run MCP credential file.
+type RunConfigPaths interface {
+	Prepare(ctx context.Context, projectID, runID string) (string, error)
+	Cleanup(ctx context.Context, projectID, runID string) error
+}
+
 type AgentPermissionController interface {
 	PermissionGate
 	ToolPolicy
@@ -193,12 +220,19 @@ type EventPublisher interface {
 	Publish(event valueobject.AgentEvent)
 }
 
+type RunEventPublisher interface {
+	PublishRun(event valueobject.RunEvent)
+}
+
 type AuditSink interface {
 	Record(ctx context.Context, record AuditRecord) error
 }
 
 type AuditRecord struct {
 	Event     string
+	RunID     string
+	TreeID    string
+	NodeID    string
 	ChainID   string
 	SessionID string
 	RequestID string

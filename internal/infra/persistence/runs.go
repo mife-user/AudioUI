@@ -188,6 +188,9 @@ func validateRun(record entity.RunRecord) error {
 	if record.ContextVersion < 0 {
 		return fmt.Errorf("%w: contextVersion is negative", ErrInvalidRun)
 	}
+	if record.EstimatorVersion < 0 || record.TokenBudget < 0 {
+		return fmt.Errorf("%w: context estimate fields must not be negative", ErrInvalidRun)
+	}
 	if record.EstimatedTokens < 0 || record.ActualInputTokens < 0 {
 		return fmt.Errorf("%w: token counts must not be negative", ErrInvalidRun)
 	}

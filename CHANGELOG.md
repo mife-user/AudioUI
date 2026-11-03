@@ -6,7 +6,7 @@
 
 ## [Unreleased]
 
-M2 图与提示词（进行中：M2-00..05 已验收；M2-06 实现与自检完成、待验收）。
+M2 图与提示词（进行中：M2-00..07 已验收）。
 
 ### Added
 
@@ -22,6 +22,9 @@ M2 图与提示词（进行中：M2-00..05 已验收；M2-06 实现与自检完�
 - M2-06：结构化 reply 从 MCP 原始 arguments 读取并委托 workflow 创建 pending；无效 Schema 的 JSON payload 保留为 invalid pending，不提供写图或 apply 工具。
 - M2-06：新增路径祖先 artifact 授权、按 round kind 校验、topic 当前候选过滤、UTF-8 安全分块与冲突视图拒绝；单块上限 16 KiB。
 - M2-06：新增 scope/生命周期、raw payload、并发 reply、topic 候选过滤、artifact 分块与工具权限测试；自检证据见 `docs/dev/evidence/m2-06.md`。
+- M2-07：新增一次性运行管理、全局 owner-aware TurnGate、真实路径快照锁、per-run MCP/token/permission、运行 transcript/usage 持久化与 `run:<type>` 事件。
+- M2-07：启动时恢复未完成记录为 interrupted；终止时等待活动 MCP/权限/Agent 事件租约并清理运行配置、MCP 服务和图锁；60 分钟无进展看门狗由运行事件重置，并保护显式中断不被 CLI idle 事件覆盖。
+- M2-07：按首次 `AssistantMessage.Usage` 记录首次请求 input tokens；新增运行生命周期、资源释放、重启恢复、配置路径、项目切换、审计字段、usage 与可注入看门狗测试；自检证据见 `docs/dev/evidence/m2-07.md`。
 - M2-02：`service/workflow` 图命令层——`AddNode`（topic 根 / 带父 prompt / 草稿）、`Connect`（改挂确认）、`MoveNode`（位置）、`UpdateNodeParams`、`SelectNode`、`EnsureExecutable`。
 - M2-02：单父树校验（无环、自连、topic 根、草稿父拒绝）、子树 `stale` 传播与 revision 规则；`SelectNode` 不递增 revision、不广播。
 - M2-02：topic 候选端口解析——0 基 `parentCandidate` 从最新已应用 `topics` 产物计数；非法候选返回 `CANDIDATE_INVALID`；父为 prompt/草稿时清空候选。
@@ -68,7 +71,7 @@ M2 图与提示词（进行中：M2-00..05 已验收；M2-06 实现与自检完�
 
 ### 说明
 
-- 本节记录 M2 设计与 M2-01..06 后端实现；M2-06 待用户验收；画布、选题/提示词 UI、运行生命周期接线与 M2 整体验收仍待后续任务。
+- 本节记录 M2 设计与 M2-01..07 后端实现；M2-06/M2-07 已由用户验收；画布、选题/提示词 UI、前端事件桥、GUI/live CLI 与 M2 整体验收仍待后续任务。
 
 ---
 

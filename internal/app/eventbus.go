@@ -9,10 +9,11 @@ import (
 )
 
 type wailsEventBus struct {
-	mu      sync.Mutex
-	app     *application.App
-	pending []valueobject.AgentEvent
-	started bool
+	mu          sync.Mutex
+	app         *application.App
+	pending     []valueobject.AgentEvent
+	pendingRuns []valueobject.RunEvent
+	started     bool
 }
 
 func newWailsEventBus() *wailsEventBus {
@@ -29,10 +30,15 @@ func (b *wailsEventBus) Start() {
 	b.mu.Lock()
 	b.started = true
 	pending := b.pending
+	pendingRuns := b.pendingRuns
 	b.pending = nil
+	b.pendingRuns = nil
 	b.mu.Unlock()
 	for _, event := range pending {
 		b.emit(event)
+	}
+	for _, event := range pendingRuns {
+		b.emitRun(event)
 	}
 }
 
@@ -50,6 +56,20 @@ func (b *wailsEventBus) Publish(event valueobject.AgentEvent) {
 	b.emit(event)
 }
 
+func (b *wailsEventBus) PublishRun(event valueobject.RunEvent) {
+	b.mu.Lock()
+	if b.app == nil || !b.started {
+		b.pendingRuns = append(b.pendingRuns, event)
+		if len(b.pendingRuns) > 1000 {
+			b.pendingRuns = b.pendingRuns[len(b.pendingRuns)-1000:]
+		}
+		b.mu.Unlock()
+		return
+	}
+	b.mu.Unlock()
+	b.emitRun(event)
+}
+
 func (b *wailsEventBus) emit(event valueobject.AgentEvent) {
 	b.mu.Lock()
 	app := b.app
@@ -59,4 +79,14 @@ func (b *wailsEventBus) emit(event valueobject.AgentEvent) {
 	}
 	name := "agent:" + string(event.Type)
 	app.Event.Emit(name, event)
+}
+
+func (b *wailsEventBus) emitRun(event valueobject.RunEvent) {
+	b.mu.Lock()
+	app := b.app
+	b.mu.Unlock()
+	if app == nil {
+		return
+	}
+	app.Event.Emit("run:"+string(event.Type), event)
 }

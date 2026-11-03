@@ -163,7 +163,7 @@
 - **决策**：
   - **链与会话分离**：链是 topic 根到末端节点的派生路径；每次节点执行创建一个一次性运行（Run），启动一个 Agent 会话，首条消息是 App 构建的上下文；运行结束即销毁。运行之间不共享 Agent 记忆。
   - 上下文只含「topic 根 → 父节点」的路径：每个祖先的**最新已应用轮次**；topic 段只带该路径经候选端口选中的**那一个候选**，不带其他候选；目标节点只带当前参数；不含目标自身历史、兄弟分支、子节点历史、其他树与未应用产物。
-  - 上下文按 token 计，默认 `contextTokenBudget=1,000,000`；超预算从最远祖先「全文 → 摘要 → 引用」降级，仍超则 `CONTEXT_TOO_LARGE`；发送前保守估算，运行后按 CLI 实际 usage 校准。
+  - 上下文按 token 计，默认 `contextTokenBudget=1,000,000`；超预算从最远祖先「全文 → 摘要 → 引用」降级，仍超则 `CONTEXT_TOO_LARGE`；发送前保守估算，运行后按首个 `AssistantMessage.Usage` 的首次请求用量（包括缓存 token）校准；缺失时保持未知，不把多轮累计 usage 当作上下文用量。
   - 上下文文本与 `ancestorHash`/`paramsHash` 可复现；不包含 runId/时间戳；工作区只注入清单与叠加规则。
   - 工作区按 **topic 树**共享：cwd = `trees/<rootTopicId>/`，节点增量 `steps/<nodeId>/`；写作用域限当前运行节点；读取走当前路径的祖先叠加。内置 Write/Edit 由 PreToolUse 做同样白名单；Bash 仍是协作式门禁（RM-017）。
   - **跨树改挂**：子树从树 A 移到树 B 时，把子树的 `steps/<nodeId>/` 从 A 迁到 B；迁移失败整体回滚；迁移后新运行使用 B 的 cwd 与路径。
@@ -217,12 +217,12 @@
 - **背景**：M2 同时有工程/图/待应用变化与运行流式事件；路径链与运行必须按节点/路径分流。
 - **决策**：
   - 命令返回 `{revision, snapshot}`；广播只发 `workspace:changed {revision, reason}` 作为失效信号，前端按 revision 重拉快照；不做增量 diff。
-  - Agent 事件带 `runId`、`nodeId`、`chainPath`（运行时快照）与每运行独立 seq；前端 `runStore` 按运行保存状态与 transcript，`workspaceStore` 保存图与快照。
+  - Agent 事件带 `runId`、`treeId`、`chainId`、`nodeId`、`chainPath`（运行时快照）与每运行独立 seq；运行期 Wails 事件名为 `run:<type>`，前端 `runStore` 按运行保存状态与 transcript，`workspaceStore` 保存图与快照。
   - QuickBar 的链由叶子路径派生：链 ID = `c_<tailNodeId>`；派生链视图由 Go 在快照中计算（不落盘），前端只消费，不复制链规则；`activeNodeId` 决定当前路径；分支产生多条共享前缀的链。
   - `SelectNode` 只持久化 `activeNodeId`，不递增 revision、不广播 `workspace:changed`；选中与路径高亮由前端本地更新。
-  - `workspace:changed.reason` 取 `project` / `graph` / `pending` / `run`。
+  - `workspace:changed.reason` 取 `project` / `graph` / `pending`；运行路径锁变化由携带 `chainPath` 的 `run:status` 表达，不递增工程 revision。
   - 运行记录保留全部，单次 transcript 上限 500 条；控制台「对话」按运行分组，历史只读。
-  - `run:changed` 只携带状态与标识，不携带 transcript。
+  - `run:status` 携带 `chainPath` 与状态；运行开始/结束的 status 事件同时作为路径锁变更信号，M2-08 前端据此刷新锁定视图。运行事件不携带完整 transcript。
 - **理由**：避免拖拽/大量节点时全量快照放大传输；revision 失效信号简单可靠；路径派生让分支无需维护链实体；运行分组与一次性会话语义一致。
 - **代价**：事件后需要一次快照请求；前端需要处理缺口与乱序；链 ID 随末端节点变化。
 - **否决**：delta 合并（易漏状态）；每次事件都推全量快照（传输放大）；持久化链实体（与派生重复）。

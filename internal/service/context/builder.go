@@ -197,6 +197,18 @@ func (b *Builder) Build(ctx context.Context, input Input) (Result, error) {
 	}
 }
 
+func (b *Builder) BuildRunContext(ctx context.Context, project entity.Project, nodeID string, workspace port.RunWorkspace, budget int) (port.RunContext, error) {
+	result, err := b.Build(ctx, Input{Project: project, NodeID: nodeID, Workspace: workspace, Budget: budget})
+	if err != nil {
+		return port.RunContext{}, err
+	}
+	return port.RunContext{
+		TreeID: result.TreeID, NodeID: result.NodeID, ChainPath: append([]string(nil), result.ChainPath...),
+		OutputKind: result.OutputKind, ContextVersion: result.ContextVersion,
+		InitialPrompt: result.InitialPrompt, Hashes: result.Hashes, Estimate: result.Estimate,
+	}, nil
+}
+
 // InputHashes recomputes the graph-ancestor and target-parameter fingerprints
 // independently of budget, representation, or mutable workspace files. It is
 // suitable for a future pending-application check; ContextHash is empty.

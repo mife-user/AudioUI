@@ -1,0 +1,680 @@
+package run
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"slices"
+	"sync"
+	"testing"
+	"time"
+
+	"audio-ui/internal/domain/entity"
+	"audio-ui/internal/domain/port"
+	"audio-ui/internal/domain/valueobject"
+)
+
+func TestTurnGateRequiresOwnerToRelease(t *testing.T) {
+	gate := NewTurnGate()
+	if err := gate.Acquire("r_one"); err != nil {
+		t.Fatal(err)
+	}
+	if !errors.Is(gate.Acquire("r_two"), ErrBusy) {
+		t.Fatal("second owner should receive BUSY")
+	}
+	if !errors.Is(gate.Release("r_two"), ErrGateOwner) {
+		t.Fatal("wrong owner released the gate")
+	}
+	if err := gate.Release("r_one"); err != nil {
+		t.Fatal(err)
+	}
+	if gate.Busy() {
+		t.Fatal("gate remained busy after owner release")
+	}
+}
+
+func TestStartRunUsesOneShotSpecAndPersistsTerminalUsage(t *testing.T) {
+	h := newRunHarness(t)
+	record, err := h.manager.Start(context.Background(), "n_topic")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if record.Status != valueobject.RunRunning || record.ChainID != "c_n_topic" || !slices.Equal(record.ChainPath, []string{"n_topic"}) {
+		t.Fatalf("run = %+v", record.RunSummary)
+	}
+	if h.manager.ActiveRunID() != record.ID || !h.manager.IsBusy() {
+		t.Fatal("run gate was not held")
+	}
+	if h.driver.spec.SystemPrompt == "" || len(h.driver.spec.BuiltinTools) == 0 || len(h.driver.spec.AllowedTools) == 0 {
+		t.Fatalf("driver did not receive per-run configuration: %+v", h.driver.spec)
+	}
+	if h.driver.spec.MCPConfigPath == "" || h.driver.spec.MCPToken != "secret-test-token" {
+		t.Fatalf("MCP credentials missing from driver spec: %+v", h.driver.spec)
+	}
+	if !errors.Is(func() error { _, err := h.manager.Start(context.Background(), "n_other"); return err }(), ErrBusy) {
+		t.Fatal("parallel run should be rejected with BUSY")
+	}
+
+	actual := 140
+	h.driver.spec.EventSink(valueobject.AgentEvent{
+		Version: 1, Type: valueobject.EventStatus,
+		State: &valueobject.AgentState{Status: valueobject.SessionIdle}, ActualInputTokens: &actual,
+	})
+	waitFor(t, func() bool { return !h.manager.IsBusy() })
+	stored, err := h.store.Load(context.Background(), record.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Status != valueobject.RunSucceeded || !stored.UsageReported || stored.ActualInputTokens != actual || !stored.OverBudget {
+		t.Fatalf("terminal run = %+v", stored.RunSummary)
+	}
+	if !h.workflow.released || !h.configs.cleaned || !h.tool.stopped || !h.session.closed {
+		t.Fatalf("cleanup incomplete: workflow=%v config=%v tool=%v session=%v", h.workflow.released, h.configs.cleaned, h.tool.stopped, h.session.closed)
+	}
+	waitFor(t, func() bool { return len(h.publisher.snapshot()) >= 3 })
+	events := h.publisher.snapshot()
+	if len(events) < 3 {
+		t.Fatalf("missing run events: %d", len(events))
+	}
+	for _, event := range events {
+		if event.RunID != record.ID || event.TreeID != "n_topic" || event.NodeID != "n_topic" || !slices.Equal(event.ChainPath, []string{"n_topic"}) {
+			t.Fatalf("run event identity missing: %+v", event)
+		}
+	}
+}
+
+func TestSendFailureReleasesRunLockGateAndMCPConfig(t *testing.T) {
+	h := newRunHarness(t)
+	h.session.sendErr = errors.New("AGENT_SEND_FAILED: unavailable")
+	record, err := h.manager.Start(context.Background(), "n_topic")
+	if err == nil {
+		t.Fatal("expected send failure")
+	}
+	if record.Status != valueobject.RunFailed || record.Error != "AGENT_SEND_FAILED" {
+		t.Fatalf("failed run = %+v", record.RunSummary)
+	}
+	if h.manager.IsBusy() || !h.workflow.released || !h.configs.cleaned || !h.tool.stopped {
+		t.Fatalf("failure leaked resources: busy=%v lock=%v config=%v tool=%v", h.manager.IsBusy(), h.workflow.released, h.configs.cleaned, h.tool.stopped)
+	}
+}
+
+func TestBeginRunFailureReleasesTurnGate(t *testing.T) {
+	h := newRunHarness(t)
+	h.workflow.beginErr = errors.New("workflow unavailable")
+	if _, err := h.manager.Start(context.Background(), "n_topic"); err == nil {
+		t.Fatal("expected BeginRun failure")
+	}
+	if h.manager.IsBusy() || h.workflow.released {
+		t.Fatalf("failed BeginRun leaked gate or released an unacquired lock: busy=%v released=%v", h.manager.IsBusy(), h.workflow.released)
+	}
+}
+
+func TestDriverStartFailureReleasesRunResources(t *testing.T) {
+	h := newRunHarness(t)
+	h.driver.startErr = errors.New("AGENT_UNAVAILABLE: test failure")
+	record, err := h.manager.Start(context.Background(), "n_topic")
+	if err == nil {
+		t.Fatal("expected driver start failure")
+	}
+	if record.Status != valueobject.RunFailed || record.Error != "AGENT_UNAVAILABLE" {
+		t.Fatalf("failed run = %+v", record.RunSummary)
+	}
+	if h.manager.IsBusy() || !h.workflow.released || !h.configs.cleaned || !h.tool.stopped {
+		t.Fatalf("startup failure leaked resources: busy=%v lock=%v config=%v tool=%v", h.manager.IsBusy(), h.workflow.released, h.configs.cleaned, h.tool.stopped)
+	}
+}
+
+func TestWatchdogAndInterruptReleaseRunResources(t *testing.T) {
+	t.Run("watchdog", func(t *testing.T) {
+		h := newRunHarness(t)
+		h.manager.opts.RunTimeout = 40 * time.Millisecond
+		record, err := h.manager.Start(context.Background(), "n_topic")
+		if err != nil {
+			t.Fatal(err)
+		}
+		waitFor(t, func() bool { return !h.manager.IsBusy() })
+		stored, err := h.store.Load(context.Background(), record.ID)
+		if err != nil || stored.Status != valueobject.RunFailed || stored.Error != "RUN_TIMEOUT" {
+			t.Fatalf("timed out run = %+v, err=%v", stored.RunSummary, err)
+		}
+		if !h.workflow.released || !h.configs.cleaned || !h.tool.stopped {
+			t.Fatal("watchdog did not clean up run resources")
+		}
+	})
+	t.Run("interrupt", func(t *testing.T) {
+		h := newRunHarness(t)
+		record, err := h.manager.Start(context.Background(), "n_topic")
+		if err != nil {
+			t.Fatal(err)
+		}
+		h.session.interruptFn = func() {
+			h.driver.spec.EventSink(valueobject.AgentEvent{
+				Type: valueobject.EventStatus, State: &valueobject.AgentState{Status: valueobject.SessionIdle},
+			})
+		}
+		if err := h.manager.Interrupt(context.Background(), record.ID); err != nil {
+			t.Fatal(err)
+		}
+		stored, err := h.store.Load(context.Background(), record.ID)
+		if err != nil || stored.Status != valueobject.RunInterrupted || h.manager.IsBusy() {
+			t.Fatalf("interrupted run = %+v, busy=%v, err=%v", stored.RunSummary, h.manager.IsBusy(), err)
+		}
+	})
+}
+
+func TestWatchdogIsInactivityBasedAndResetsOnProgress(t *testing.T) {
+	h := newRunHarness(t)
+	timer := &fakeRunTimer{}
+	h.manager.opts.RunTimeout = DefaultRunTimeout
+	h.manager.opts.NewTimer = func(delay time.Duration, callback func()) RunTimer {
+		timer.mu.Lock()
+		timer.delay = delay
+		timer.callback = callback
+		timer.mu.Unlock()
+		return timer
+	}
+	record, err := h.manager.Start(context.Background(), "n_topic")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if timer.delay != 60*time.Minute {
+		t.Fatalf("watchdog delay = %s, want 60 minutes", timer.delay)
+	}
+	h.driver.spec.EventSink(valueobject.AgentEvent{
+		Type:    valueobject.EventMessage,
+		Message: &valueobject.TranscriptItem{ID: "progress", Kind: valueobject.TranscriptMessage, Text: "working", Streaming: true},
+	})
+	if got := timer.resetCount(); got != 1 {
+		t.Fatalf("timer resets after stream progress = %d, want 1", got)
+	}
+	if err := h.manager.WithActiveRun(context.Background(), h.toolFactory.scope, func() error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if got := timer.resetCount(); got != 2 {
+		t.Fatalf("timer resets after MCP activity = %d, want 2", got)
+	}
+	timer.fire()
+	stored, err := h.store.Load(context.Background(), record.ID)
+	if err != nil || stored.Status != valueobject.RunFailed || stored.Error != "RUN_TIMEOUT" {
+		t.Fatalf("timed out run = %+v, err=%v", stored.RunSummary, err)
+	}
+}
+
+func TestCloseCancelsQuestionBeforeWaitingForMCPLease(t *testing.T) {
+	h := newRunHarness(t)
+	record, err := h.manager.Start(context.Background(), "n_topic")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.permissions.askStarted = make(chan struct{})
+	h.permissions.askRelease = make(chan struct{})
+	questionDone := make(chan error, 1)
+	go func() {
+		questionDone <- h.manager.WithActiveRun(context.Background(), h.toolFactory.scope, func() error {
+			_, err := h.permissions.Ask(context.Background(), valueobject.QuestionRequest{Question: "continue?"})
+			return err
+		})
+	}()
+	<-h.permissions.askStarted
+	closeDone := make(chan struct{})
+	go func() { h.manager.Close(); close(closeDone) }()
+	select {
+	case <-closeDone:
+	case <-time.After(time.Second):
+		t.Fatal("Close waited on an ask_user request before closing its broker")
+	}
+	if err := <-questionDone; err != nil {
+		t.Fatal(err)
+	}
+	stored, err := h.store.Load(context.Background(), record.ID)
+	if err != nil || stored.Status != valueobject.RunInterrupted {
+		t.Fatalf("shutdown run = %+v, err=%v", stored.RunSummary, err)
+	}
+}
+
+func TestTranscriptRemainsBounded(t *testing.T) {
+	transcript := []valueobject.TranscriptItem{}
+	for i := 0; i < valueobject.MaxRunTranscriptItems+1; i++ {
+		applyMessage(&transcript, valueobject.TranscriptItem{ID: fmt.Sprintf("m-%d", i), Text: "x"})
+	}
+	if len(transcript) != valueobject.MaxRunTranscriptItems || transcript[0].ID != "m-1" {
+		t.Fatalf("transcript bounds not enforced: len=%d first=%q", len(transcript), transcript[0].ID)
+	}
+}
+
+func TestRunTerminationWaitsForActiveMCPLease(t *testing.T) {
+	h := newRunHarness(t)
+	record, err := h.manager.Start(context.Background(), "n_topic")
+	if err != nil {
+		t.Fatal(err)
+	}
+	entered := make(chan struct{})
+	leave := make(chan struct{})
+	operationDone := make(chan error, 1)
+	go func() {
+		operationDone <- h.manager.WithActiveRun(context.Background(), h.toolFactory.scope, func() error {
+			close(entered)
+			<-leave
+			return nil
+		})
+	}()
+	<-entered
+	h.driver.spec.EventSink(valueobject.AgentEvent{Type: valueobject.EventStatus, State: &valueobject.AgentState{Status: valueobject.SessionIdle}})
+	select {
+	case <-h.tool.stopStarted:
+		t.Fatal("MCP server stopped before the active reply lease finished")
+	case <-time.After(30 * time.Millisecond):
+	}
+	close(leave)
+	if err := <-operationDone; err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, func() bool { return !h.manager.IsBusy() })
+	stored, err := h.store.Load(context.Background(), record.ID)
+	if err != nil || stored.Status != valueobject.RunSucceeded {
+		t.Fatalf("run record=%+v err=%v", stored.RunSummary, err)
+	}
+}
+
+func TestRecoverInterruptedRunsAcrossProjectsAndKeepsHistory(t *testing.T) {
+	started := testRecord("r_start", "p_one", valueobject.RunStarting)
+	running := testRecord("r_running", "p_two", valueobject.RunRunning)
+	succeeded := testRecord("r_done", "p_two", valueobject.RunSucceeded)
+	one := &memoryRunStore{records: map[string]entity.RunRecord{started.ID: started}}
+	two := &memoryRunStore{records: map[string]entity.RunRecord{running.ID: running, succeeded.ID: succeeded}}
+	projects := &fakeProjects{project: testProject(), list: []entity.ProjectSummary{{ID: "p_one"}, {ID: "p_two"}}}
+	provider := &fakeRunStores{stores: map[string]*memoryRunStore{"p_one": one, "p_two": two}}
+	configs := &fakeRunConfigs{}
+	manager := New(Options{Projects: projects, RunStores: provider, RunConfigs: configs})
+	if err := manager.RecoverInterrupted(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		store *memoryRunStore
+		id    string
+		want  valueobject.RunStatus
+	}{{one, started.ID, valueobject.RunInterrupted}, {two, running.ID, valueobject.RunInterrupted}, {two, succeeded.ID, valueobject.RunSucceeded}} {
+		record, err := test.store.Load(context.Background(), test.id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if record.Status != test.want {
+			t.Fatalf("run %s status=%s, want %s", test.id, record.Status, test.want)
+		}
+	}
+	if len(configs.cleanedIDs) != 2 || !slices.Contains(configs.cleanedIDs, "r_start") || !slices.Contains(configs.cleanedIDs, "r_running") {
+		t.Fatalf("interrupted MCP configs were not cleaned: %v", configs.cleanedIDs)
+	}
+}
+
+type runHarness struct {
+	manager     *Manager
+	workflow    *fakeWorkflow
+	projects    *fakeProjects
+	store       *memoryRunStore
+	configs     *fakeRunConfigs
+	tool        *fakeTool
+	toolFactory *fakeToolFactory
+	driver      *fakeDriver
+	session     *fakeAgentSession
+	permissions *fakeRunPermissions
+	publisher   *fakeRunPublisher
+}
+
+func newRunHarness(t *testing.T) *runHarness {
+	t.Helper()
+	project := testProject()
+	workflow := &fakeWorkflow{project: project, path: []string{"n_topic"}}
+	projects := &fakeProjects{project: project, config: valueobject.AppConfig{ContextTokenBudget: 100}}
+	store := &memoryRunStore{records: make(map[string]entity.RunRecord)}
+	configs := &fakeRunConfigs{}
+	tool := &fakeTool{token: "secret-test-token", stopStarted: make(chan struct{}, 1)}
+	toolFactory := &fakeToolFactory{tool: tool}
+	session := &fakeAgentSession{}
+	driver := &fakeDriver{session: session}
+	permissions := &fakeRunPermissions{}
+	publisher := &fakeRunPublisher{}
+	manager := New(Options{
+		Projects: projects, Workflow: workflow, Contexts: fakeContextBuilder{},
+		Workspaces: fakeWorkspaceProvider{}, RunStores: &fakeRunStores{stores: map[string]*memoryRunStore{"p_test": store}},
+		RunConfigs: configs, ToolServers: toolFactory, Permissions: fakePermissionFactory{permissions: permissions},
+		Driver: driver, Publisher: publisher, RunTimeout: time.Second,
+	})
+	return &runHarness{manager: manager, workflow: workflow, projects: projects, store: store, configs: configs, tool: tool, toolFactory: toolFactory, driver: driver, session: session, permissions: permissions, publisher: publisher}
+}
+
+func waitFor(t *testing.T, predicate func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if predicate() {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("condition did not become true before timeout")
+}
+
+func testProject() entity.Project {
+	return entity.Project{
+		Version: valueobject.ProjectFileVersion, ID: "p_test", Name: "Test", Revision: 1,
+		Nodes: []entity.Node{{ID: "n_topic", Type: valueobject.NodeTypeTopic, Title: "Topic", Params: entity.NodeParams{Idea: "idea"}, Rounds: []entity.Round{}}},
+	}
+}
+
+func testRecord(id, projectID string, status valueobject.RunStatus) entity.RunRecord {
+	return entity.RunRecord{RunSummary: entity.RunSummary{
+		ID: id, TreeID: "n_topic", NodeID: "n_topic", ChainID: "c_n_topic", ChainPath: []string{"n_topic"},
+		Status: status, ContextVersion: 1, StartedAt: time.Now().UTC().Format(time.RFC3339Nano),
+	}, Transcript: []valueobject.TranscriptItem{}}
+}
+
+type fakeProjects struct {
+	project entity.Project
+	config  valueobject.AppConfig
+	list    []entity.ProjectSummary
+}
+
+func (p *fakeProjects) Current(context.Context) (entity.Project, error) {
+	return p.project.Clone(), nil
+}
+func (p *fakeProjects) Config(context.Context) (valueobject.AppConfig, error) { return p.config, nil }
+func (p *fakeProjects) List(context.Context) ([]entity.ProjectSummary, error) {
+	return append([]entity.ProjectSummary(nil), p.list...), nil
+}
+
+type fakeWorkflow struct {
+	project  entity.Project
+	path     []string
+	beginErr error
+	mu       sync.Mutex
+	locked   bool
+	released bool
+}
+
+func (w *fakeWorkflow) BeginRun(_ context.Context, _ string, _ string) (entity.Project, []string, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.beginErr != nil {
+		return entity.Project{}, nil, w.beginErr
+	}
+	w.locked = true
+	return w.project.Clone(), append([]string(nil), w.path...), nil
+}
+func (w *fakeWorkflow) ReleaseRunLock(context.Context, string) error {
+	w.mu.Lock()
+	w.released = true
+	w.locked = false
+	w.mu.Unlock()
+	return nil
+}
+
+type fakeContextBuilder struct{}
+
+func (fakeContextBuilder) BuildRunContext(_ context.Context, project entity.Project, nodeID string, workspace port.RunWorkspace, budget int) (port.RunContext, error) {
+	scope := workspace.Scope()
+	return port.RunContext{
+		TreeID: scope.TreeID, NodeID: nodeID, ChainPath: scope.ChainPath,
+		OutputKind: valueobject.OutputKindTopics, ContextVersion: 1, InitialPrompt: "initial context",
+		Hashes:   valueobject.ContextHashes{ContextHash: "context", AncestorHash: "ancestor", ParamsHash: "params"},
+		Estimate: valueobject.ContextEstimate{EstimatorVersion: 1, EstimatedTokens: 40, TokenBudget: budget},
+	}, nil
+}
+
+type fakeWorkspaceProvider struct{}
+
+func (fakeWorkspaceProvider) OpenRun(_ context.Context, projectID, treeID, nodeID string, chainPath []string) (port.RunWorkspace, error) {
+	return &fakeRunWorkspace{scope: port.WorkspaceScope{ProjectID: projectID, TreeID: treeID, NodeID: nodeID, ChainPath: append([]string(nil), chainPath...)}}, nil
+}
+
+type fakeRunWorkspace struct{ scope port.WorkspaceScope }
+
+func (w *fakeRunWorkspace) Scope() port.WorkspaceScope      { return w.scope }
+func (*fakeRunWorkspace) CWD() string                       { return `C:\workspace\trees\n_topic` }
+func (*fakeRunWorkspace) Resolver() port.ScopedPathResolver { return fakePathResolver{} }
+func (w *fakeRunWorkspace) ReadFile(context.Context, string, int64) (port.WorkspaceRead, error) {
+	return port.WorkspaceRead{}, nil
+}
+func (w *fakeRunWorkspace) ListDir(context.Context, string, int) (port.WorkspaceList, error) {
+	return port.WorkspaceList{}, nil
+}
+func (w *fakeRunWorkspace) Grep(context.Context, string, string, port.WorkspaceGrepOptions) (port.WorkspaceGrep, error) {
+	return port.WorkspaceGrep{}, nil
+}
+func (w *fakeRunWorkspace) Stat(context.Context, string) (port.WorkspaceStat, error) {
+	return port.WorkspaceStat{}, nil
+}
+
+type fakePathResolver struct{}
+
+func (fakePathResolver) Resolve(path string) (string, error)      { return path, nil }
+func (fakePathResolver) ResolveRead(path string) (string, error)  { return path, nil }
+func (fakePathResolver) ResolveWrite(path string) (string, error) { return path, nil }
+
+type fakeRunStores struct{ stores map[string]*memoryRunStore }
+
+func (p *fakeRunStores) ForProject(_ context.Context, projectID string) (port.RunStore, error) {
+	store := p.stores[projectID]
+	if store == nil {
+		return nil, fmt.Errorf("no store for %s", projectID)
+	}
+	return store, nil
+}
+
+type memoryRunStore struct {
+	mu      sync.Mutex
+	records map[string]entity.RunRecord
+}
+
+func (s *memoryRunStore) List(context.Context) ([]entity.RunSummary, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	result := make([]entity.RunSummary, 0, len(s.records))
+	for _, record := range s.records {
+		result = append(result, record.RunSummary)
+	}
+	return result, nil
+}
+func (s *memoryRunStore) Load(_ context.Context, id string) (entity.RunRecord, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	record, ok := s.records[id]
+	if !ok {
+		return entity.RunRecord{}, ErrRunNotFound
+	}
+	return cloneRecord(record), nil
+}
+func (s *memoryRunStore) Save(_ context.Context, record entity.RunRecord) error {
+	s.mu.Lock()
+	s.records[record.ID] = cloneRecord(record)
+	s.mu.Unlock()
+	return nil
+}
+
+type fakeRunConfigs struct {
+	mu         sync.Mutex
+	cleaned    bool
+	cleanedIDs []string
+}
+
+func (c *fakeRunConfigs) Prepare(_ context.Context, projectID, runID string) (string, error) {
+	return `C:\data\agent\` + projectID + `\` + runID + `\mcp.json`, nil
+}
+func (c *fakeRunConfigs) Cleanup(_ context.Context, _, runID string) error {
+	c.mu.Lock()
+	c.cleaned = true
+	c.cleanedIDs = append(c.cleanedIDs, runID)
+	c.mu.Unlock()
+	return nil
+}
+
+type fakeToolFactory struct {
+	tool  *fakeTool
+	scope port.RunScope
+}
+
+func (f *fakeToolFactory) New(string, string, port.QuestionGate, func(string)) (port.ToolServer, error) {
+	return f.tool, nil
+}
+func (f *fakeToolFactory) NewForRun(scope port.RunScope, _, _ string, _ port.QuestionGate, _ func(string), _ port.WorkspaceReader, _ port.RunLifecycle) (port.ToolServer, error) {
+	f.scope = scope
+	return f.tool, nil
+}
+
+type fakeTool struct {
+	token       string
+	started     bool
+	stopped     bool
+	stopStarted chan struct{}
+}
+
+func (t *fakeTool) Start(context.Context) error { t.started = true; return nil }
+func (t *fakeTool) Stop(context.Context) error {
+	t.stopped = true
+	select {
+	case t.stopStarted <- struct{}{}:
+	default:
+	}
+	return nil
+}
+func (*fakeTool) URL() string              { return "http://127.0.0.1:1/mcp" }
+func (t *fakeTool) Token() string          { return t.token }
+func (*fakeTool) WriteConfig(string) error { return nil }
+
+type fakePermissionFactory struct{ permissions *fakeRunPermissions }
+
+func (f fakePermissionFactory) NewRunPermissions(_ port.RunScope, _ port.ScopedPathResolver, _ func(valueobject.AgentEvent)) (port.RunPermissionController, error) {
+	return f.permissions, nil
+}
+
+type fakeRunPermissions struct {
+	resolved   func(string, string)
+	askStarted chan struct{}
+	askRelease chan struct{}
+	closeOnce  sync.Once
+}
+
+func (*fakeRunPermissions) Request(context.Context, valueobject.PermissionRequest) (valueobject.PermissionDecision, error) {
+	return valueobject.DecisionDeny, nil
+}
+func (p *fakeRunPermissions) Ask(context.Context, valueobject.QuestionRequest) (valueobject.QuestionAnswer, error) {
+	if p.askStarted != nil {
+		close(p.askStarted)
+		<-p.askRelease
+	}
+	return valueobject.QuestionAnswer{}, nil
+}
+func (*fakeRunPermissions) Check(context.Context, string, map[string]any) port.PolicyResult {
+	return port.PolicyResult{Decision: port.PolicyAllow}
+}
+func (*fakeRunPermissions) ResolvePermission(string, valueobject.PermissionDecision) error {
+	return nil
+}
+func (*fakeRunPermissions) ResolveQuestion(string, valueobject.QuestionAnswer) error { return nil }
+func (p *fakeRunPermissions) SetResolvedCallback(callback func(string, string)) {
+	p.resolved = callback
+}
+func (p *fakeRunPermissions) Close() {
+	if p.askRelease != nil {
+		p.closeOnce.Do(func() { close(p.askRelease) })
+	}
+}
+
+type fakeDriver struct {
+	spec     port.DriverSpec
+	session  *fakeAgentSession
+	startErr error
+}
+
+func (d *fakeDriver) Start(_ context.Context, spec port.DriverSpec) (port.AgentSession, error) {
+	d.spec = spec
+	if d.startErr != nil {
+		return nil, d.startErr
+	}
+	return d.session, nil
+}
+func (*fakeDriver) Resume(context.Context, port.DriverSpec, json.RawMessage) (port.AgentSession, error) {
+	return nil, errors.New("resume is not used")
+}
+
+type fakeAgentSession struct {
+	sendErr     error
+	closed      bool
+	interruptFn func()
+}
+
+func (s *fakeAgentSession) Send(context.Context, string) error { return s.sendErr }
+func (s *fakeAgentSession) Interrupt(context.Context) error {
+	if s.interruptFn != nil {
+		s.interruptFn()
+	}
+	return nil
+}
+func (s *fakeAgentSession) Close() error { s.closed = true; return nil }
+
+type fakeRunPublisher struct {
+	mu     sync.Mutex
+	events []valueobject.RunEvent
+}
+
+func (p *fakeRunPublisher) snapshot() []valueobject.RunEvent {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]valueobject.RunEvent(nil), p.events...)
+}
+
+type fakeRunTimer struct {
+	mu       sync.Mutex
+	delay    time.Duration
+	callback func()
+	resets   int
+	stopped  bool
+}
+
+func (t *fakeRunTimer) Stop() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	wasActive := !t.stopped
+	t.stopped = true
+	return wasActive
+}
+
+func (t *fakeRunTimer) Reset(delay time.Duration) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	wasActive := !t.stopped
+	t.delay = delay
+	t.resets++
+	t.stopped = false
+	return wasActive
+}
+
+func (t *fakeRunTimer) resetCount() int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.resets
+}
+
+func (t *fakeRunTimer) fire() {
+	t.mu.Lock()
+	callback := t.callback
+	t.stopped = true
+	t.mu.Unlock()
+	if callback != nil {
+		callback()
+	}
+}
+
+func (p *fakeRunPublisher) PublishRun(event valueobject.RunEvent) {
+	p.mu.Lock()
+	p.events = append(p.events, event)
+	p.mu.Unlock()
+}
+
+func cloneRecord(record entity.RunRecord) entity.RunRecord {
+	clone := record
+	clone.ChainPath = append([]string(nil), record.ChainPath...)
+	clone.Transcript = append([]valueobject.TranscriptItem(nil), record.Transcript...)
+	return clone
+}

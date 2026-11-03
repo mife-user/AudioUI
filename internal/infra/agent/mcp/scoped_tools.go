@@ -293,6 +293,11 @@ func (s *Server) replyRun(ctx context.Context, request *sdkmcp.CallToolRequest) 
 		if err != nil {
 			return err
 		}
+		if observer, ok := s.options.RunLifecycle.(port.RunPendingObserver); ok {
+			if err := observer.RecordRunPending(ctx, scope, pending); err != nil {
+				return err
+			}
+		}
 		output = ScopedReplyOutput{Accepted: true, PendingID: pending.ID, Status: pending.Status, Error: pending.Error}
 		return nil
 	})

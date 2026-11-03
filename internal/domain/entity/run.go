@@ -12,9 +12,12 @@ type RunSummary struct {
 	ChainPath         []string              `json:"chainPath"`
 	Status            valueobject.RunStatus `json:"status"`
 	ContextVersion    int                   `json:"contextVersion"`
+	EstimatorVersion  int                   `json:"estimatorVersion,omitempty"`
 	ContextHash       string                `json:"contextHash,omitempty"`
 	EstimatedTokens   int                   `json:"estimatedTokens,omitempty"`
+	TokenBudget       int                   `json:"tokenBudget,omitempty"`
 	ActualInputTokens int                   `json:"actualInputTokens,omitempty"`
+	UsageReported     bool                  `json:"usageReported,omitempty"`
 	OverBudget        bool                  `json:"overBudget,omitempty"`
 	Error             string                `json:"error,omitempty"`
 	PendingID         string                `json:"pendingId,omitempty"`
@@ -25,8 +28,9 @@ type RunSummary struct {
 // RunRecord is the per-run detail document.
 type RunRecord struct {
 	RunSummary
-	ContextPreview string                       `json:"contextPreview,omitempty"`
-	Transcript     []valueobject.TranscriptItem `json:"transcript"`
+	ContextPreview          string                       `json:"contextPreview,omitempty"`
+	ContextPreviewTruncated bool                         `json:"contextPreviewTruncated,omitempty"`
+	Transcript              []valueobject.TranscriptItem `json:"transcript"`
 }
 
 // RunsFile is the runs.json index document.

@@ -421,8 +421,14 @@ func (s *Service) startDriver(ctx context.Context, ref json.RawMessage, generati
 	}
 
 	spec := port.DriverSpec{
-		ChainID:       valueobject.DefaultChainID,
-		Workspace:     s.opts.Layout.WorkspaceDir,
+		ChainID:      valueobject.DefaultChainID,
+		Workspace:    s.opts.Layout.WorkspaceDir,
+		SystemPrompt: "You are AudioUI's local content agent. Work only inside the provided workspace. Use ask_user when a decision is needed. Use reply(kind=message) for chat output; graph tools are not available in M1.",
+		BuiltinTools: []string{"Read", "Glob", "Grep", "Write", "Edit", "Bash"},
+		AllowedTools: []string{
+			"mcp__audioui__get_chain", "mcp__audioui__reply", "mcp__audioui__read_file",
+			"mcp__audioui__list_dir", "mcp__audioui__grep", "mcp__audioui__stat", "mcp__audioui__ask_user",
+		},
 		MCPConfigPath: mcpPath,
 		MCPURL:        tool.URL(),
 		MCPToken:      tool.Token(),
