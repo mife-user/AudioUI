@@ -1,5 +1,5 @@
 import type { Edge, Node as FlowNode } from '@xyflow/react'
-import type { Node, WorkspaceSnapshot } from '../../bindings/audio-ui/internal/domain/entity'
+import type { Node, NodeParams, RunStartResult, WorkspaceSnapshot } from '../../bindings/audio-ui/internal/domain/entity'
 import type { TopicCandidateFixture } from './graphApi'
 
 export type CanvasNodeData = {
@@ -9,6 +9,13 @@ export type CanvasNodeData = {
   hasUnmappedChildren: boolean
   candidates: TopicCandidateFixture[]
   mutationsDisabled: boolean
+  projectId?: string
+  runStatus?: string
+  pendingCount?: number
+  globalRunBusy?: boolean
+  runSubmitting?: boolean
+  onUpdateTopicParams?: (nodeId: string, title: string, params: NodeParams, projectId: string) => Promise<boolean | void>
+  onStartTopicRun?: (nodeId: string, projectId: string) => Promise<RunStartResult>
   onAddChild: (nodeId: string, candidate: number | null) => void
 }
 
@@ -22,16 +29,37 @@ export function deriveHighlightedPath(snapshot: WorkspaceSnapshot): Set<string> 
   return new Set([activeNodeId])
 }
 
+type TopicCallbacks = {
+  runSubmittingNodeId?: string
+  onUpdateTopicParams?: CanvasNodeData['onUpdateTopicParams']
+  onStartTopicRun?: CanvasNodeData['onStartTopicRun']
+}
+
 export function buildFlowModel(
   snapshot: WorkspaceSnapshot,
   onAddChild: CanvasNodeData['onAddChild'],
   candidateFixtures: Record<string, TopicCandidateFixture[]> = {},
   mutationsDisabled = false,
+  topicCallbacks: TopicCallbacks = {},
 ): { nodes: CanvasFlowNode[]; edges: Edge[] } {
   const locked = new Set(snapshot.lockedNodeIds ?? [])
   const highlighted = deriveHighlightedPath(snapshot)
   const projectNodes = snapshot.nodes ?? []
+  const projectId = snapshot.project?.id ?? ''
   const byId = new Map(projectNodes.map((node) => [node.id, node]))
+  const latestRunByNode = new Map<string, { status: string; startedAt: string }>()
+  for (const run of snapshot.runs ?? []) {
+    const previous = latestRunByNode.get(run.nodeId)
+    const startedAt = run.startedAt ?? ''
+    if (!previous || startedAt >= previous.startedAt) latestRunByNode.set(run.nodeId, { status: run.status, startedAt })
+  }
+  const pendingCountByNode = new Map<string, number>()
+  for (const pending of snapshot.pending ?? []) {
+    if (pending.status !== 'pending' && pending.status !== 'invalid') continue
+    pendingCountByNode.set(pending.nodeId, (pendingCountByNode.get(pending.nodeId) ?? 0) + 1)
+  }
+  const globalRunBusy = Boolean(topicCallbacks.runSubmittingNodeId)
+    || (snapshot.runs ?? []).some((run) => run.status === 'starting' || run.status === 'running')
   const nodes: CanvasFlowNode[] = projectNodes.map((node) => ({
     id: node.id,
     type: node.type as CanvasFlowNode['type'],
@@ -45,6 +73,13 @@ export function buildFlowModel(
         && !candidateFixtures[node.id]?.[child.parentCandidate ?? 0]),
       candidates: candidateFixtures[node.id] ?? [],
       mutationsDisabled,
+      projectId,
+      runStatus: latestRunByNode.get(node.id)?.status,
+      pendingCount: pendingCountByNode.get(node.id) ?? 0,
+      globalRunBusy,
+      runSubmitting: topicCallbacks.runSubmittingNodeId === node.id,
+      onUpdateTopicParams: topicCallbacks.onUpdateTopicParams,
+      onStartTopicRun: topicCallbacks.onStartTopicRun,
       onAddChild,
     },
   }))

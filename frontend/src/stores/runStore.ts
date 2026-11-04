@@ -150,7 +150,9 @@ export const useRunStore = create<RunStoreState>((set) => ({
 
     const activeRun = summaries.find((summary) => isActive(summary.status))
     const stillSelected = summaries.some((summary) => summary.id === current.selectedRunId)
-    const selectedRunId = activeRun?.id ?? (stillSelected ? current.selectedRunId : summaries[0]?.id ?? null)
+    const selectedView = current.selectedRunId ? nextRuns[current.selectedRunId] : undefined
+    const selectedViewExists = Boolean(selectedView && (selectedView.snapshot || selectedView.bufferedEvents.length > 0))
+    const selectedRunId = activeRun?.id ?? (stillSelected || selectedViewExists ? current.selectedRunId : summaries[0]?.id ?? null)
     if (selectedRunId) {
       const selected = nextRuns[selectedRunId] ?? emptyView(summaries.find((item) => item.id === selectedRunId) ?? null)
       nextRuns[selectedRunId] = {

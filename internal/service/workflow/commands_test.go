@@ -501,6 +501,20 @@ func TestRunLockLifecycle(t *testing.T) {
 	}
 }
 
+func TestBeginRunRejectsStaleProjectBeforeLocking(t *testing.T) {
+	h := newHarness(t, baseProject())
+	beforeChanges := len(*h.changes)
+	if _, _, err := h.service.BeginRun(context.Background(), "r_run", "n_a", "p_other"); !errors.Is(err, ErrProjectChanged) {
+		t.Fatalf("BeginRun error = %v, want PROJECT_CHANGED", err)
+	}
+	if locked := h.service.LockedNodeIDs(); len(locked) != 0 {
+		t.Fatalf("stale project start acquired path locks: %+v", locked)
+	}
+	if len(*h.changes) != beforeChanges {
+		t.Fatalf("stale project start published changes: %+v", *h.changes)
+	}
+}
+
 func TestRunLockReleaseEventCarriesProjectAndLatestGraphRevision(t *testing.T) {
 	h := newHarness(t, baseProject())
 	if err := h.service.AcquireRunLock(context.Background(), "r_one", "n_topic", "n_a", []string{"n_topic", "n_a"}); err != nil {

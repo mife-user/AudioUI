@@ -1,5 +1,6 @@
 import { Events } from '@wailsio/runtime'
 import { RunService } from '../../bindings/audio-ui/internal/handler'
+import type { RunStartResult } from '../../bindings/audio-ui/internal/domain/entity'
 import type { RunSnapshot, RunSummary, WorkspaceRunSummary } from '../../bindings/audio-ui/internal/domain/entity'
 import type { PermissionRequest, QuestionRequest, RunStatus, TranscriptItem } from '../../bindings/audio-ui/internal/domain/valueobject'
 
@@ -37,7 +38,7 @@ export type RunEvent = {
   actualInputTokens?: number
 }
 
-export type { PermissionRequest, QuestionRequest, RunSnapshot, RunStatus, RunSummary, TranscriptItem, WorkspaceRunSummary }
+export type { PermissionRequest, QuestionRequest, RunSnapshot, RunStartResult, RunStatus, RunSummary, TranscriptItem, WorkspaceRunSummary }
 export type PermissionDecision = 'allow' | 'allow_session' | 'deny'
 
 function eventData<T>(payload: unknown): T {
@@ -50,6 +51,10 @@ function eventData<T>(payload: unknown): T {
 const runEventNames: RunEventType[] = [
   'status', 'message', 'tool', 'permission', 'question', 'error', 'pending', 'request_resolved',
 ]
+
+export async function startRun(nodeId: string, projectId: string): Promise<RunStartResult> {
+  return await RunService.Start(nodeId, projectId)
+}
 
 export async function getRunSnapshot(runId: string): Promise<RunSnapshot> {
   return await RunService.GetRunSnapshot(runId)

@@ -1,5 +1,5 @@
-import { getRunSnapshot, interruptRun, respondRunPermission, respondRunQuestion, subscribeRunEvents } from '../api/runs'
-import type { PermissionDecision, RunEvent } from '../api/runs'
+import { getRunSnapshot, interruptRun, respondRunPermission, respondRunQuestion, startRun, subscribeRunEvents } from '../api/runs'
+import type { PermissionDecision, RunEvent, RunStartResult } from '../api/runs'
 import { getWorkspaceSnapshot, newProject, openProject, subscribeWorkspaceEvents } from '../api/workspace'
 import type { WorkspaceChangedEvent } from '../api/workspace'
 import type { GraphMutationReceipt } from '../../bindings/audio-ui/internal/domain/entity'
@@ -11,6 +11,7 @@ const MAX_BUFFERED_EVENTS = 1000
 export type WorkspaceBridgeAPI = {
   getWorkspaceSnapshot: typeof getWorkspaceSnapshot
   getRunSnapshot: typeof getRunSnapshot
+  startRun: typeof startRun
   newProject: typeof newProject
   openProject: typeof openProject
   interruptRun: typeof interruptRun
@@ -23,6 +24,7 @@ export type WorkspaceBridgeAPI = {
 const defaultAPI: WorkspaceBridgeAPI = {
   getWorkspaceSnapshot,
   getRunSnapshot,
+  startRun,
   newProject,
   openProject,
   interruptRun,
@@ -118,6 +120,28 @@ export class WorkspaceBridge {
     }
 
     throw new Error(`WORKSPACE_SYNC_STALE: 工程 ${receipt.projectId} 的 revision ${receipt.projectRevision} 尚未出现在工作台快照中。`)
+  }
+
+  async startRun(nodeId: string, projectId: string): Promise<RunStartResult> {
+    const generation = this.generation
+    const currentProjectId = useWorkspaceStore.getState().snapshot?.project?.id ?? null
+    if (!this.isCurrent(generation) || currentProjectId !== projectId) {
+      return { error: { code: 'PROJECT_CHANGED', message: '工程已切换，未启动运行。' } }
+    }
+
+    const result = await this.api.startRun(nodeId, projectId)
+    if (!this.isCurrent(generation)) {
+      return { error: { code: 'PROJECT_CHANGED', message: '工程已切换，运行结果未并入当前工作台。' } }
+    }
+    if ((useWorkspaceStore.getState().snapshot?.project?.id ?? null) !== projectId) {
+      return { error: { code: 'PROJECT_CHANGED', message: '当前工程与运行所属工程不一致。' } }
+    }
+    if (result.run?.id) {
+      useRunStore.getState().selectRun(result.run.id)
+      await this.loadRunSnapshot(result.run.id, generation, true)
+      void this.refreshWorkspace(generation)
+    }
+    return result
   }
 
   selectRun(runId: string): void {

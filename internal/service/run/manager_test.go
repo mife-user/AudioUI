@@ -105,6 +105,19 @@ func TestStartHandlesRunEndingBeforeDriverStartReturns(t *testing.T) {
 	}
 }
 
+func TestStartRejectsStaleProjectScopeBeforeAcquiringRunLock(t *testing.T) {
+	h := newRunHarness(t)
+	if _, err := h.manager.Start(context.Background(), "n_topic", "p_other"); err == nil || ErrorCode(err) != "PROJECT_CHANGED" {
+		t.Fatalf("start error = %v, want PROJECT_CHANGED", err)
+	}
+	h.store.mu.Lock()
+	recordCount := len(h.store.records)
+	h.store.mu.Unlock()
+	if h.manager.IsBusy() || h.workflow.locked || recordCount != 0 {
+		t.Fatalf("stale project start left resources: busy=%v locked=%v records=%d", h.manager.IsBusy(), h.workflow.locked, recordCount)
+	}
+}
+
 func TestRunSnapshotRecoversTranscriptRequestsAndTerminalSequence(t *testing.T) {
 	h := newRunHarness(t)
 	record, err := h.manager.Start(context.Background(), "n_topic")
@@ -575,9 +588,12 @@ type fakeWorkflow struct {
 	released bool
 }
 
-func (w *fakeWorkflow) BeginRun(_ context.Context, _ string, _ string) (entity.Project, []string, error) {
+func (w *fakeWorkflow) BeginRun(_ context.Context, _ string, _ string, expectedProjectID ...string) (entity.Project, []string, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	if len(expectedProjectID) > 0 && expectedProjectID[0] != "" && expectedProjectID[0] != w.project.ID {
+		return entity.Project{}, nil, fmt.Errorf("PROJECT_CHANGED: active %s, expected %s", w.project.ID, expectedProjectID[0])
+	}
 	if w.beginErr != nil {
 		return entity.Project{}, nil, w.beginErr
 	}

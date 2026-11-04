@@ -50,3 +50,19 @@ type RunsFile struct {
 	Version int          `json:"version"`
 	Runs    []RunSummary `json:"runs"`
 }
+
+// RunStartResult is the structured response to a UI start request. Expected
+// business failures stay in the response so callers can render typed details
+// such as a context-budget estimate without parsing error text.
+type RunStartResult struct {
+	Run   *RunRecord     `json:"run,omitempty"`
+	Error *RunStartError `json:"error,omitempty"`
+}
+
+// RunStartError is a safe, read-only error view for a rejected start request.
+type RunStartError struct {
+	Code            string `json:"code"`
+	Message         string `json:"message"`
+	EstimatedTokens *int   `json:"estimatedTokens,omitempty"`
+	TokenBudget     *int   `json:"tokenBudget,omitempty"`
+}

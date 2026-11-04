@@ -587,6 +587,115 @@
   line-height: 1.55;
 }
 
+.topic-node {
+  width: 320px;
+}
+
+.topic-parameters {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--s2);
+}
+
+.topic-field {
+  display: grid;
+  gap: var(--s1);
+  color: var(--text-dim);
+  font-size: 9.5px;
+}
+
+.topic-field input,
+.topic-field textarea {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+  color: var(--text);
+  font: inherit;
+  padding: var(--s1) var(--s2);
+}
+
+.topic-field textarea {
+  min-height: 52px;
+  resize: vertical;
+}
+
+.topic-field input:focus-visible,
+.topic-field textarea:focus-visible,
+.topic-run-button:focus-visible,
+.topic-retry-save:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.topic-field input[aria-invalid='true'] {
+  border-color: var(--danger);
+}
+
+.topic-field-error,
+.topic-save-error,
+.topic-run-error {
+  color: var(--danger);
+  font-size: 9px;
+  line-height: 1.5;
+}
+
+.topic-save-row {
+  min-height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s2);
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.topic-retry-save {
+  padding: 2px var(--s2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 9px;
+}
+
+.topic-save-error,
+.topic-run-error {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.topic-run-button {
+  min-height: 28px;
+  padding: 0 var(--s2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 9.5px;
+  font-weight: 600;
+}
+
+.topic-run-button:disabled,
+.topic-retry-save:disabled {
+  cursor: not-allowed;
+  opacity: .5;
+}
+
+.topic-pending-hint {
+  margin-top: var(--s2);
+  border-left: 2px solid var(--warn);
+  padding-left: var(--s2);
+}
+
+.topic-candidate-hint {
+  margin-top: var(--s2);
+}
+
 .candidate-port-list {
   display: flex;
   flex-direction: column;

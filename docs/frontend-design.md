@@ -2,9 +2,9 @@
 
 | 项 | 内容 |
 |---|---|
-| 版本 | 0.2.3 |
-| 状态 | 待评审（M2-09 已验收；本文档修订待评审） |
-| 更新 | — |
+| 版本 | 0.2.4 |
+| 状态 | 待评审（M2-09、M2-10A 已验收；本文档修订待评审） |
+| 更新 | 2026-11-05 |
 | 作者 | 待填 |
 | 评审 | 待填 |
 | 设计依据 | [`design/style-directions.html`](design/style-directions.html) |
@@ -12,6 +12,7 @@
 | M1 原型 | [`design/m1-session-shell.html`](design/m1-session-shell.html) |
 | M2 原型 | [`design/m2-workspace.html`](design/m2-workspace.html) |
 | M2-09 演示 | [`design/m2-09-canvas-demo.html`](design/m2-09-canvas-demo.html) |
+| M2-10A 演示 | [`design/m2-10a-topic-run-demo.html`](design/m2-10a-topic-run-demo.html) |
 | 适用 | 前端、设计、QA |
 | 关联 | [产品总览](product.md) · [PRD](prd.md) · [架构](architecture.md) · [验收标准](acceptance.md) |
 
@@ -24,6 +25,7 @@
 | 0.2.1 | 2026-11-03 | M2-08B：工程切换器、工作台加载/错误/空工程状态、按 runId 恢复运行历史与控制台；画布仍为占位区域，M2-09 接入节点画布；用户已验收，GUI 截图证据见 `docs/dev/evidence/m2-08b.png` |
 | 0.2.2 | — | M2-09：接入受控 React Flow 画布、topic/prompt 卡、草稿、连接/改挂确认、路径高亮、运行锁展示与位置防抖保存；候选正文读取留至 M2-10B |
 | 0.2.3 | 2026-11-04 | M2-09 修复：以工程作用域 receipt 等待快照确认；区分命令提交与画布同步、仅重试读取；补充确定性布局、节点避让、键盘持久化和 React Flow DOM 回归 |
+| 0.2.4 | 2026-11-05 | M2-10A：选题参数编辑、防抖保存与保存前启动；启动/终态/结构化错误状态和待处理摘要；更新 HTML 交互演示 |
 
 ---
 
@@ -399,8 +401,9 @@ M1 没有画布/提示词节点，先做一条链路的会话页；M2 画布落�
 |---|---|
 | Topbar | 品牌、工程名与切换、Agent/CLI 状态、系统抽屉、版本；工程切换器支持列表/新建/打开，在途运行时禁用；画布内提供重置视图；无主题徽章、无设置入口 |
 | Canvas | React Flow 受控渲染快照节点和派生边；拖拽平移、滚轮缩放 0.6–1.6、点阵 22px、重置视图、双击聚焦及位置去抖保存；节点创建、连线、移动按工程作用域 receipt 等待目标快照后完成；同步失败明确保留已提交状态，只重试快照读取 |
-| NodeCard | `topic` / `prompt` 两种；状态：草稿、执行中、待应用 n、已锁定、待刷新、错误；点击选中，双击聚焦画布 |
-| TopicNode | M2-09 展示标题、状态和候选端口占位；真实 `title/angle/hook` 与候选输出端口在 M2-10B 读取；后续候选端口各自连接即选定该候选，不设单独「选定」按钮 |
+| NodeCard | `topic` / `prompt` 两种；状态：草稿、启动中、执行中、待处理 n、已完成、运行失败、已中断、已锁定、待刷新、错误；点击选中，双击聚焦画布 |
+| TopicNode | M2-10A 展示标题、参数表单、保存/运行状态；本阶段不读取候选正文或创建真实候选端口，M2-10B 接入。候选端口各自连接即选定该候选，不设单独「选定」按钮 |
+| TopicParameters | 标题、想法、方向、候选数 3～10；校验、320ms 防抖保存、运行前 flush、保存失败保留编辑并允许重试；只读路径与运行期间禁用 |
 | PromptNode | M2-09 展示标题、草稿/内容锁/运行锁状态和输入/输出端口；连接提示词可新增下游提示词；参数和执行在 M2-11 接入 |
 | DraftNode | 无父 `prompt`；虚线边框、标注「草稿」；不可执行、没有输出端口；可作为任意合法输出端口的目标 |
 | Port | prompt 输出端口在底部，目标端口在节点顶部；topic 候选端口只在候选数据可用时渲染；将已有提示词拖到新父端口会先请求 Connect，确认卡显示子树、旧上游、跨树和 steps 迁移影响；取消或失败不改变边 |
@@ -426,7 +429,10 @@ M1 没有画布/提示词节点，先做一条链路的会话页；M2 画布落�
 - 工作台主区与 `.canvas-flow-root` 构成确定高度的 flex 链；React Flow 根绝对填满画布，不依赖不确定的百分比高度。
 - 键盘 Enter/Space 选择节点、方向键移动与鼠标选择/拖动走同一持久化路径；SelectNode 仍不递增图 revision。
 - 改挂必须在服务端确认后更新视图；确认卡显示移动的子树节点数、是否跨 topic 树、迁移 steps，以及「该节点内容仍基于旧上游」提示。同一 topic 换候选同样确认，显示候选 A → B。
-- M2-09 尚无读取已应用 topic 候选内容的接口：无候选快照时不虚构候选端口；现存边通过不可连接的通用锚点显示，M2-10B 接入真实候选端口。
+- M2-10A 尚未读取已应用 topic 候选正文：无候选快照时不虚构候选端口；现存边通过不可连接的通用锚点显示，M2-10B 接入真实候选端口。运行完成只显示 pending 摘要，不预览或自动应用结果。
+- `TopicParameters` 编辑标题、想法、方向及 3～10 的整数候选数；标题必填，输入错误通过 `aria-invalid` 与字段说明暴露。有效修改 320ms 防抖调用工程作用域 `UpdateNodeParams`；启动前 flush 最新版本，保存失败保留输入并阻止启动，可显式重试。
+- 写命令已提交但权威快照未同步时显示「已提交，等待快照同步」，锁定重复写入与执行；只允许重试快照同步。工程切换取消旧工程的排队保存/运行请求，启动请求带发起时的 `projectId`。
+- 节点内「生成候选」提供启动中与防重复反馈；全局在途时显示 BUSY 禁用态；运行快照驱动启动中/执行中/完成/失败/中断状态。活动运行的停止沿用 AgentConsole 的运行卡操作，不在 topic 表单重复放置停止按钮。CLI 不可用、锁定与预算错误按结构化 code 展示；`CONTEXT_TOO_LARGE` 数值只用结构化估算值/预算，不解析错误文案。
 - 运行/排队路径只读；路径外分支可编辑，视觉上用锁 chip 与禁用输入区分。
 - 锁定节点内容与执行均禁用；锁定后只提供「新增提示词」与分支入口。
 - 原型顶栏的「模拟运行」仅用于演示运行锁与 BUSY，不属于产品界面；产品执行入口只来自节点与待处理卡。
@@ -450,7 +456,8 @@ M1 没有画布/提示词节点，先做一条链路的会话页；M2 画布落�
 | `RunList` | 按运行分组的记录 | empty/running/complete/interrupted | `--panel-2` `--muted` |
 | `ConsoleTabs` | 对话/待处理分页 | conversation/pending | `--accent-soft` `--border` |
 | `ProjectSwitcher` | 工程列表/新建/打开 | closed/open/loading/error | `--bg-elev` `--accent` |
-| `TopicNode` | 选题参数、候选端口 | draft/running/pending/applied/locked/error | `--panel` `--accent` |
+| `TopicNode` | 选题参数、运行状态、候选端口 | starting/running/succeeded/failed/interrupted/pending/applied/locked/error | `--panel` `--accent` |
+| `TopicParameters` | 选题标题/想法/方向/候选数、保存态、运行入口 | saved/dirty/saving/save-error/sync-pending/invalid/starting/run-error/disabled | `--panel-2` `--accent` `--danger` |
 | `PromptNode` | 提示词参数、执行、锁定 | draft/running/pending/applied/locked/error | `--panel` `--accent` |
 | `DraftNode` | 未连接提示词节点 | default/hover/invalid-target | `--border-strong` `--muted` |
 | `PendingArtifactCard` | 待应用预览/应用/丢弃 | pending/invalid/applied/discarded | `--warn` `--ok` `--danger` |

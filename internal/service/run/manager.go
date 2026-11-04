@@ -36,7 +36,7 @@ type ProjectService interface {
 }
 
 type WorkflowService interface {
-	BeginRun(ctx context.Context, runID, nodeID string) (entity.Project, []string, error)
+	BeginRun(ctx context.Context, runID, nodeID string, expectedProjectID ...string) (entity.Project, []string, error)
 	ReleaseRunLock(ctx context.Context, runID string) error
 }
 
@@ -139,7 +139,7 @@ func New(options Options) *Manager {
 	}
 }
 
-func (m *Manager) Start(ctx context.Context, nodeID string) (entity.RunRecord, error) {
+func (m *Manager) Start(ctx context.Context, nodeID string, expectedProjectID ...string) (entity.RunRecord, error) {
 	if err := ctx.Err(); err != nil {
 		return entity.RunRecord{}, err
 	}
@@ -176,7 +176,7 @@ func (m *Manager) Start(ctx context.Context, nodeID string) (entity.RunRecord, e
 		_ = m.gate.Release(runID)
 	}()
 
-	project, chainPath, err := m.opts.Workflow.BeginRun(ctx, runID, nodeID)
+	project, chainPath, err := m.opts.Workflow.BeginRun(ctx, runID, nodeID, expectedProjectID...)
 	if err != nil {
 		return entity.RunRecord{}, err
 	}
@@ -1175,7 +1175,10 @@ func errorCode(err error) string {
 	}
 	message := strings.TrimSpace(err.Error())
 	code, _, found := strings.Cut(message, ":")
-	if found && code != "" && len(code) <= 64 {
+	if !found {
+		code = message
+	}
+	if code != "" && len(code) <= 64 {
 		valid := true
 		for _, char := range code {
 			if (char < 'A' || char > 'Z') && (char < '0' || char > '9') && char != '_' {
@@ -1189,6 +1192,9 @@ func errorCode(err error) string {
 	}
 	return "RUN_FAILED"
 }
+
+// ErrorCode returns the stable code used for run lifecycle failures.
+func ErrorCode(err error) string { return errorCode(err) }
 
 const runSystemPrompt = "You are AudioUI's one-shot node execution agent. Work only on the active node task and its provided workspace path. Follow the output contract in the initial context. Use ask_user when a decision is required, and use reply for chat or structured output. Never attempt to change the graph or apply an artifact."
 

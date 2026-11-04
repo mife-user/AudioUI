@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { Node, WorkspaceSnapshot } from '../../bindings/audio-ui/internal/domain/entity'
+import { OutputKind, PendingStatus, RunStatus } from '../../bindings/audio-ui/internal/domain/valueobject'
 import { buildFlowModel, deriveHighlightedPath, subtreeSize, topicRootId } from './flowModel'
 
 function makeNode(id: string, type: 'topic' | 'prompt', parent = '', parentCandidate?: number, overrides: Partial<Node> = {}): Node {
@@ -56,6 +57,24 @@ describe('flowModel', () => {
     expect(model.edges[0]?.sourceHandle).toBe('topic-connection-anchor')
     expect(model.nodes[0]?.data.candidates).toEqual([])
     expect(model.nodes[0]?.data.hasUnmappedChildren).toBe(true)
+  })
+
+  it('exposes the latest topic run state and active pending count without copying run rules', () => {
+    const topic = makeNode('n_topic', 'topic')
+    const view = snapshot([topic])
+    view.runs = [
+      { id: 'r_old', nodeId: topic.id, status: RunStatus.RunFailed, chainId: 'c_old', chainPath: [topic.id], estimatedTokens: 10, startedAt: '2026-11-03T00:00:00Z' },
+      { id: 'r_new', nodeId: topic.id, status: RunStatus.RunSucceeded, chainId: 'c_new', chainPath: [topic.id], estimatedTokens: 10, startedAt: '2026-11-04T00:00:00Z' },
+    ]
+    view.pending = [{
+      id: 'pending_one', nodeId: topic.id, runId: 'r_new', chainId: 'c_new', kind: OutputKind.OutputKindTopics,
+      status: PendingStatus.PendingPending,
+    }]
+
+    const model = buildFlowModel(view, vi.fn())
+    expect(model.nodes[0]?.data.runStatus).toBe('succeeded')
+    expect(model.nodes[0]?.data.pendingCount).toBe(1)
+    expect(model.nodes[0]?.data.globalRunBusy).toBe(false)
   })
 
   it('highlights only the backend-provided chain prefix through the active node', () => {

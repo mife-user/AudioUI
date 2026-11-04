@@ -61,6 +61,7 @@ function makeAPI(initialResult: WorkspaceSnapshotResult = workspaceResult(null, 
   const runListeners: ((event: RunEvent) => void)[] = []
   const getWorkspaceSnapshot = vi.fn().mockResolvedValue(initialResult)
   const getRunSnapshot = vi.fn().mockImplementation(async (runId: string) => runSnapshot(initialResult.snapshot.project?.id ?? '', runId, 0))
+  const startRun = vi.fn().mockResolvedValue({})
   const newProject = vi.fn().mockResolvedValue(undefined)
   const openProject = vi.fn().mockResolvedValue(undefined)
   const interruptRun = vi.fn().mockResolvedValue(undefined)
@@ -77,6 +78,7 @@ function makeAPI(initialResult: WorkspaceSnapshotResult = workspaceResult(null, 
   const api = {
     getWorkspaceSnapshot,
     getRunSnapshot,
+    startRun,
     newProject,
     openProject,
     interruptRun,
@@ -87,7 +89,7 @@ function makeAPI(initialResult: WorkspaceSnapshotResult = workspaceResult(null, 
   } as unknown as WorkspaceBridgeAPI
   return {
     api, workspaceListeners, runListeners,
-    getWorkspaceSnapshot, getRunSnapshot, newProject, openProject, interruptRun, respondRunPermission, respondRunQuestion,
+    getWorkspaceSnapshot, getRunSnapshot, startRun, newProject, openProject, interruptRun, respondRunPermission, respondRunQuestion,
     subscribeWorkspaceEvents, subscribeRunEvents,
   }
 }
@@ -213,6 +215,55 @@ describe('WorkspaceBridge', () => {
 
     await expect(app.syncGraphMutation({ projectId: 'p_old', projectRevision: 3, nodeId: 'n_created' }))
       .rejects.toThrow('PROJECT_CHANGED')
+  })
+
+  it('starts only in the loaded project and restores the returned run into the console', async () => {
+    const setup = makeAPI(workspaceResult('p_one', 1))
+    const record = runSnapshot('p_one', 'r_started', 0).run
+    setup.startRun.mockResolvedValue({ run: record })
+    const app = bridge(setup.api)
+    app.start()
+    await vi.waitFor(() => expect(useWorkspaceStore.getState().status).toBe('ready'))
+    setup.getWorkspaceSnapshot.mockResolvedValue(workspaceResult('p_one', 2, [runSummary('r_started')]))
+
+    const result = await app.startRun('n_topic', 'p_one')
+    await vi.waitFor(() => expect(useRunStore.getState().runs.r_started?.snapshot?.run.id).toBe('r_started'))
+    expect(result.run?.id).toBe('r_started')
+    expect(setup.startRun).toHaveBeenCalledOnce()
+    expect(setup.startRun).toHaveBeenCalledWith('n_topic', 'p_one')
+    expect(useRunStore.getState().selectedRunId).toBe('r_started')
+
+    const stale = await app.startRun('n_topic', 'p_old')
+    expect(stale.error?.code).toBe('PROJECT_CHANGED')
+    expect(setup.startRun).toHaveBeenCalledOnce()
+  })
+
+  it('preserves a run event and snapshot that arrive before the start response', async () => {
+    const setup = makeAPI(workspaceResult('p_one', 1))
+    const startResponse = deferred<Awaited<ReturnType<WorkspaceBridgeAPI['startRun']>>>()
+    const runSnapshotResponse = deferred<RunSnapshot>()
+    const record = runSnapshot('p_one', 'r_early', 1).run
+    setup.startRun.mockReturnValue(startResponse.promise)
+    setup.getRunSnapshot.mockReturnValue(runSnapshotResponse.promise)
+    const app = bridge(setup.api)
+    app.start()
+    await vi.waitFor(() => expect(useWorkspaceStore.getState().status).toBe('ready'))
+
+    const start = app.startRun('n_topic', 'p_one')
+    setup.runListeners[0]({
+      ...runEvent('p_one', 'r_early', 1),
+      type: 'status',
+      status: RunStatus.RunStarting,
+    })
+    await vi.waitFor(() => expect(setup.getRunSnapshot).toHaveBeenCalledWith('r_early'))
+    startResponse.resolve({ run: record })
+    await vi.waitFor(() => expect(useRunStore.getState().selectedRunId).toBe('r_early'))
+    runSnapshotResponse.resolve(runSnapshot('p_one', 'r_early', 1))
+
+    const result = await start
+    expect(result.run?.id).toBe('r_early')
+    expect(useRunStore.getState().runs.r_early?.snapshot?.run.status).toBe(RunStatus.RunRunning)
+    expect(useRunStore.getState().selectedRunId).toBe('r_early')
   })
 
   it('re-pulls a run snapshot on a sequence gap and replays updates after that snapshot', async () => {

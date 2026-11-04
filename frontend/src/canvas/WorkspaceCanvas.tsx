@@ -13,7 +13,8 @@ import {
   type NodeChange,
   type NodeMouseHandler,
 } from '@xyflow/react'
-import type { GraphMutationReceipt, Node, WorkspaceSnapshot } from '../../bindings/audio-ui/internal/domain/entity'
+import type { GraphMutationReceipt, Node, NodeParams, RunStartResult, WorkspaceSnapshot } from '../../bindings/audio-ui/internal/domain/entity'
+import { startRun as startRunAPI } from '../api/runs'
 import { graphAPI, type GraphAPI, type TopicCandidateFixture } from './graphApi'
 import { allocateNodePosition } from './nodePosition'
 import { buildFlowModel, nodeMap, subtreeSize, topicRootId, type CanvasFlowNode } from './flowModel'
@@ -40,6 +41,7 @@ type Props = {
   onGraphMutation?: (receipt: GraphMutationReceipt) => void | Promise<void>
   api?: GraphAPI
   candidateFixtures?: Record<string, TopicCandidateFixture[]>
+  onStartRun?: (nodeId: string, projectId: string) => Promise<RunStartResult>
 }
 
 type PendingSync = {
@@ -77,7 +79,7 @@ function candidateFromHandle(handleId: string | null | undefined, parent: Node):
   return match ? Number(match[1]) : null
 }
 
-function CanvasBody({ snapshot, onSelectNode, onGraphMutation, api, candidateFixtures }: Props & { api: GraphAPI }) {
+function CanvasBody({ snapshot, onSelectNode, onGraphMutation, api, candidateFixtures, onStartRun }: Props & { api: GraphAPI }) {
   const candidateMap = candidateFixtures ?? EMPTY_CANDIDATES
   const projectId = snapshot.project?.id ?? ''
   const currentProjectId = useRef(projectId)
@@ -99,6 +101,8 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, api, candidateFix
   const [notice, setNotice] = useState('')
   const [busy, setBusy] = useState(false)
   const [connectSubmitting, setConnectSubmitting] = useState(false)
+  const [paramsSaveCount, setParamsSaveCount] = useState(0)
+  const [runSubmittingNodeId, setRunSubmittingNodeId] = useState('')
   const [pendingSync, setPendingSync] = useState<PendingSync | null>(null)
   const [pendingFocusNodeId, setPendingFocusNodeId] = useState('')
   const [confirmIntent, setConfirmIntent] = useState<ConnectIntent | null>(null)
@@ -106,9 +110,17 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, api, candidateFix
   const [candidateSelection, setCandidateSelection] = useState('0')
   const createInFlight = useRef(false)
   const connectInFlight = useRef(false)
-  const mutationBlocked = busy || connectSubmitting || pendingSync !== null
+  const runStartInFlight = useRef(false)
+  const runRequestSequence = useRef(0)
+  const hasActiveRun = (snapshot.runs ?? []).some((run) => run.status === 'starting' || run.status === 'running')
+  const globalRunBusy = hasActiveRun || Boolean(runSubmittingNodeId)
+  const globalRunBusyRef = useRef(globalRunBusy)
+  globalRunBusyRef.current = globalRunBusy
+  const mutationBlocked = busy || connectSubmitting || paramsSaveCount > 0 || pendingSync !== null
   const mutationBlockedRef = useRef(mutationBlocked)
   mutationBlockedRef.current = mutationBlocked
+  const runStartBlockedRef = useRef(busy || connectSubmitting || pendingSync !== null)
+  runStartBlockedRef.current = busy || connectSubmitting || pendingSync !== null
   const confirmCancelRef = useRef<HTMLButtonElement>(null)
   const confirmReturnFocus = useRef<HTMLElement | null>(null)
 
@@ -176,9 +188,52 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, api, candidateFix
     void addPrompt({ parentId, candidate, position })
   }, [snapshot])
 
+  const saveTopicParams = useCallback(async (nodeId: string, title: string, params: NodeParams, ownerProjectId: string) => {
+    if (currentProjectId.current !== ownerProjectId) throw new Error('PROJECT_CHANGED: 工程已切换，未保存旧工程参数。')
+    setParamsSaveCount((count) => count + 1)
+    try {
+      const receipt = await api.updateNodeParams(nodeId, title, params, ownerProjectId)
+      if (receipt.projectId !== ownerProjectId) throw new Error('PROJECT_CHANGED: 参数保存回执所属工程不一致。')
+      if (currentProjectId.current !== ownerProjectId) return false
+      return await syncMutation(receipt, '选题参数')
+    } finally {
+      setParamsSaveCount((count) => Math.max(0, count - 1))
+    }
+  }, [api, syncMutation])
+
+  const startTopicRun = useCallback(async (nodeId: string, ownerProjectId: string): Promise<RunStartResult> => {
+    if (currentProjectId.current !== ownerProjectId) {
+      return { error: { code: 'PROJECT_CHANGED', message: '工程已切换，未启动运行。' } }
+    }
+    if (runStartInFlight.current || globalRunBusyRef.current) {
+      return { error: { code: 'BUSY', message: '已有运行正在进行，当前无法启动另一个运行。' } }
+    }
+    if (runStartBlockedRef.current) {
+      return { error: { code: 'WORKSPACE_SYNC_STALE', message: '请先完成当前工程操作与快照同步。' } }
+    }
+
+    runStartInFlight.current = true
+    const requestId = ++runRequestSequence.current
+    setRunSubmittingNodeId(nodeId)
+    try {
+      return await (onStartRun ?? startRunAPI)(nodeId, ownerProjectId)
+    } catch (failure) {
+      return { error: { code: 'RUN_START_FAILED', message: errorMessage(failure) } }
+    } finally {
+      if (runRequestSequence.current === requestId) {
+        runStartInFlight.current = false
+        setRunSubmittingNodeId('')
+      }
+    }
+  }, [onStartRun, projectId])
+
   const model = useMemo(
-    () => buildFlowModel(snapshot, addChild, candidateMap, mutationBlocked),
-    [snapshot, addChild, candidateMap, mutationBlocked],
+    () => buildFlowModel(snapshot, addChild, candidateMap, mutationBlocked, {
+      runSubmittingNodeId,
+      onUpdateTopicParams: saveTopicParams,
+      onStartTopicRun: startTopicRun,
+    }),
+    [snapshot, addChild, candidateMap, mutationBlocked, runSubmittingNodeId, saveTopicParams, startTopicRun],
   )
 
   useEffect(() => {
@@ -206,6 +261,10 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, api, candidateFix
     setPendingFocusNodeId('')
     setBusy(false)
     setConnectSubmitting(false)
+    setParamsSaveCount(0)
+    runRequestSequence.current += 1
+    runStartInFlight.current = false
+    setRunSubmittingNodeId('')
     createRequestId.current += 1
     createInFlight.current = false
     connectInFlight.current = false
@@ -365,8 +424,8 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, api, candidateFix
         title: '新选题',
         parent: '',
         parentCandidate: null,
-        position: allocateNodePosition(graphNodes, canvasPosition()),
-        params: {},
+        position: allocateNodePosition(graphNodes, canvasPosition(), 'topic'),
+        params: { candidateCount: 3 },
       })
       if (currentProjectId.current !== projectId || receipt.projectId !== projectId) return
       await syncMutation(receipt, '选题节点', receipt.nodeId)
@@ -638,10 +697,10 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, api, candidateFix
   )
 }
 
-export function WorkspaceCanvas({ snapshot, onSelectNode, onGraphMutation, api = graphAPI, candidateFixtures }: Props) {
+export function WorkspaceCanvas({ snapshot, onSelectNode, onGraphMutation, api = graphAPI, candidateFixtures, onStartRun = startRunAPI }: Props) {
   return (
     <ReactFlowProvider>
-      <CanvasBody snapshot={snapshot} onSelectNode={onSelectNode} onGraphMutation={onGraphMutation} api={api} candidateFixtures={candidateFixtures} />
+      <CanvasBody snapshot={snapshot} onSelectNode={onSelectNode} onGraphMutation={onGraphMutation} api={api} candidateFixtures={candidateFixtures} onStartRun={onStartRun} />
     </ReactFlowProvider>
   )
 }

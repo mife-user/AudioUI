@@ -141,6 +141,7 @@ function makeAPI(): GraphAPI {
     connect: vi.fn().mockResolvedValue({ projectId: 'p_test', projectRevision: 3, nodeId: 'n_child' }),
     moveNode: vi.fn().mockResolvedValue({ projectId: 'p_test', projectRevision: 3, nodeId: 'n_child' }),
     selectNode: vi.fn().mockResolvedValue({ projectId: 'p_test', projectRevision: 3, nodeId: 'n_child' }),
+    updateNodeParams: vi.fn().mockResolvedValue({ projectId: 'p_test', projectRevision: 3, nodeId: 'n_topic_a' }),
   }
 }
 
@@ -266,7 +267,7 @@ describe('WorkspaceCanvas', () => {
     render(<WorkspaceCanvas snapshot={makeSnapshot()} onSelectNode={vi.fn().mockResolvedValue(undefined)} onGraphMutation={onGraphMutation} api={api} />)
 
     fireEvent.click(screen.getByRole('button', { name: '＋ 新选题' }))
-    await waitFor(() => expect(api.addNode).toHaveBeenCalledWith(expect.objectContaining({ projectId: 'p_test', type: 'topic', parent: '', params: {} })))
+    await waitFor(() => expect(api.addNode).toHaveBeenCalledWith(expect.objectContaining({ projectId: 'p_test', type: 'topic', parent: '', params: { candidateCount: 3 } })))
     expect(onGraphMutation).toHaveBeenCalledTimes(1)
     fireEvent.click(screen.getByRole('button', { name: '＋ 草稿提示词' }))
     await waitFor(() => expect(api.addNode).toHaveBeenCalledWith(expect.objectContaining({ projectId: 'p_test', type: 'prompt', parent: '', params: {} })))
