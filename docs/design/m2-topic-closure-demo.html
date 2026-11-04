@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AudioUI · 选题闭环交互演示</title>
+  <style>
+    :root{color-scheme:dark;--bg:#0a0e11;--panel:#101a20;--sub:#15242c;--line:#2a414b;--ink:#e2ecee;--muted:#9bb0b5;--accent:#5ad1e6;--ok:#6fd3a4;--warn:#d8b27a;--danger:#d98a8a}
+    *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 system-ui,"Microsoft YaHei",sans-serif}button,input,select,textarea{font:inherit}button{cursor:pointer}button:disabled{cursor:not-allowed;opacity:.45}button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+    header{min-height:64px;padding:12px 24px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:18px;background:#0e171c}header strong{letter-spacing:.08em}header .spacer{flex:1}.badge{border:1px solid var(--line);border-radius:999px;padding:3px 9px;color:var(--muted);font-size:12px}.accent{color:var(--accent)}
+    .notice{padding:10px 24px;background:#1d2c30;color:#bed1d3;font-size:13px}.notice b{color:var(--warn)}main{display:grid;grid-template-columns:minmax(0,1fr) 322px;min-height:calc(100vh - 108px)}.canvas{padding:24px;background-color:#0c1418;background-image:radial-gradient(#20343d 1px,transparent 1px);background-size:22px 22px}.canvas-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:18px}.canvas-head h1{font-size:18px;margin:0}.hint{color:var(--muted);font-size:12px}.board{display:flex;align-items:flex-start;gap:38px;flex-wrap:wrap}.node{width:340px;max-width:100%;border:1px solid #3c6874;border-radius:10px;background:var(--panel);box-shadow:0 8px 24px #0004}.node header{border-radius:10px 10px 0 0;min-height:0;padding:12px 14px;gap:8px}.node-title{flex:1;font-weight:600}.body{padding:14px}.field{display:block;margin-bottom:11px;color:var(--muted);font-size:12px}.field input,.field textarea,.field select{display:block;width:100%;margin-top:5px;border:1px solid var(--line);border-radius:6px;background:#0a1419;color:var(--ink);padding:8px}.field textarea{resize:vertical;min-height:60px}.button{border:1px solid var(--line);border-radius:6px;background:var(--sub);color:var(--ink);padding:7px 11px}.button.primary{background:#1c5967;border-color:#39859a;color:#f4ffff}.button.danger{color:#ffc6c6}.row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.status{font-size:12px;color:var(--muted)}.status.running{color:var(--ok)}.status.pending{color:var(--warn)}.status.locked{color:var(--accent)}.candidates{display:grid;gap:8px;margin-top:12px}.candidate{padding:9px;border:1px solid var(--line);border-radius:6px;background:#0c171c}.candidate .row{justify-content:space-between}.candidate p{margin:4px 0 0;color:var(--muted);font-size:12px}.port{color:var(--accent);border:1px solid #3d7784;background:#112930;border-radius:16px;padding:4px 9px}.branch-list{display:grid;gap:12px;min-width:220px}.branch{width:235px;border-style:dashed}.branch .body{color:var(--muted)}
+    aside{background:#0e181e;border-left:1px solid var(--line);padding:18px;min-width:0}aside h2{font-size:15px;margin:0 0 12px}.tabs{display:flex;border-bottom:1px solid var(--line);gap:16px;margin-bottom:16px}.tab{border:0;background:none;color:var(--muted);padding:8px 0}.tab[aria-selected=true]{color:var(--accent);border-bottom:2px solid var(--accent)}.card{border:1px solid var(--line);background:var(--panel);border-radius:8px;padding:12px;margin:12px 0}.card h3{font-size:13px;margin:0 0 6px}.card p{margin:6px 0;color:var(--muted);font-size:12px}.error{color:var(--danger)!important}.empty{color:var(--muted);font-size:13px}.toggle{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:12px;margin-top:16px}dialog{width:min(470px,90vw);border:1px solid var(--line);border-radius:10px;background:var(--panel);color:var(--ink);padding:20px}dialog::backdrop{background:#000a}dialog h2{margin-top:0;font-size:17px}dialog p{color:var(--muted)}dialog .row{justify-content:flex-end}#toast{min-height:22px;margin:12px 0 0;color:var(--warn)}@media(max-width:1050px){main{grid-template-columns:1fr}aside{border-left:0;border-top:1px solid var(--line)}.board{gap:20px}}
+  </style>
+</head>
+<body>
+  <header><strong>◈ AudioUI</strong><span class="badge">示例工程</span><span class="spacer"></span><span id="global-status" class="badge">空闲</span><span class="hint">选题闭环 · 演示</span></header>
+  <div class="notice"><b>交互演示：</b>本页仅使用本地模拟数据，不启动 Agent、不保存工程，并限同时演示一条待处理结果。依次点击“生成候选”“完成模拟运行”“待处理”“应用”，再通过候选端口新增分支。</div>
+  <main>
+    <section class="canvas" aria-label="示例画布">
+      <div class="canvas-head"><div><h1>选题工作台</h1><span class="hint">只展示本批范围；画布拖拽、缩放与工程切换请参照完整工作台原型。</span></div><button id="reset" class="button">重置演示</button></div>
+      <div class="board">
+        <article class="node" aria-label="选题节点">
+          <header><span class="accent">●</span><span class="node-title">选题 · 城市夜行</span><span id="node-status" class="status">未运行</span></header>
+          <div class="body">
+            <label class="field">想法<textarea id="idea">记录城市夜晚中仍在工作的人</textarea></label>
+            <label class="field">方向<input id="direction" value="人物观察与声音叙事"></label>
+            <label class="field">候选数<select id="count"><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option><option>8</option><option>9</option><option>10</option></select></label>
+            <div class="row"><button id="run" class="button primary">生成候选</button><button id="finish" class="button" hidden>完成模拟运行</button></div>
+            <div id="candidates" class="candidates"></div>
+          </div>
+        </article>
+        <div id="branches" class="branch-list" aria-label="提示词分支"></div>
+      </div>
+      <p id="toast" role="status" aria-live="polite"></p>
+    </section>
+    <aside aria-label="运行控制台">
+      <h2>Agent 控制台</h2><div class="tabs" role="tablist"><button id="conversation-tab" class="tab" role="tab" aria-selected="true">对话</button><button id="pending-tab" class="tab" role="tab" aria-selected="false">待处理 <span id="pending-count">0</span></button></div>
+      <section id="conversation" role="tabpanel"><p id="run-empty" class="empty">尚无运行。生成候选后，运行记录会显示在这里。</p><div id="run-card" class="card" hidden><h3>选题 · 城市夜行</h3><p id="run-detail">模拟运行中</p><p>每次执行创建独立运行；历史只读。</p></div></section>
+      <section id="pending-panel" role="tabpanel" hidden><p id="pending-empty" class="empty">暂无待处理结果。</p><div id="pending-card" class="card" hidden><h3>选题候选 · 待处理</h3><p id="pending-detail"></p><ul id="pending-preview" class="hint"></ul><div class="row"><button id="apply" class="button primary">应用</button><button id="discard" class="button danger">丢弃</button></div></div></section>
+      <label class="toggle"><input id="invalid" type="checkbox"> 下次模拟无效 Schema</label>
+      <p class="hint">演示中通过按钮建立分支；实际画布同时提供端口连接与键盘可达操作。</p>
+    </aside>
+  </main>
+  <dialog id="confirm-dialog" aria-labelledby="confirm-title"><h2 id="confirm-title">确认更换候选</h2><p id="confirm-copy"></p><p>节点及其后代上下文将变化，原有内容仍基于旧上游；同一 topic 内不会迁移 steps。</p><div class="row"><button id="cancel" class="button">取消</button><button id="confirm" class="button primary">确认改挂</button></div></dialog>
+  <script>
+    const $ = (id) => document.getElementById(id)
+    const topics = [
+      { title: '凌晨面包房', detail: '从第一炉面包的声音进入故事。' },
+      { title: '夜班末班车', detail: '跟随司机看城市逐渐安静。' },
+      { title: '24 小时修理铺', detail: '以修理物件串联不同人物。' }
+    ]
+    let state
+    function reset() { state = { running: false, hasRun: false, pending: null, applied: false, branches: [], target: null, results: [] }; $('invalid').checked = false; $('idea').value = '记录城市夜晚中仍在工作的人'; $('direction').value = '人物观察与声音叙事'; $('count').value = '3'; render() }
+    function tab(name) {
+      for (const item of ['conversation', 'pending']) {
+        const selected = item === name
+        $(item + '-tab').setAttribute('aria-selected', String(selected))
+        $(item === 'pending' ? 'pending-panel' : 'conversation').hidden = !selected
+      }
+    }
+    function note(message) { $('toast').textContent = message }
+    function render() {
+      $('global-status').textContent = state.running ? '运行中 · 全局单在途' : '空闲'
+      $('node-status').textContent = state.running ? '运行锁定' : state.applied ? '已锁定' : state.pending ? '待应用' : '未运行'
+      $('node-status').className = 'status ' + (state.running ? 'running' : state.applied ? 'locked' : state.pending ? 'pending' : '')
+      for (const id of ['idea', 'direction', 'count']) $(id).disabled = state.running || state.applied
+      $('run').disabled = state.running || state.applied || !!state.pending
+      $('finish').hidden = !state.running
+      $('run').textContent = state.applied ? '已锁定' : '生成候选'
+      $('run-empty').hidden = state.hasRun
+      $('run-card').hidden = !state.hasRun
+      $('run-detail').textContent = state.running ? '模拟运行中 · 路径节点只读' : '模拟运行结束 · 历史记录'
+      $('pending-count').textContent = state.pending ? '1' : '0'
+      $('pending-empty').hidden = !!state.pending
+      $('pending-card').hidden = !state.pending
+      $('pending-detail').textContent = state.pending === 'invalid' ? '校验失败：topics 至少包含 3 个候选。原文：{"topics":[]}' : `${state.results.length} 个候选等待确认；应用之前节点内容保持不变。`
+      $('pending-detail').className = state.pending === 'invalid' ? 'error' : ''
+      $('pending-preview').replaceChildren()
+      if (state.pending === 'valid') state.results.forEach((topic) => { const item = document.createElement('li'); item.textContent = topic.title; $('pending-preview').append(item) })
+      $('apply').disabled = state.pending !== 'valid' || state.running
+      $('candidates').replaceChildren()
+      if (state.applied) state.results.forEach((topic, index) => {
+        const card = document.createElement('div'); card.className = 'candidate'
+        const row = document.createElement('div'); row.className = 'row'
+        const title = document.createElement('strong'); title.textContent = `${index + 1}. ${topic.title}`
+        const button = document.createElement('button'); button.className = 'port'; button.textContent = '＋ 分支'; button.disabled = state.running
+        button.setAttribute('aria-label', `从候选 ${index + 1} ${topic.title} 新增提示词分支`)
+        button.addEventListener('click', () => { state.branches.push({ candidate: index, stale: false }); note(`已从候选 ${index + 1} 新建提示词分支。`); render() })
+        row.append(title, button); const description = document.createElement('p'); description.textContent = topic.detail; card.append(row, description); $('candidates').append(card)
+      })
+      $('branches').replaceChildren()
+      state.branches.forEach((branch, index) => {
+        const card = document.createElement('article'); card.className = 'node branch'
+        const head = document.createElement('header'); head.textContent = `提示词 ${index + 1}${branch.stale ? ' · 待刷新' : ''}`
+        const body = document.createElement('div'); body.className = 'body'; const info = document.createElement('p'); info.textContent = `已连接候选 ${branch.candidate + 1} · ${state.results[branch.candidate].title}`
+        const button = document.createElement('button'); button.className = 'button'; button.textContent = '更换到下一候选'; button.disabled = state.running
+        button.addEventListener('click', () => { const next = (branch.candidate + 1) % state.results.length; state.target = { index, next }; $('confirm-copy').textContent = `提示词 ${index + 1}：候选 ${branch.candidate + 1} → 候选 ${next + 1}。受影响子树：1 个节点。`; $('confirm-dialog').showModal() })
+        body.append(info, button); card.append(head, body); $('branches').append(card)
+      })
+    }
+    $('run').addEventListener('click', () => { state.running = true; state.hasRun = true; note('模拟运行开始：该路径只读；重复运行返回 BUSY。'); render() })
+    $('finish').addEventListener('click', () => { state.running = false; state.results = Array.from({ length: Number($('count').value) }, (_, index) => ({ ...topics[index % topics.length], title: index < topics.length ? topics[index].title : `${topics[index % topics.length].title} ${index + 1}` })); state.pending = $('invalid').checked ? 'invalid' : 'valid'; note('运行结束；结果仍需用户处理。'); render(); tab('pending') })
+    $('apply').addEventListener('click', () => { if (state.pending !== 'valid') return; state.pending = null; state.applied = true; note('已模拟应用：选题内容与执行锁定，候选端口可建分支。'); render() })
+    $('discard').addEventListener('click', () => { state.pending = null; note('已模拟丢弃；节点内容未改变。'); render() })
+    $('conversation-tab').addEventListener('click', () => tab('conversation'))
+    $('pending-tab').addEventListener('click', () => tab('pending'))
+    $('cancel').addEventListener('click', () => { state.target = null; $('confirm-dialog').close(); note('已取消改挂。') })
+    $('confirm').addEventListener('click', () => { if (!state.target) return; const { index, next } = state.target; state.branches[index].candidate = next; state.branches[index].stale = true; state.target = null; $('confirm-dialog').close(); note('已模拟改挂，节点标记为待刷新。'); render() })
+    $('reset').addEventListener('click', () => { reset(); tab('conversation'); note('演示已重置。') })
+    reset()
+  </script>
+</body>
+</html>

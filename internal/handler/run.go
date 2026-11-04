@@ -46,6 +46,16 @@ func (h *RunService) GetRun(runID string) (entity.RunRecord, error) {
 	return h.manager.Get(ctx, runID)
 }
 
+func (h *RunService) GetRunSnapshot(runID string) (entity.RunSnapshot, error) {
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return entity.RunSnapshot{}, errors.New("运行 ID 不能为空")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	return h.manager.GetSnapshot(ctx, runID)
+}
+
 func (h *RunService) Interrupt(runID string) error {
 	runID = strings.TrimSpace(runID)
 	if runID == "" {

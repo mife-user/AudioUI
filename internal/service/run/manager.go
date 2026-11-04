@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -74,38 +75,44 @@ type Options struct {
 }
 
 type Manager struct {
-	opts   Options
-	gate   *TurnGate
-	now    func() time.Time
-	mu     sync.Mutex
-	active map[string]*runState
-	closed bool
-	seq    atomic.Uint64
+	opts        Options
+	gate        *TurnGate
+	now         func() time.Time
+	mu          sync.Mutex
+	active      map[string]*runState
+	terminalSeq map[string]uint64
+	closed      bool
+	seq         atomic.Uint64
 }
 
 type runState struct {
-	setupMu      sync.Mutex
-	mu           sync.Mutex
-	persistMu    sync.Mutex
-	leaseMu      sync.Mutex
-	leaseCond    *sync.Cond
-	leases       int
-	closing      bool
-	interrupting bool
-	finishOnce   sync.Once
-	seq          uint64
-	scope        port.RunScope
-	spec         RunSpec
-	record       entity.RunRecord
-	store        port.RunStore
-	session      port.AgentSession
-	tool         port.ToolServer
-	permissions  port.RunPermissionController
-	runContext   context.Context
-	cancel       context.CancelFunc
-	timer        RunTimer
-	configReady  bool
-	messageSeq   atomic.Uint64
+	eventMu         sync.Mutex
+	eventQueue      []valueobject.RunEvent
+	publishing      bool
+	setupMu         sync.Mutex
+	mu              sync.Mutex
+	persistMu       sync.Mutex
+	leaseMu         sync.Mutex
+	leaseCond       *sync.Cond
+	leases          int
+	closing         bool
+	interrupting    bool
+	finishOnce      sync.Once
+	seq             uint64
+	scope           port.RunScope
+	spec            RunSpec
+	record          entity.RunRecord
+	permissionsByID map[string]valueobject.PermissionRequest
+	questionsByID   map[string]valueobject.QuestionRequest
+	store           port.RunStore
+	session         port.AgentSession
+	tool            port.ToolServer
+	permissions     port.RunPermissionController
+	runContext      context.Context
+	cancel          context.CancelFunc
+	timer           RunTimer
+	configReady     bool
+	messageSeq      atomic.Uint64
 }
 
 func New(options Options) *Manager {
@@ -126,7 +133,10 @@ func New(options Options) *Manager {
 	if options.Logf == nil {
 		options.Logf = func(string, ...any) {}
 	}
-	return &Manager{opts: options, gate: options.Gate, now: options.Now, active: make(map[string]*runState)}
+	return &Manager{
+		opts: options, gate: options.Gate, now: options.Now,
+		active: make(map[string]*runState), terminalSeq: make(map[string]uint64),
+	}
 }
 
 func (m *Manager) Start(ctx context.Context, nodeID string) (entity.RunRecord, error) {
@@ -223,6 +233,8 @@ func (m *Manager) Start(ctx context.Context, nodeID string) (entity.RunRecord, e
 	runCtx, cancel := context.WithCancel(context.Background())
 	state := &runState{
 		scope: scope, store: store, record: record, runContext: runCtx, cancel: cancel,
+		permissionsByID: make(map[string]valueobject.PermissionRequest),
+		questionsByID:   make(map[string]valueobject.QuestionRequest),
 	}
 	state.leaseCond = sync.NewCond(&state.leaseMu)
 	if err := m.register(state); err != nil {
@@ -292,7 +304,7 @@ func (m *Manager) Start(ctx context.Context, nodeID string) (entity.RunRecord, e
 			return
 		}
 		defer state.releaseLease()
-		m.emit(state, valueobject.RunEvent{Type: valueobject.EventRequestResolved, ResolvedKind: kind, ResolvedID: id})
+		m.resolveRequest(state, kind, id)
 	})
 
 	tool, err := m.opts.ToolServers.NewForRun(scope, workspace.CWD(), runID, permissions, func(message string) {
@@ -330,9 +342,9 @@ func (m *Manager) Start(ctx context.Context, nodeID string) (entity.RunRecord, e
 	state.session = session
 	state.mu.Unlock()
 
-	state.mu.Lock()
-	state.record.Status = valueobject.RunRunning
-	state.mu.Unlock()
+	m.emitWith(state, valueobject.RunEvent{Type: valueobject.EventStatus, Status: valueobject.RunRunning}, func() {
+		state.record.Status = valueobject.RunRunning
+	})
 	if err := m.persist(state); err != nil {
 		return failStartup(fmt.Errorf("RUN_STORE_FAILED: %w", err))
 	}
@@ -341,8 +353,6 @@ func (m *Manager) Start(ctx context.Context, nodeID string) (entity.RunRecord, e
 		m.finish(state, valueobject.RunFailed, "RUN_TIMEOUT", nil)
 	})
 	state.mu.Unlock()
-	m.emitStatus(state, valueobject.RunRunning, nil)
-
 	if err := session.Send(runCtx, runContext.InitialPrompt); err != nil {
 		state.setupMu.Unlock()
 		setupHeld = false
@@ -411,7 +421,11 @@ func (m *Manager) RespondPermission(runID, id string, decision valueobject.Permi
 	if permissions == nil {
 		return ErrRunNotFound
 	}
-	return permissions.ResolvePermission(id, decision)
+	if err := permissions.ResolvePermission(id, decision); err != nil {
+		return err
+	}
+	m.resolveRequest(state, "permission", id)
+	return nil
 }
 
 func (m *Manager) RespondQuestion(runID, id string, answer valueobject.QuestionAnswer) error {
@@ -427,7 +441,11 @@ func (m *Manager) RespondQuestion(runID, id string, answer valueobject.QuestionA
 	if permissions == nil {
 		return ErrRunNotFound
 	}
-	return permissions.ResolveQuestion(id, answer)
+	if err := permissions.ResolveQuestion(id, answer); err != nil {
+		return err
+	}
+	m.resolveRequest(state, "question", id)
+	return nil
 }
 
 func (m *Manager) List(ctx context.Context) ([]entity.RunSummary, error) {
@@ -438,11 +456,50 @@ func (m *Manager) List(ctx context.Context) ([]entity.RunSummary, error) {
 	if err != nil {
 		return nil, err
 	}
-	store, err := m.opts.RunStores.ForProject(ctx, project.ID)
+	return m.ListForProject(ctx, project.ID)
+}
+
+// ListForProject reads persisted run summaries and overlays active in-memory
+// state for one explicit project. It never guesses project ownership from a
+// run's node or tree identifiers.
+func (m *Manager) ListForProject(ctx context.Context, projectID string) ([]entity.RunSummary, error) {
+	if err := valueobject.ValidateID(projectID); err != nil || m.opts.RunStores == nil {
+		return nil, errors.New("RUN_MANAGER_DEPENDENCY_MISSING")
+	}
+	store, err := m.opts.RunStores.ForProject(ctx, projectID)
 	if err != nil {
 		return nil, err
 	}
-	return store.List(ctx)
+	runs, err := store.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	positions := make(map[string]int, len(runs))
+	for i := range runs {
+		positions[runs[i].ID] = i
+	}
+	m.mu.Lock()
+	active := make([]*runState, 0, len(m.active))
+	for _, state := range m.active {
+		if state.scope.ProjectID == projectID {
+			active = append(active, state)
+		}
+	}
+	m.mu.Unlock()
+	for _, state := range active {
+		record := state.snapshot()
+		if index, ok := positions[record.ID]; ok {
+			runs[index] = record.RunSummary
+			continue
+		}
+		positions[record.ID] = len(runs)
+		runs = append(runs, record.RunSummary)
+	}
+	sort.SliceStable(runs, func(i, j int) bool { return runs[i].StartedAt > runs[j].StartedAt })
+	for i := range runs {
+		runs[i].ChainPath = append([]string(nil), runs[i].ChainPath...)
+	}
+	return runs, nil
 }
 
 func (m *Manager) Get(ctx context.Context, runID string) (entity.RunRecord, error) {
@@ -458,6 +515,43 @@ func (m *Manager) Get(ctx context.Context, runID string) (entity.RunRecord, erro
 		return entity.RunRecord{}, err
 	}
 	return store.Load(ctx, runID)
+}
+
+// GetSnapshot returns a run view and the event sequence from one in-memory
+// synchronization point. Historical runs have no process-local requests and
+// use the last sequence retained by this process, or zero after a restart.
+func (m *Manager) GetSnapshot(ctx context.Context, runID string) (entity.RunSnapshot, error) {
+	if err := valueobject.ValidateID(runID); err != nil {
+		return entity.RunSnapshot{}, ErrRunNotFound
+	}
+	if m.opts.Projects == nil || m.opts.RunStores == nil {
+		return entity.RunSnapshot{}, errors.New("RUN_MANAGER_DEPENDENCY_MISSING")
+	}
+	project, err := m.opts.Projects.Current(ctx)
+	if err != nil {
+		return entity.RunSnapshot{}, err
+	}
+	if state := m.getActive(runID); state != nil {
+		if state.scope.ProjectID != project.ID {
+			return entity.RunSnapshot{}, ErrRunNotFound
+		}
+		return state.runSnapshot(), nil
+	}
+	store, err := m.opts.RunStores.ForProject(ctx, project.ID)
+	if err != nil {
+		return entity.RunSnapshot{}, err
+	}
+	record, err := store.Load(ctx, runID)
+	if err != nil {
+		return entity.RunSnapshot{}, err
+	}
+	m.mu.Lock()
+	lastSeq := m.terminalSeq[runID]
+	m.mu.Unlock()
+	return entity.RunSnapshot{
+		RunID: runID, ProjectID: project.ID, Run: record, LastSeq: lastSeq,
+		Permissions: []valueobject.PermissionRequest{}, Questions: []valueobject.QuestionRequest{},
+	}, nil
 }
 
 // RecoverInterrupted marks unfinished records from every project before the
@@ -499,7 +593,12 @@ func (m *Manager) RecoverInterrupted(ctx context.Context) error {
 			if err := m.opts.RunConfigs.Cleanup(ctx, project.ID, record.ID); err != nil {
 				return fmt.Errorf("cleanup interrupted run %s: %w", record.ID, err)
 			}
-			m.publishRecovered(record)
+			if m.opts.Publisher != nil {
+				m.mu.Lock()
+				m.terminalSeq[record.ID] = 1
+				m.mu.Unlock()
+			}
+			m.publishRecovered(project.ID, record)
 		}
 	}
 	return nil
@@ -537,13 +636,12 @@ func (m *Manager) RecordRunPending(ctx context.Context, scope port.RunScope, pen
 	}
 	defer state.releaseLease()
 	m.resetWatchdog(state)
-	state.mu.Lock()
-	state.record.PendingID = pending.ID
-	state.mu.Unlock()
+	m.emitWith(state, valueobject.RunEvent{Type: valueobject.EventPending, PendingID: pending.ID}, func() {
+		state.record.PendingID = pending.ID
+	})
 	if err := m.persist(state); err != nil {
 		return err
 	}
-	m.emit(state, valueobject.RunEvent{Type: valueobject.EventPending, PendingID: pending.ID})
 	return nil
 }
 
@@ -570,7 +668,13 @@ func (m *Manager) onAgentEvent(state *runState, event valueobject.AgentEvent) {
 		case valueobject.SessionError, valueobject.SessionUnavailable, valueobject.SessionResumeFailed:
 			go m.finish(state, valueobject.RunFailed, "RUN_FAILED", event.ActualInputTokens)
 		default:
-			m.emitAgentEvent(state, event)
+			status := valueobject.RunStarting
+			if event.State.Status == valueobject.SessionRunning {
+				status = valueobject.RunRunning
+			}
+			m.emitWith(state, valueobject.RunEvent{Type: valueobject.EventStatus, Status: status}, func() {
+				state.record.Status = status
+			})
 		}
 	case valueobject.EventError:
 		m.emitAgentEvent(state, event)
@@ -581,28 +685,46 @@ func (m *Manager) onAgentEvent(state *runState, event valueobject.AgentEvent) {
 		go m.finish(state, valueobject.RunFailed, code, event.ActualInputTokens)
 	case valueobject.EventMessage:
 		if event.Message != nil {
-			state.mu.Lock()
-			applyMessage(&state.record.Transcript, *event.Message)
-			state.mu.Unlock()
+			item := *event.Message
+			m.emitWith(state, valueobject.RunEvent{Type: valueobject.EventMessage, Message: &item}, func() {
+				applyMessage(&state.record.Transcript, item)
+			})
 			if !event.Message.Streaming {
 				if err := m.persist(state); err != nil {
 					m.opts.Logf("persist transcript for run %s: %v", state.scope.RunID, err)
 				}
 			}
+			return
 		}
 		m.emitAgentEvent(state, event)
 	case valueobject.EventTool:
 		if event.Tool != nil {
-			state.mu.Lock()
-			applyTool(&state.record.Transcript, *event.Tool)
-			state.mu.Unlock()
+			item := *event.Tool
+			m.emitWith(state, valueobject.RunEvent{Type: valueobject.EventTool, Tool: &item}, func() {
+				applyTool(&state.record.Transcript, item)
+			})
 			if err := m.persist(state); err != nil {
 				m.opts.Logf("persist tool event for run %s: %v", state.scope.RunID, err)
 			}
+			return
 		}
 		m.emitAgentEvent(state, event)
-	case valueobject.EventPermission, valueobject.EventQuestion:
-		m.emitAgentEvent(state, event)
+	case valueobject.EventPermission:
+		if event.Permission == nil {
+			return
+		}
+		request := clonePermissionRequest(*event.Permission)
+		m.emitWith(state, valueobject.RunEvent{Type: valueobject.EventPermission, Permission: &request}, func() {
+			state.permissionsByID[request.ID] = request
+		})
+	case valueobject.EventQuestion:
+		if event.Question == nil {
+			return
+		}
+		request := cloneQuestionRequest(*event.Question)
+		m.emitWith(state, valueobject.RunEvent{Type: valueobject.EventQuestion, Question: &request}, func() {
+			state.questionsByID[request.ID] = request
+		})
 	}
 }
 
@@ -620,13 +742,12 @@ func (m *Manager) onReply(state *runState, message string) {
 		Kind: valueobject.TranscriptMessage, Role: "assistant", Text: message,
 		CreatedAt: m.now().UTC().Format(time.RFC3339Nano),
 	}
-	state.mu.Lock()
-	applyMessage(&state.record.Transcript, item)
-	state.mu.Unlock()
+	m.emitWith(state, valueobject.RunEvent{Type: valueobject.EventMessage, Message: &item}, func() {
+		applyMessage(&state.record.Transcript, item)
+	})
 	if err := m.persist(state); err != nil {
 		m.opts.Logf("persist MCP reply for run %s: %v", state.scope.RunID, err)
 	}
-	m.emit(state, valueobject.RunEvent{Type: valueobject.EventMessage, Message: &item})
 }
 
 func (m *Manager) finish(state *runState, status valueobject.RunStatus, errorCode string, actualInputTokens *int) {
@@ -693,56 +814,68 @@ func (m *Manager) finish(state *runState, status valueobject.RunStatus, errorCod
 				m.opts.Logf("remove MCP config for run %s: %v", state.scope.RunID, err)
 			}
 		}
-		if err := m.opts.Workflow.ReleaseRunLock(context.Background(), state.scope.RunID); err != nil {
-			m.opts.Logf("release run lock %s: %v", state.scope.RunID, err)
-			if status == valueobject.RunSucceeded {
-				status = valueobject.RunFailed
-				errorCode = "RUN_LOCK_RELEASE_FAILED"
-			}
-		}
-
-		state.mu.Lock()
-		state.record.Status = status
-		state.record.Error = errorCode
-		state.record.FinishedAt = m.now().UTC().Format(time.RFC3339Nano)
+		record := state.snapshot()
+		record.Status = status
+		record.Error = errorCode
+		record.FinishedAt = m.now().UTC().Format(time.RFC3339Nano)
 		if actualInputTokens != nil {
 			if usage, err := (valueobject.ContextEstimate{
-				EstimatorVersion: state.record.EstimatorVersion,
-				EstimatedTokens:  state.record.EstimatedTokens,
-				TokenBudget:      state.record.TokenBudget,
+				EstimatorVersion: record.EstimatorVersion,
+				EstimatedTokens:  record.EstimatedTokens,
+				TokenBudget:      record.TokenBudget,
 			}).WithActualInputTokens(*actualInputTokens); err == nil {
-				state.record.ActualInputTokens = usage.ActualInputTokens
-				state.record.UsageReported = true
-				state.record.OverBudget = usage.OverBudget
+				record.ActualInputTokens = usage.ActualInputTokens
+				record.UsageReported = true
+				record.OverBudget = usage.OverBudget
 			}
 		}
-		if len(state.record.Transcript) > valueobject.MaxRunTranscriptItems {
-			state.record.Transcript = append([]valueobject.TranscriptItem(nil), state.record.Transcript[len(state.record.Transcript)-valueobject.MaxRunTranscriptItems:]...)
+		if len(record.Transcript) > valueobject.MaxRunTranscriptItems {
+			record.Transcript = append([]valueobject.TranscriptItem(nil), record.Transcript[len(record.Transcript)-valueobject.MaxRunTranscriptItems:]...)
 		}
-		state.mu.Unlock()
-		if err := m.persist(state); err != nil {
+		if err := m.persistRecord(state, record); err != nil {
 			m.opts.Logf("persist terminal run %s: %v", state.scope.RunID, err)
-			state.mu.Lock()
-			state.record.Status = valueobject.RunFailed
-			state.record.Error = "RUN_STORE_FAILED"
-			state.mu.Unlock()
+			record.Status = valueobject.RunFailed
+			record.Error = "RUN_STORE_FAILED"
 			status = valueobject.RunFailed
 			errorCode = "RUN_STORE_FAILED"
-			if retryErr := m.persist(state); retryErr != nil {
+			if retryErr := m.persistRecord(state, record); retryErr != nil {
 				m.opts.Logf("retry terminal run store for %s: %v", state.scope.RunID, retryErr)
 			}
-		}
-		m.mu.Lock()
-		delete(m.active, state.scope.RunID)
-		m.mu.Unlock()
-		if err := m.gate.Release(state.scope.RunID); err != nil {
-			m.opts.Logf("release turn gate for run %s: %v", state.scope.RunID, err)
 		}
 		var eventError *valueobject.AgentError
 		if errorCode != "" {
 			eventError = &valueobject.AgentError{Code: errorCode, Message: errorCode, Recoverable: false}
 		}
-		m.emit(state, valueobject.RunEvent{Type: valueobject.EventStatus, Status: status, Error: eventError, ActualInputTokens: actualInputTokens})
+		m.emitWith(state, valueobject.RunEvent{Type: valueobject.EventStatus, Status: status, Error: eventError, ActualInputTokens: actualInputTokens}, func() {
+			state.record = cloneRunRecord(record)
+			state.permissionsByID = make(map[string]valueobject.PermissionRequest)
+			state.questionsByID = make(map[string]valueobject.QuestionRequest)
+		})
+		if err := m.opts.Workflow.ReleaseRunLock(context.Background(), state.scope.RunID); err != nil {
+			m.opts.Logf("release run lock %s: %v", state.scope.RunID, err)
+			if status == valueobject.RunSucceeded {
+				status = valueobject.RunFailed
+				errorCode = "RUN_LOCK_RELEASE_FAILED"
+				record.Status = status
+				record.Error = errorCode
+				if persistErr := m.persistRecord(state, record); persistErr != nil {
+					m.opts.Logf("persist run lock failure for %s: %v", state.scope.RunID, persistErr)
+				}
+				lockError := &valueobject.AgentError{Code: errorCode, Message: errorCode, Recoverable: false}
+				m.emitWith(state, valueobject.RunEvent{Type: valueobject.EventStatus, Status: status, Error: lockError, ActualInputTokens: actualInputTokens}, func() {
+					state.record = cloneRunRecord(record)
+				})
+			}
+		}
+		if err := m.gate.Release(state.scope.RunID); err != nil {
+			m.opts.Logf("release turn gate for run %s: %v", state.scope.RunID, err)
+		}
+		m.mu.Lock()
+		delete(m.active, state.scope.RunID)
+		state.mu.Lock()
+		m.terminalSeq[state.scope.RunID] = state.seq
+		state.mu.Unlock()
+		m.mu.Unlock()
 	})
 }
 
@@ -769,6 +902,12 @@ func (m *Manager) persist(state *runState) error {
 	state.persistMu.Lock()
 	defer state.persistMu.Unlock()
 	return state.store.Save(context.Background(), state.snapshot())
+}
+
+func (m *Manager) persistRecord(state *runState, record entity.RunRecord) error {
+	state.persistMu.Lock()
+	defer state.persistMu.Unlock()
+	return state.store.Save(context.Background(), cloneRunRecord(record))
 }
 
 func (m *Manager) resetWatchdog(state *runState) {
@@ -812,28 +951,107 @@ func (m *Manager) emitStatus(state *runState, status valueobject.RunStatus, even
 }
 
 func (m *Manager) emit(state *runState, event valueobject.RunEvent) {
-	if m.opts.Publisher == nil {
+	m.emitWith(state, event, nil)
+}
+
+func (m *Manager) emitWith(state *runState, event valueobject.RunEvent, mutate func()) {
+	state.eventMu.Lock()
+	state.mu.Lock()
+	if mutate != nil {
+		mutate()
+	}
+	event = nextRunEventLocked(state, event)
+	state.mu.Unlock()
+	drain := m.queueRunEventLocked(state, event)
+	state.eventMu.Unlock()
+	if drain {
+		m.drainRunEvents(state)
+	}
+}
+
+func (m *Manager) resolveRequest(state *runState, kind, id string) {
+	state.eventMu.Lock()
+	state.mu.Lock()
+	switch kind {
+	case "permission":
+		if _, exists := state.permissionsByID[id]; !exists {
+			state.mu.Unlock()
+			state.eventMu.Unlock()
+			return
+		}
+		delete(state.permissionsByID, id)
+	case "question":
+		if _, exists := state.questionsByID[id]; !exists {
+			state.mu.Unlock()
+			state.eventMu.Unlock()
+			return
+		}
+		delete(state.questionsByID, id)
+	default:
+		state.mu.Unlock()
+		state.eventMu.Unlock()
 		return
 	}
-	state.mu.Lock()
+	event := nextRunEventLocked(state, valueobject.RunEvent{
+		Type: valueobject.EventRequestResolved, ResolvedKind: kind, ResolvedID: id,
+	})
+	state.mu.Unlock()
+	drain := m.queueRunEventLocked(state, event)
+	state.eventMu.Unlock()
+	if drain {
+		m.drainRunEvents(state)
+	}
+}
+
+// queueRunEventLocked appends in sequence order. Callers publish only after
+// releasing eventMu and the run state mutex.
+func (m *Manager) queueRunEventLocked(state *runState, event valueobject.RunEvent) bool {
+	if m.opts.Publisher == nil {
+		return false
+	}
+	state.eventQueue = append(state.eventQueue, event)
+	if state.publishing {
+		return false
+	}
+	state.publishing = true
+	return true
+}
+
+func (m *Manager) drainRunEvents(state *runState) {
+	for {
+		state.eventMu.Lock()
+		if len(state.eventQueue) == 0 {
+			state.publishing = false
+			state.eventMu.Unlock()
+			return
+		}
+		event := state.eventQueue[0]
+		state.eventQueue[0] = valueobject.RunEvent{}
+		state.eventQueue = state.eventQueue[1:]
+		state.eventMu.Unlock()
+		m.opts.Publisher.PublishRun(event)
+	}
+}
+
+func nextRunEventLocked(state *runState, event valueobject.RunEvent) valueobject.RunEvent {
 	state.seq++
 	event.Version = 1
 	event.Seq = state.seq
 	event.RunID = state.scope.RunID
+	event.ProjectID = state.scope.ProjectID
 	event.TreeID = state.scope.TreeID
 	event.ChainID = state.scope.ChainID
 	event.NodeID = state.scope.NodeID
 	event.ChainPath = append([]string(nil), state.scope.ChainPath...)
-	state.mu.Unlock()
-	m.opts.Publisher.PublishRun(event)
+	return event
 }
 
-func (m *Manager) publishRecovered(record entity.RunRecord) {
+func (m *Manager) publishRecovered(projectID string, record entity.RunRecord) {
 	if m.opts.Publisher == nil {
 		return
 	}
 	m.opts.Publisher.PublishRun(valueobject.RunEvent{
-		Version: 1, Seq: 1, RunID: record.ID, TreeID: record.TreeID, ChainID: record.ChainID,
+		Version: 1, Seq: 1, RunID: record.ID, ProjectID: projectID, TreeID: record.TreeID, ChainID: record.ChainID,
 		NodeID: record.NodeID, ChainPath: append([]string(nil), record.ChainPath...),
 		Type: valueobject.EventStatus, Status: valueobject.RunInterrupted,
 		Error: &valueobject.AgentError{Code: "INTERRUPTED_BY_RESTART", Message: "INTERRUPTED_BY_RESTART", Recoverable: false},
@@ -843,10 +1061,46 @@ func (m *Manager) publishRecovered(record entity.RunRecord) {
 func (s *runState) snapshot() entity.RunRecord {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	record := s.record
-	record.ChainPath = append([]string(nil), s.record.ChainPath...)
-	record.Transcript = append([]valueobject.TranscriptItem(nil), s.record.Transcript...)
-	return record
+	return cloneRunRecord(s.record)
+}
+
+func (s *runState) runSnapshot() entity.RunSnapshot {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	permissions := make([]valueobject.PermissionRequest, 0, len(s.permissionsByID))
+	for _, request := range s.permissionsByID {
+		permissions = append(permissions, clonePermissionRequest(request))
+	}
+	sort.Slice(permissions, func(i, j int) bool { return permissions[i].ID < permissions[j].ID })
+	questions := make([]valueobject.QuestionRequest, 0, len(s.questionsByID))
+	for _, request := range s.questionsByID {
+		questions = append(questions, cloneQuestionRequest(request))
+	}
+	sort.Slice(questions, func(i, j int) bool { return questions[i].ID < questions[j].ID })
+	return entity.RunSnapshot{
+		RunID: s.scope.RunID, ProjectID: s.scope.ProjectID,
+		Run: cloneRunRecord(s.record), LastSeq: s.seq,
+		Permissions: permissions, Questions: questions,
+	}
+}
+
+func cloneRunRecord(record entity.RunRecord) entity.RunRecord {
+	clone := record
+	clone.ChainPath = append([]string(nil), record.ChainPath...)
+	clone.Transcript = append([]valueobject.TranscriptItem(nil), record.Transcript...)
+	return clone
+}
+
+func clonePermissionRequest(request valueobject.PermissionRequest) valueobject.PermissionRequest {
+	clone := request
+	clone.Paths = append([]string(nil), request.Paths...)
+	return clone
+}
+
+func cloneQuestionRequest(request valueobject.QuestionRequest) valueobject.QuestionRequest {
+	clone := request
+	clone.Options = append([]string(nil), request.Options...)
+	return clone
 }
 
 func (m *Manager) sameScope(state *runState, scope port.RunScope) bool {

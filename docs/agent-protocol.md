@@ -270,32 +270,35 @@ Schema（M2 最小）：
 
 当前运行由 Wails `RunService` 一次启动并发送首条上下文消息；`Start` 仅在 MCP/权限/driver 完成初始化并成功提交首条消息后返回。M2 同时只允许一个在途运行，竞争请求立即返回 `BUSY`。运行历史经 `ListRuns`/`GetRun` 读取；`Interrupt`、`RespondPermission` 与 `RespondQuestion` 按 runId 定位活动运行。启动时，所有工程中遗留的 `starting`/`running` 记录转为 `interrupted`，不会恢复 Agent 会话。
 
-实际运行的 Wails 事件统一按 `run:<type>` 发布，每条事件都有运行身份与单调序号：
+实际运行的 Wails 事件统一按 `run:<type>` 发布，每条事件都有工程/运行身份与单调序号：
 
 ```text
-run:status           { v, seq, runId, treeId, chainId, nodeId, chainPath, type, status, error? }
-run:message          { v, seq, runId, treeId, chainId, nodeId, chainPath, type, message }
-run:tool             { v, seq, runId, treeId, chainId, nodeId, chainPath, type, tool }
-run:permission       { v, seq, runId, treeId, chainId, nodeId, chainPath, type, permission }
-run:question         { v, seq, runId, treeId, chainId, nodeId, chainPath, type, question }
-run:error            { v, seq, runId, treeId, chainId, nodeId, chainPath, type, error }
-run:pending          { v, seq, runId, treeId, chainId, nodeId, chainPath, type, pendingId }
-run:request_resolved { v, seq, runId, treeId, chainId, nodeId, chainPath, type, resolvedKind, resolvedId }
+run:status           { v, seq, runId, projectId, treeId, chainId, nodeId, chainPath, type, status, error? }
+run:message          { v, seq, runId, projectId, treeId, chainId, nodeId, chainPath, type, message }
+run:tool             { v, seq, runId, projectId, treeId, chainId, nodeId, chainPath, type, tool }
+run:permission       { v, seq, runId, projectId, treeId, chainId, nodeId, chainPath, type, permission }
+run:question         { v, seq, runId, projectId, treeId, chainId, nodeId, chainPath, type, question }
+run:error            { v, seq, runId, projectId, treeId, chainId, nodeId, chainPath, type, error }
+run:pending          { v, seq, runId, projectId, treeId, chainId, nodeId, chainPath, type, pendingId }
+run:request_resolved { v, seq, runId, projectId, treeId, chainId, nodeId, chainPath, type, resolvedKind, resolvedId }
 ```
 
+- `projectId` 来自启动该运行时绑定的 `RunScope`，不得用 nodeId/treeId 推导。
 - `chainPath` 是运行时的 topic 根 → 目标节点路径快照；链本身是派生视图。
-- envelope 的 `v=1`；`seq` 每个 run 独立、单调递增；消费者按 runId 丢弃其他运行或重复序号的事件。
+- envelope 的 `v=1`；`seq` 每个 run 独立、单调递增，并与运行视图/待决请求的内存更新在同一同步点递增；消费者按 projectId/runId 丢弃其他工程、其他运行或重复序号的事件。
 - 终态 `status` 含 `succeeded`、`failed`、`interrupted`；`error` 使用稳定错误码。`actualInputTokens` 表示首个 `AssistantMessage.Usage` 中的首次请求用量（包括缓存 token），随终态事件发送；没有该 usage 时字段缺失，不用 `ResultMessage` 多轮累计量替代。
 - MCP `reply` 创建 pending 后发布 `run:pending`；权限与问题请求解决后发布 `run:request_resolved`。
-- 前端接线属于 M2-08；接入时先 `GetRun`/`GetWorkspaceSnapshot` 拉快照，再订阅运行事件并处理序号缺口。
+- 前端接线属于 M2-08；启动/切换工程时先订阅事件并按工程代次缓冲，再取 `GetWorkspaceSnapshot` 与活动运行的 `GetRunSnapshot`，按 revision/lastSeq 丢弃旧事件并重放更新；发生缺口时暂停对应流并重拉。
 - 事件 payload 版本 `v=1`。
 - 运行事件不携带完整 transcript；transcript 由 `GetRun` 获取。
-- `workspace:changed.reason` 取 `project`（新建/打开/切换工程）、`graph`（节点、参数、位置、锁定、stale）、`pending`（待应用新增/应用/丢弃）；运行开始/结束的路径锁变化由带 `chainPath` 的 `run:status` 表达。
+- `GetRunSnapshot(runId)` 返回 `{ runId, projectId, run, lastSeq, permissions, questions }`。活动运行的 `run`、`lastSeq` 和未决请求在同一把运行状态锁下读取；请求到达、解决、超时及终止清理都与事件序号原子对应。终态和历史运行返回持久化 `run`、空请求列表；进程重启后事件序号重新从新快照基准开始，不跨进程比较。
+- `workspace:changed` 返回 `{ projectId, revision, reason, projectRevision }`。`reason` 取 `project`（新建/切换工程）、`graph`（图命令提交）、`pending`（待应用新增/应用/丢弃）、`run_lock`（运行路径锁取得/释放）。事件里的工程 ID 来自发生变更的命令/锁记录；不能在回调中查询“当前工程”推断归属。
+- 工作台外层 `revision` 是本进程内单调递增的同步版本，覆盖工程切换、图/pending 提交及路径锁变化，不落盘；`projectRevision` 和 `snapshot.project.revision` 是持久化工程 revision。重启后以新快照为基准。
 - `SelectNode` 只持久化 `activeNodeId`，不递增 revision、不广播；选中与路径高亮由前端本地更新。
 
 ### 10.1 工作台快照最小字段
 
-`GetWorkspaceSnapshot` 返回 `{ revision, snapshot }`；快照只含 UI 渲染所需字段，正文按需通过 `GetRun`/`GetPending` 获取：
+`GetWorkspaceSnapshot` 返回 `{ revision, snapshot }`；若读取期间工程切换、图/pending 提交或运行锁变化，服务端重试；仍不稳定时返回可重试错误 `WORKSPACE_CHANGED`，不返回混合工程数据。无活动工程时 `snapshot.project` 为 `null`，列表为空数组。快照只含 UI 渲染所需字段，正文按需通过 `GetRun`/`GetRunSnapshot`/`GetPending` 获取：
 
 | 字段 | 内容 |
 |---|---|
@@ -306,8 +309,10 @@ run:request_resolved { v, seq, runId, treeId, chainId, nodeId, chainPath, type, 
 | `chains[]` | Go 派生叶子链视图：`id/tailNodeId/path/label/status`；`status` 取 `idle/running/pending`，不落盘 |
 | `lockedNodeIds[]` | 当前运行/排队路径与共享祖先；M2 为单在途运行的路径 |
 
-- `revision` 只在图/工程/待应用/运行锁变化时递增；`SelectNode` 不改变快照 revision。
+- 外层 `revision` 只在图/工程/pending/运行锁变化时递增；`snapshot.project.revision` 只由持久化图/pending 写入规则递增。`SelectNode` 不改变外层 revision。
 - 快照不内联 transcript、pending 正文或 artifact 正文；前端只消费 `chains`，不复制链派生规则。
+- `actualInputTokens` 在实际 usage 未知时省略，不伪装为 `0`。派生 `chains` 的 `status` 按活动运行路径和活动 pending 推导。
+- 运行路径锁已取得但运行记录仍在初始化时，`runs[]` 可带临时 `starting` 摘要；运行记录保存后以完整摘要替换，启动失败则随解锁事件消失。
 
 ## 11. 错误码
 

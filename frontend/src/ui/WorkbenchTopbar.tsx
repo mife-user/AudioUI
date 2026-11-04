@@ -1,37 +1,28 @@
-import type { AgentState } from '../api/agent'
+import type { EnvironmentDTO } from '../api/system'
+import type { WorkspaceProject } from '../../bindings/audio-ui/internal/domain/entity'
+import { ProjectSwitcher } from './ProjectSwitcher'
 import { copy } from './copy'
 
 type Props = {
-  state: AgentState | null
+  project: WorkspaceProject | null
+  environment: EnvironmentDTO | null
+  busy: boolean
   version: string
+  onNewProject: (name: string) => Promise<void>
+  onOpenProject: (projectId: string) => Promise<void>
   onAbout: () => void
   onSystem: () => void
 }
 
-function statusOf(state: AgentState | null) {
-  if (!state) return { tone: 'warn', label: '连接中' }
-  if (!state.cliAvailable) return { tone: 'bad', label: 'Agent 不可用' }
-  if ((state.permissions?.length ?? 0) + (state.questions?.length ?? 0) > 0) {
-    return { tone: 'warn', label: '待处理' }
-  }
-  switch (state.status) {
-    case 'running':
-      return { tone: 'ok', label: '工作中' }
-    case 'resuming':
-      return { tone: 'warn', label: '恢复中' }
-    case 'resume_failed':
-      return { tone: 'bad', label: '恢复失败' }
-    case 'error':
-      return { tone: 'bad', label: '需要处理' }
-    case 'unavailable':
-      return { tone: 'bad', label: 'Agent 不可用' }
-    default:
-      return { tone: 'ok', label: '空闲' }
-  }
+function statusOf(environment: EnvironmentDTO | null, busy: boolean) {
+  if (!environment) return { tone: 'warn', label: '环境检查中' }
+  if (!environment.cli.installed) return { tone: 'bad', label: 'Agent 不可用' }
+  if (busy) return { tone: 'ok', label: '工作中' }
+  return { tone: 'ok', label: 'Agent 空闲' }
 }
 
-export function WorkbenchTopbar({ state, version, onAbout, onSystem }: Props) {
-  const status = statusOf(state)
+export function WorkbenchTopbar({ project, environment, busy, version, onNewProject, onOpenProject, onAbout, onSystem }: Props) {
+  const status = statusOf(environment, busy)
   const toneClass = status.tone === 'ok' ? '' : ` ${status.tone === 'warn' ? 'warn' : 'bad'}`
   return (
     <header className="topbar">
@@ -40,8 +31,14 @@ export function WorkbenchTopbar({ state, version, onAbout, onSystem }: Props) {
         <span>{copy.brand}</span>
         <span className="brand-sub">{copy.brandSub}</span>
       </div>
+      <ProjectSwitcher
+        project={project}
+        blocked={busy}
+        onNew={onNewProject}
+        onOpen={onOpenProject}
+      />
       <div className="topbar-spacer" />
-      <div className="env-state">
+      <div className="env-state" role="status" aria-live="polite">
         <span className={`dot${toneClass}`} />
         <span>{status.label}</span>
       </div>

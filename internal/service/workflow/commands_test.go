@@ -474,3 +474,24 @@ func TestRunLockLifecycle(t *testing.T) {
 		t.Fatalf("error = %v, want NODE_NOT_FOUND", err)
 	}
 }
+
+func TestRunLockReleaseEventCarriesProjectAndLatestGraphRevision(t *testing.T) {
+	h := newHarness(t, baseProject())
+	if err := h.service.AcquireRunLock(context.Background(), "r_one", "n_topic", "n_a", []string{"n_topic", "n_a"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.service.UpdateNodeParams(context.Background(), "n_c", "C", entity.NodeParams{Instruction: "updated sibling"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.service.ReleaseRunLock(context.Background(), "r_one"); err != nil {
+		t.Fatal(err)
+	}
+	changes := *h.changes
+	if len(changes) != 3 {
+		t.Fatalf("change events = %+v", changes)
+	}
+	last := changes[len(changes)-1]
+	if last.projectID != h.session.project.ID || last.revision != h.session.project.Revision || last.reason != ChangeReasonRunLock {
+		t.Fatalf("run lock release event = %+v, project=%+v", last, h.session.project)
+	}
+}

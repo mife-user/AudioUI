@@ -17,15 +17,20 @@ type projectSetup struct {
 	service *project.Service
 }
 
-func newProjectSetup(layout valueobject.Layout, logger *zap.Logger) *projectSetup {
+func newProjectSetup(layout valueobject.Layout, logger *zap.Logger, onChange ...func(string, int64)) *projectSetup {
 	configStore := persistence.NewConfigStore(layout.ConfigFile)
 	projectStore := persistence.NewProjectStore(layout)
 	migrator := persistence.NewM1Migrator(layout)
+	var changed func(string, int64)
+	if len(onChange) > 0 {
+		changed = onChange[0]
+	}
 	service := project.New(project.Options{
 		Layout:   layout,
 		Config:   configStore,
 		Projects: projectStore,
 		Migrator: migrator,
+		OnChange: changed,
 		Logf: func(format string, args ...any) {
 			logger.Info("project", zap.String("detail", fmt.Sprintf(format, args...)))
 		},

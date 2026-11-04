@@ -33,6 +33,18 @@ type RunRecord struct {
 	Transcript              []valueobject.TranscriptItem `json:"transcript"`
 }
 
+// RunSnapshot is the in-memory recovery view used to resume an event stream.
+// ProjectID and LastSeq are deliberately not persisted in runs.json: events
+// and their sequence numbers are scoped to one process lifetime.
+type RunSnapshot struct {
+	RunID       string                          `json:"runId"`
+	ProjectID   string                          `json:"projectId"`
+	Run         RunRecord                       `json:"run"`
+	LastSeq     uint64                          `json:"lastSeq"`
+	Permissions []valueobject.PermissionRequest `json:"permissions"`
+	Questions   []valueobject.QuestionRequest   `json:"questions"`
+}
+
 // RunsFile is the runs.json index document.
 type RunsFile struct {
 	Version int          `json:"version"`

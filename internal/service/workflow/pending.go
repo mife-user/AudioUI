@@ -436,10 +436,10 @@ func (s *Service) commitPendingMutation(ctx context.Context, access port.Project
 		return entity.Project{}, err
 	}
 	if err := store.DeleteTransaction(ctx); err != nil {
-		s.changedPending(saved.Revision)
+		s.changedPending(saved.ID, saved.Revision)
 		return entity.Project{}, err
 	}
-	s.changedPending(saved.Revision)
+	s.changedPending(saved.ID, saved.Revision)
 	return saved, nil
 }
 

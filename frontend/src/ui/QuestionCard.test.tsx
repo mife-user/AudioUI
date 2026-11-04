@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { QuestionCard } from './QuestionCard'
-import type { QuestionRequest } from '../api/agent'
+import type { QuestionRequest } from '../api/runs'
 
 const request: QuestionRequest = {
   id: 'q1',

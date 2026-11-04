@@ -6,6 +6,7 @@ export {
     OutputKind,
     PendingStatus,
     PermissionTier,
+    RunStatus,
     SessionState,
     TranscriptKind
 } from "./models.js";

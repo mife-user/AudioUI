@@ -74,6 +74,20 @@ export interface PendingDetail {
 }
 
 /**
+ * PendingSummary is the payload-free view used by the workspace list.
+ */
+export interface PendingSummary {
+    "id": string;
+    "nodeId": string;
+    "runId": string;
+    "chainId": string;
+    "kind": valueobject$0.OutputKind;
+    "status": valueobject$0.PendingStatus;
+    "summary"?: string;
+    "error"?: string;
+}
+
+/**
  * Position is the persisted canvas position of a node.
  */
 export interface Position {
@@ -113,4 +127,129 @@ export interface Round {
     "artifactId": string;
     "pendingId": string;
     "runId": string;
+}
+
+/**
+ * RunRecord is the per-run detail document.
+ */
+export interface RunRecord {
+    "id": string;
+    "treeId": string;
+    "nodeId": string;
+    "chainId": string;
+    "chainPath": string[] | null;
+    "status": valueobject$0.RunStatus;
+    "contextVersion": number;
+    "estimatorVersion"?: number;
+    "contextHash"?: string;
+    "estimatedTokens"?: number;
+    "tokenBudget"?: number;
+    "actualInputTokens"?: number;
+    "usageReported"?: boolean;
+    "overBudget"?: boolean;
+    "error"?: string;
+    "pendingId"?: string;
+    "startedAt"?: string;
+    "finishedAt"?: string;
+    "contextPreview"?: string;
+    "contextPreviewTruncated"?: boolean;
+    "transcript": valueobject$0.TranscriptItem[] | null;
+}
+
+/**
+ * RunSnapshot is the in-memory recovery view used to resume an event stream.
+ * ProjectID and LastSeq are deliberately not persisted in runs.json: events
+ * and their sequence numbers are scoped to one process lifetime.
+ */
+export interface RunSnapshot {
+    "runId": string;
+    "projectId": string;
+    "run": RunRecord;
+    "lastSeq": number;
+    "permissions": valueobject$0.PermissionRequest[] | null;
+    "questions": valueobject$0.QuestionRequest[] | null;
+}
+
+/**
+ * RunSummary is the runs.json index entry. Transcript and context preview
+ * live in runs/<runId>.json so listing runs stays cheap.
+ */
+export interface RunSummary {
+    "id": string;
+    "treeId": string;
+    "nodeId": string;
+    "chainId": string;
+    "chainPath": string[] | null;
+    "status": valueobject$0.RunStatus;
+    "contextVersion": number;
+    "estimatorVersion"?: number;
+    "contextHash"?: string;
+    "estimatedTokens"?: number;
+    "tokenBudget"?: number;
+    "actualInputTokens"?: number;
+    "usageReported"?: boolean;
+    "overBudget"?: boolean;
+    "error"?: string;
+    "pendingId"?: string;
+    "startedAt"?: string;
+    "finishedAt"?: string;
+}
+
+/**
+ * WorkspaceChain is a leaf path derived from Graph.LeafChains.
+ */
+export interface WorkspaceChain {
+    "id": string;
+    "tailNodeId": string;
+    "path": string[] | null;
+    "label": string;
+    "status": string;
+}
+
+/**
+ * WorkspaceProject is the project identity in a workspace snapshot. Nodes are
+ * carried separately so the front end does not need to unpack project.json.
+ */
+export interface WorkspaceProject {
+    "id": string;
+    "name": string;
+    "revision": number;
+    "activeNodeId": string;
+}
+
+/**
+ * WorkspaceRunSummary is the payload-free view used by the workspace list.
+ */
+export interface WorkspaceRunSummary {
+    "id": string;
+    "nodeId": string;
+    "status": valueobject$0.RunStatus;
+    "chainId": string;
+    "chainPath": string[] | null;
+    "contextHash"?: string;
+    "estimatedTokens": number;
+    "actualInputTokens"?: number | null;
+    "startedAt"?: string;
+    "finishedAt"?: string;
+}
+
+/**
+ * WorkspaceSnapshot contains only the summary data required to draw a
+ * workspace. Run transcripts and pending/artifact payloads remain on demand.
+ */
+export interface WorkspaceSnapshot {
+    "project": WorkspaceProject | null;
+    "nodes": Node[] | null;
+    "pending": PendingSummary[] | null;
+    "runs": WorkspaceRunSummary[] | null;
+    "chains": WorkspaceChain[] | null;
+    "lockedNodeIds": string[] | null;
+}
+
+/**
+ * WorkspaceSnapshotResult pairs a snapshot with its process-local revision.
+ */
+export interface WorkspaceSnapshotResult {
+    "revision": number;
+    "snapshot": WorkspaceSnapshot;
 }

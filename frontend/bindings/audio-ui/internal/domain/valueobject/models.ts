@@ -99,6 +99,23 @@ export interface QuestionRequest {
     "expiresAt": string;
 }
 
+/**
+ * RunStatus follows the run lifecycle in agent-protocol.md.
+ */
+export enum RunStatus {
+    /**
+     * The Go zero value for the underlying type of the enum.
+     */
+    $zero = "",
+
+    RunStarting = "starting",
+    RunRunning = "running",
+    RunSucceeded = "succeeded",
+    RunFailed = "failed",
+    RunInterrupted = "interrupted",
+    RunImported = "imported",
+};
+
 export enum SessionState {
     /**
      * The Go zero value for the underlying type of the enum.

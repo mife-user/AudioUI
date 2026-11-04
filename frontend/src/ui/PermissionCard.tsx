@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { PermissionRequest } from '../api/agent'
+import type { PermissionRequest } from '../api/runs'
 
 type Props = {
   request: PermissionRequest

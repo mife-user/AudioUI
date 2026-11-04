@@ -2,12 +2,14 @@
 
 | 项 | 内容 |
 |---|---|
-| 状态 | 草案（M2 进行中：M2-00..07 已验收；M2-08 及后续待开发） |
+| 状态 | 草案（M2 进行中：M2-00..07 已验收；M2-08A、M2-08B 已验收；M2-09 及后续待开发） |
 | 最后更新 | 2026-11-03 |
 | 适用 | 每个新开对话只执行一个 M2 任务 |
 | 关联 | [路线图](roadmap.md)、[流程](process.md)、[PRD](../prd.md)、[架构](../architecture.md)、[协议](../agent-protocol.md)、[验收](../acceptance.md)、[ADR](../decisions.md) |
 
 > **M2 不一口气写完。** 每个任务单独开一个对话，做完、跑门禁、更新文档与证据，交给用户评审后再开下一个。任何任务都不得顺手实现其他任务的代码。
+
+> M2-08～10 的选题闭环细化任务及顺序见 [工作台至选题闭环计划](m2-topic-closure-plan.md)。该计划将 M2-08 和 M2-10 拆成单独验收的子项，并在其中安排本闭环必需的部分 M2-12 功能；各原任务状态仍以本手册状态表和用户验收为准。
 
 ---
 
@@ -215,6 +217,8 @@ DoD：分层与不变量未破坏；新增/修改逻辑有测试；任务级门�
 
 - **需求 / 验收**：F-01、F-03；AC-01、AC-03。
 - **依赖**：M2-07。
+- **子项进度**：M2-08A 后端快照、事件与恢复契约已验收（用户于 2026-11-03 确认）；任务级 Go、前端、绑定生成与 Wails 构建门禁通过。AC-01/03/06 有接口级自动化覆盖，证据见 [M2-08A 自检与验收证据](evidence/m2-08a.md)。M2-08B 前端工作台与运行控制台已实现、自动化及构建门禁通过；用户于 2026-11-03 明确指定截图更名后即算完成验收，证据见 [M2-08B 自检证据](evidence/m2-08b.md)。原任务 M2-08 已完成；M2-09 尚未开始。
+- **M2-08A 接口**：`GetWorkspaceSnapshot` 返回进程内工作台 revision 与工程、节点、pending/run 摘要、Go 派生链及路径锁；`workspace:changed` 携带来源 `projectId`、reason 和持久化工程 revision。运行事件加入 `projectId`，`GetRunSnapshot` 同步返回 transcript、`lastSeq` 与活动待决请求。两种 revision 不落盘混用，既有 `GetRun` 和运行记录格式保持兼容。
 - **目标**：workspaceStore、runStore、事件桥、控制台分页、工程入口、删除 M1 临时 UI。
 - **关键设计**：快照字段以 `agent-protocol.md` §10.1 为准；快照 + revision/seq；快照含 Go 派生的链视图与 `lockedNodeIds`；runStore 按 runId；控制台「对话/待处理」；删除 PromptDock、SessionPage、ResumeFailureCard/新开会话/取消恢复；工程切换 dialog；运行在途禁止切换工程；`SelectNode` 本地更新，不递增 revision、不重拉快照。
 - **文件**：`frontend/src/stores/{workspaceStore,runStore}.ts`、`api/*`、`hooks/*`、`ui/{WorkspacePage,ConsoleTabs,RunList,ProjectSwitcher}.tsx`。
@@ -325,7 +329,7 @@ wails3 build
 | M2-05 Pending 后端 | 已完成 | [自检与验收证据](evidence/m2-05.md)；用户已确认验收通过（2026-11-02） |
 | M2-06 MCP 只读与 reply | 已完成 | [自检与验收证据](evidence/m2-06.md)；用户于 2026-11-03 确认验收 |
 | M2-07 运行管理 | 已完成 | [自检与验收证据](evidence/m2-07.md)；用户于 2026-11-03 确认验收 |
-| M2-08 前端工作台骨架 | 未开始 | — |
+| M2-08 前端工作台骨架 | 已完成（08A、08B 均已验收） | [M2-08A 证据](evidence/m2-08a.md)；[M2-08B 自检证据](evidence/m2-08b.md) |
 | M2-09 画布与节点交互 | 未开始 | — |
 | M2-10 选题流程 | 未开始 | — |
 | M2-11 提示词流程 | 未开始 | — |

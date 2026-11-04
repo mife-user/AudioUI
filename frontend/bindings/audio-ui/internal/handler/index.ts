@@ -3,13 +3,17 @@
 
 import * as AgentService from "./agentservice.js";
 import * as ProjectService from "./projectservice.js";
+import * as RunService from "./runservice.js";
 import * as SystemService from "./systemservice.js";
 import * as WorkflowService from "./workflowservice.js";
+import * as WorkspaceService from "./workspaceservice.js";
 export {
     AgentService,
     ProjectService,
+    RunService,
     SystemService,
-    WorkflowService
+    WorkflowService,
+    WorkspaceService
 };
 
 export type {

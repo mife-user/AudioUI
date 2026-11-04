@@ -10,9 +10,11 @@
 | [design/m0-startup-shell.html](design/m0-startup-shell.html) | 设计 / 前端 | 原型 | M0 启动自检壳（临时） |
 | [design/m1-session-shell.html](design/m1-session-shell.html) | 设计 / 前端 | 原型 | M1 临时会话页与控制台（M2 已删除） |
 | [design/m2-workspace.html](design/m2-workspace.html) | 设计 / 前端 | 原型 | M2 工作台：画布、草稿节点、候选端口、运行分组、待应用、运行路径锁、同父换候选确认 |
+| [design/m2-topic-closure-demo.html](design/m2-topic-closure-demo.html) | 设计 / 前端 | 演示 | 选题运行、待应用、候选分支及改挂的本地交互示例 |
 | [dev/process.md](dev/process.md) | 开发 / 产品 | 草案 | 阶段、工作分解、门禁、变更控制 |
 | [dev/roadmap.md](dev/roadmap.md) | 产品 / 开发 | 草案 | 需求优先级、批次、暂存需求池 |
 | [dev/m2-workplan.md](dev/m2-workplan.md) | 开发 | 草案 | M2 逐任务执行手册、开工协议、任务卡与状态 |
+| [dev/m2-topic-closure-plan.md](dev/m2-topic-closure-plan.md) | 开发 / 测试 | 计划 | M2 工作台至选题闭环的分项实现、测试与验收计划 |
 | [dev/m2-backend-closure-plan.md](dev/m2-backend-closure-plan.md) | 开发 | 草案 | M2-05～07 后端闭环实现计划与已确认决策 |
 | [dev/evidence/m0.md](dev/evidence/m0.md) | 产品 / 测试 | 证据 | M0 自测与 GUI 冒烟记录 |
 | [dev/evidence/m1.md](dev/evidence/m1.md) | 产品 / 测试 | 证据 | M1 会话/权限/resume 冒烟记录 |

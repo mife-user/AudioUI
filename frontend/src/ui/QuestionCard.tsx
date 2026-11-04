@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { QuestionRequest } from '../api/agent'
+import type { QuestionRequest } from '../api/runs'
 
 type Props = {
   request: QuestionRequest

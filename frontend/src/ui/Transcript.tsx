@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import type { TranscriptItem } from '../api/agent'
+import type { TranscriptItem } from '../api/runs'
 
 type Props = {
   items: TranscriptItem[]
@@ -24,14 +24,16 @@ export function Transcript({ items }: Props) {
   const endRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    endRef.current?.scrollIntoView({ block: 'end' })
+    if (typeof endRef.current?.scrollIntoView === 'function') {
+      endRef.current.scrollIntoView({ block: 'end' })
+    }
   }, [items.length])
 
   if (items.length === 0) {
     return (
       <div className="agent-empty">
-        <div className="agent-empty-title">还没有会话消息</div>
-        <div className="agent-empty-sub">在底部临时指令栏输入一条消息，开始 M1 会话。</div>
+        <div className="agent-empty-title">暂无运行内容</div>
+        <div className="agent-empty-sub">选择一条运行记录查看完整对话和工具活动。</div>
       </div>
     )
   }
