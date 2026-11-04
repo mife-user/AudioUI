@@ -2,6 +2,7 @@ import { getRunSnapshot, interruptRun, respondRunPermission, respondRunQuestion,
 import type { PermissionDecision, RunEvent } from '../api/runs'
 import { getWorkspaceSnapshot, newProject, openProject, subscribeWorkspaceEvents } from '../api/workspace'
 import type { WorkspaceChangedEvent } from '../api/workspace'
+import type { GraphMutationReceipt } from '../../bindings/audio-ui/internal/domain/entity'
 import { useRunStore } from '../stores/runStore'
 import { useWorkspaceStore } from '../stores/workspaceStore'
 
@@ -46,6 +47,7 @@ export class WorkspaceBridge {
   private workspaceLoaded = false
   private workspaceLoading = false
   private workspaceLoadingGeneration: number | null = null
+  private workspaceRefreshPromise: Promise<void> | null = null
   private workspaceReloadRequested = false
   private workspaceEvents: WorkspaceChangedEvent[] = []
   private runEvents: RunEvent[] = []
@@ -61,6 +63,7 @@ export class WorkspaceBridge {
     this.workspaceLoaded = false
     this.workspaceLoading = false
     this.workspaceLoadingGeneration = null
+    this.workspaceRefreshPromise = null
     this.workspaceReloadRequested = false
     this.workspaceEvents = []
     this.runEvents = []
@@ -79,6 +82,7 @@ export class WorkspaceBridge {
     this.workspaceLoaded = false
     this.workspaceLoading = false
     this.workspaceLoadingGeneration = null
+    this.workspaceRefreshPromise = null
     this.workspaceReloadRequested = false
     this.workspaceEvents = []
     this.runEvents = []
@@ -87,8 +91,33 @@ export class WorkspaceBridge {
     useRunStore.getState().clear()
   }
 
-  retryWorkspace(): void {
-    if (this.active) void this.refreshWorkspace(this.generation)
+  async retryWorkspace(): Promise<void> {
+    if (!this.active) return
+    const generation = this.generation
+    await this.refreshWorkspace(generation)
+    if (!this.isCurrent(generation)) return
+    const workspace = useWorkspaceStore.getState()
+    if (workspace.status === 'error') throw new Error(workspace.error || '工作台快照同步失败')
+  }
+
+  async syncGraphMutation(receipt: GraphMutationReceipt): Promise<void> {
+    const generation = this.generation
+    if (!this.isCurrent(generation)) throw new Error('工作台尚未初始化')
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      await this.retryWorkspace()
+      if (!this.isCurrent(generation)) throw new Error('工程已切换，放弃旧工程快照同步。')
+
+      const snapshot = useWorkspaceStore.getState().snapshot
+      const project = snapshot?.project
+      if (!project || project.id !== receipt.projectId) {
+        throw new Error('PROJECT_CHANGED: 当前工程与图命令所属工程不一致。')
+      }
+      const nodePresent = !receipt.nodeId || (snapshot.nodes ?? []).some((node) => node.id === receipt.nodeId)
+      if (project.revision >= receipt.projectRevision && nodePresent) return
+    }
+
+    throw new Error(`WORKSPACE_SYNC_STALE: 工程 ${receipt.projectId} 的 revision ${receipt.projectRevision} 尚未出现在工作台快照中。`)
   }
 
   selectRun(runId: string): void {
@@ -139,6 +168,7 @@ export class WorkspaceBridge {
     this.workspaceLoaded = false
     this.workspaceLoading = false
     this.workspaceLoadingGeneration = null
+    this.workspaceRefreshPromise = null
     this.workspaceReloadRequested = false
     this.workspaceEvents = []
     this.runEvents = []
@@ -206,13 +236,28 @@ export class WorkspaceBridge {
     }
   }
 
-  private async refreshWorkspace(generation: number): Promise<void> {
-    if (!this.isCurrent(generation)) return
+  private refreshWorkspace(generation: number): Promise<void> {
+    if (!this.isCurrent(generation)) return Promise.resolve()
     if (this.workspaceLoading && this.workspaceLoadingGeneration === generation) {
       this.workspaceReloadRequested = true
-      return
+      return this.workspaceRefreshPromise ?? Promise.resolve()
     }
 
+    const refresh = this.performWorkspaceRefresh(generation)
+    this.workspaceRefreshPromise = refresh
+    void refresh.then(
+      () => {
+        if (this.workspaceRefreshPromise === refresh) this.workspaceRefreshPromise = null
+      },
+      () => {
+        if (this.workspaceRefreshPromise === refresh) this.workspaceRefreshPromise = null
+      },
+    )
+    return refresh
+  }
+
+  private async performWorkspaceRefresh(generation: number): Promise<void> {
+    if (!this.isCurrent(generation)) return
     this.workspaceLoading = true
     this.workspaceLoadingGeneration = generation
     useWorkspaceStore.getState().setLoading()
@@ -259,7 +304,7 @@ export class WorkspaceBridge {
         this.workspaceLoadingGeneration = null
         if (this.isCurrent(generation) && this.workspaceReloadRequested) {
           this.workspaceReloadRequested = false
-          queueMicrotask(() => void this.refreshWorkspace(generation))
+          await this.refreshWorkspace(generation)
         }
       }
     }

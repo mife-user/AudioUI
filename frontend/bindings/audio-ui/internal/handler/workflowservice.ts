@@ -13,7 +13,7 @@ import * as entity$0 from "../domain/entity/models.js";
 // @ts-ignore: Unused imports
 import * as $models from "./models.js";
 
-export function AddNode(request: $models.AddNodeRequest): $CancellablePromise<entity$0.Project> {
+export function AddNode(request: $models.AddNodeRequest): $CancellablePromise<entity$0.GraphMutationReceipt> {
     return $Call.ByID(768279910, request);
 }
 
@@ -21,8 +21,8 @@ export function ApplyPending(id: string, force: boolean): $CancellablePromise<en
     return $Call.ByID(599074776, id, force);
 }
 
-export function Connect(parentID: string, childID: string, parentCandidate: number | null, replace: boolean): $CancellablePromise<entity$0.Project> {
-    return $Call.ByID(2783250323, parentID, childID, parentCandidate, replace);
+export function Connect(parentID: string, childID: string, parentCandidate: number | null, replace: boolean, projectID: string): $CancellablePromise<entity$0.GraphMutationReceipt> {
+    return $Call.ByID(2783250323, parentID, childID, parentCandidate, replace, projectID);
 }
 
 export function DiscardPending(id: string): $CancellablePromise<entity$0.Project> {
@@ -37,14 +37,14 @@ export function ListPending(): $CancellablePromise<entity$0.Pending[] | null> {
     return $Call.ByID(3179214806);
 }
 
-export function MoveNode(id: string, x: number, y: number): $CancellablePromise<entity$0.Project> {
-    return $Call.ByID(634824434, id, x, y);
+export function MoveNode(id: string, x: number, y: number, projectID: string): $CancellablePromise<entity$0.GraphMutationReceipt> {
+    return $Call.ByID(634824434, id, x, y, projectID);
 }
 
-export function SelectNode(id: string): $CancellablePromise<entity$0.Project> {
-    return $Call.ByID(2386440799, id);
+export function SelectNode(id: string, projectID: string): $CancellablePromise<entity$0.GraphMutationReceipt> {
+    return $Call.ByID(2386440799, id, projectID);
 }
 
-export function UpdateNodeParams(id: string, title: string, params: entity$0.NodeParams): $CancellablePromise<entity$0.Project> {
-    return $Call.ByID(4294809720, id, title, params);
+export function UpdateNodeParams(id: string, title: string, params: entity$0.NodeParams, projectID: string): $CancellablePromise<entity$0.GraphMutationReceipt> {
+    return $Call.ByID(4294809720, id, title, params, projectID);
 }

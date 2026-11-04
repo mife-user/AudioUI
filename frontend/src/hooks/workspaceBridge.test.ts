@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { RunStatus, TranscriptKind } from '../../bindings/audio-ui/internal/domain/valueobject'
-import type { RunSnapshot, WorkspaceRunSummary, WorkspaceSnapshotResult } from '../../bindings/audio-ui/internal/domain/entity'
+import type { Node, RunSnapshot, WorkspaceRunSummary, WorkspaceSnapshotResult } from '../../bindings/audio-ui/internal/domain/entity'
 import type { RunEvent, TranscriptItem } from '../api/runs'
 import type { WorkspaceChangedEvent } from '../api/workspace'
 import { useRunStore } from '../stores/runStore'
@@ -150,6 +150,71 @@ describe('WorkspaceBridge', () => {
     expect(useRunStore.getState().runs.r1?.snapshot?.run.transcript?.[0].text).toBe('已恢复')
   })
 
+  it('waits for an in-flight graph refresh and its queued snapshot before resolving', async () => {
+    const setup = makeAPI(workspaceResult('p_one', 1))
+    const app = bridge(setup.api)
+    app.start()
+    await vi.waitFor(() => expect(useWorkspaceStore.getState().status).toBe('ready'))
+
+    const pendingSnapshot = deferred<WorkspaceSnapshotResult>()
+    const createdNode: Node = {
+      id: 'n_created', type: 'topic' as Node['type'], title: '新选题', parent: '',
+      position: { x: 0, y: 0 }, params: {}, rounds: [], locked: false, stale: false,
+    }
+    const refreshed = workspaceResult('p_one', 3)
+    refreshed.snapshot.nodes = [createdNode]
+    setup.getWorkspaceSnapshot
+      .mockImplementationOnce(() => pendingSnapshot.promise)
+      .mockResolvedValueOnce(refreshed)
+    setup.workspaceListeners[0]({ projectId: 'p_one', revision: 2, reason: 'graph', projectRevision: 2 })
+    await vi.waitFor(() => expect(setup.getWorkspaceSnapshot).toHaveBeenCalledTimes(2))
+
+    let resolvedBeforeNodeArrived = false
+    const refresh = app.retryWorkspace()
+    const completion = Promise.resolve(refresh).then(() => {
+      resolvedBeforeNodeArrived = !useWorkspaceStore.getState().snapshot?.nodes?.some((node) => node.id === createdNode.id)
+    })
+    pendingSnapshot.resolve(workspaceResult('p_one', 2))
+    await vi.waitFor(() => expect(useWorkspaceStore.getState().snapshot?.nodes?.map((node) => node.id)).toContain(createdNode.id))
+    await completion
+
+    expect(resolvedBeforeNodeArrived).toBe(false)
+  })
+
+  it('waits until a mutation receipt revision and node ID appear in the snapshot', async () => {
+    const initial = workspaceResult('p_one', 1)
+    if (initial.snapshot.project) initial.snapshot.project.revision = 1
+    const setup = makeAPI(initial)
+    const app = bridge(setup.api)
+    app.start()
+    await vi.waitFor(() => expect(useWorkspaceStore.getState().status).toBe('ready'))
+
+    const stale = workspaceResult('p_one', 2)
+    if (stale.snapshot.project) stale.snapshot.project.revision = 2
+    const latest = workspaceResult('p_one', 3)
+    if (latest.snapshot.project) latest.snapshot.project.revision = 3
+    latest.snapshot.nodes = [{
+      id: 'n_created', type: 'topic' as Node['type'], title: '新选题', parent: '',
+      position: { x: 0, y: 0 }, params: {}, rounds: [], locked: false, stale: false,
+    }]
+    setup.getWorkspaceSnapshot.mockResolvedValueOnce(stale).mockResolvedValueOnce(latest)
+
+    await app.syncGraphMutation({ projectId: 'p_one', projectRevision: 3, nodeId: 'n_created' })
+
+    expect(useWorkspaceStore.getState().snapshot?.project?.revision).toBe(3)
+    expect(useWorkspaceStore.getState().snapshot?.nodes?.map((node) => node.id)).toContain('n_created')
+  })
+
+  it('rejects a mutation receipt after the active project changes', async () => {
+    const setup = makeAPI(workspaceResult('p_new', 1))
+    const app = bridge(setup.api)
+    app.start()
+    await vi.waitFor(() => expect(useWorkspaceStore.getState().status).toBe('ready'))
+
+    await expect(app.syncGraphMutation({ projectId: 'p_old', projectRevision: 3, nodeId: 'n_created' }))
+      .rejects.toThrow('PROJECT_CHANGED')
+  })
+
   it('re-pulls a run snapshot on a sequence gap and replays updates after that snapshot', async () => {
     const active = runSummary('r1')
     const setup = makeAPI(workspaceResult('p_one', 1, [active]))
@@ -179,6 +244,17 @@ describe('WorkspaceBridge', () => {
     app.retryWorkspace()
     await vi.waitFor(() => expect(useWorkspaceStore.getState().status).toBe('ready'))
     expect(useWorkspaceStore.getState().revision).toBe(2)
+  })
+
+  it('rejects refresh callers when the workspace snapshot request fails', async () => {
+    const setup = makeAPI(workspaceResult('p_one', 1))
+    const app = bridge(setup.api)
+    app.start()
+    await vi.waitFor(() => expect(useWorkspaceStore.getState().status).toBe('ready'))
+    setup.getWorkspaceSnapshot.mockRejectedValueOnce(new Error('snapshot unavailable'))
+
+    await expect(app.retryWorkspace()).rejects.toThrow('snapshot unavailable')
+    expect(useWorkspaceStore.getState().status).toBe('error')
   })
 
   it('drops late run snapshots and old-project events after switching projects', async () => {

@@ -65,85 +65,122 @@ func newWorkflowHandler(t *testing.T) *WorkflowService {
 	return NewWorkflowService(workflowService)
 }
 
+func activeProjectID(t *testing.T, h *WorkflowService) string {
+	t.Helper()
+	view, err := h.service.WorkspaceView(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return view.Project.ID
+}
+
 func TestWorkflowHandlerAddMoveUpdateSelect(t *testing.T) {
 	h := newWorkflowHandler(t)
-	projectValue, err := h.AddNode(AddNodeRequest{
-		Type: "topic", Title: " 选题 ", Position: entity.Position{X: 1, Y: 2},
+	projectID := activeProjectID(t, h)
+	topicReceipt, err := h.AddNode(AddNodeRequest{
+		ProjectID: projectID, Type: "topic", Title: " 选题 ", Position: entity.Position{X: 1, Y: 2},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(projectValue.Nodes) != 1 || projectValue.Nodes[0].Title != "选题" {
-		t.Fatalf("project = %+v", projectValue)
+	if topicReceipt.ProjectID == "" || topicReceipt.ProjectRevision == 0 || topicReceipt.NodeID == "" {
+		t.Fatalf("topic receipt = %+v", topicReceipt)
 	}
-	topicID := projectValue.Nodes[0].ID
 
-	projectValue, err = h.AddNode(AddNodeRequest{
-		Type: "prompt", Title: "提示词", Position: entity.Position{X: 3, Y: 4},
+	promptReceipt, err := h.AddNode(AddNodeRequest{
+		ProjectID: projectID, Type: "prompt", Title: "提示词", Position: entity.Position{X: 3, Y: 4},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	promptID := projectValue.Nodes[len(projectValue.Nodes)-1].ID
+	promptID := promptReceipt.NodeID
+	if promptReceipt.ProjectID != topicReceipt.ProjectID || promptReceipt.ProjectRevision <= topicReceipt.ProjectRevision {
+		t.Fatalf("prompt receipt = %+v, topic receipt = %+v", promptReceipt, topicReceipt)
+	}
 
-	projectValue, err = h.SelectNode(promptID)
+	selected, err := h.SelectNode(promptID, topicReceipt.ProjectID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if projectValue.ActiveNodeID != promptID || projectValue.Revision != 3 {
-		t.Fatalf("select result = %+v", projectValue)
+	if selected.NodeID != promptID || selected.ProjectRevision != promptReceipt.ProjectRevision {
+		t.Fatalf("select receipt = %+v", selected)
 	}
 
-	projectValue, err = h.MoveNode(promptID, 8, 9)
+	moved, err := h.MoveNode(promptID, 8, 9, topicReceipt.ProjectID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	last := projectValue.Nodes[len(projectValue.Nodes)-1]
-	if last.Position != (entity.Position{X: 8, Y: 9}) || projectValue.Revision != 4 {
-		t.Fatalf("move result = %+v", projectValue)
+	view, err := h.service.WorkspaceView(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if moved.ProjectRevision <= selected.ProjectRevision || view.Project.ActiveNodeID != promptID {
+		t.Fatalf("move receipt = %+v, project = %+v", moved, view.Project)
+	}
+	var prompt entity.Node
+	for _, node := range view.Project.Nodes {
+		if node.ID == promptID {
+			prompt = node
+		}
+	}
+	if prompt.Position != (entity.Position{X: 8, Y: 9}) {
+		t.Fatalf("moved prompt = %+v", prompt)
 	}
 
-	projectValue, err = h.UpdateNodeParams(promptID, "新标题", entity.NodeParams{
+	updated, err := h.UpdateNodeParams(promptID, "新标题", entity.NodeParams{
 		Instruction: "写脚本", OutputKind: valueobject.OutputKindScript,
-	})
+	}, topicReceipt.ProjectID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	last = projectValue.Nodes[len(projectValue.Nodes)-1]
-	if last.Title != "新标题" || last.Params.Instruction != "写脚本" {
-		t.Fatalf("update result = %+v", last)
+	if updated.NodeID != promptID || updated.ProjectRevision <= moved.ProjectRevision {
+		t.Fatalf("update receipt = %+v", updated)
+	}
+	view, err = h.service.WorkspaceView(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, node := range view.Project.Nodes {
+		if node.ID == promptID && (node.Title != "新标题" || node.Params.Instruction != "写脚本") {
+			t.Fatalf("updated prompt = %+v", node)
+		}
 	}
 
 	candidate := 0
-	if _, err := h.Connect(topicID, promptID, &candidate, false); err != nil {
+	connected, err := h.Connect(topicReceipt.NodeID, promptID, &candidate, false, topicReceipt.ProjectID)
+	if err != nil {
 		t.Fatal(err)
+	}
+	if connected.NodeID != promptID || connected.ProjectID != topicReceipt.ProjectID {
+		t.Fatalf("connect receipt = %+v", connected)
 	}
 }
 
 func TestWorkflowHandlerPendingQueriesApplyAndDiscard(t *testing.T) {
 	h := newWorkflowHandler(t)
-	projectValue, err := h.AddNode(AddNodeRequest{Type: "topic", Title: "选题"})
+	projectID := activeProjectID(t, h)
+	topicReceipt, err := h.AddNode(AddNodeRequest{ProjectID: projectID, Type: "topic", Title: "选题"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	topicID := projectValue.Nodes[0].ID
+	topicID := topicReceipt.NodeID
 	candidate := 0
-	projectValue, err = h.AddNode(AddNodeRequest{
-		Type: "prompt", Title: "脚本 A", Parent: topicID, ParentCandidate: &candidate,
+	firstReceipt, err := h.AddNode(AddNodeRequest{
+		ProjectID: projectID, Type: "prompt", Title: "脚本 A", Parent: topicID, ParentCandidate: &candidate,
 		Params: entity.NodeParams{OutputKind: valueobject.OutputKindScript},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	firstNodeID := projectValue.Nodes[len(projectValue.Nodes)-1].ID
-	projectValue, err = h.AddNode(AddNodeRequest{
-		Type: "prompt", Title: "脚本 B", Parent: topicID, ParentCandidate: &candidate,
+	firstNodeID := firstReceipt.NodeID
+	secondReceipt, err := h.AddNode(AddNodeRequest{
+		ProjectID: projectID, Type: "prompt", Title: "脚本 B", Parent: topicID, ParentCandidate: &candidate,
 		Params: entity.NodeParams{OutputKind: valueobject.OutputKindScript},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	secondNodeID := projectValue.Nodes[len(projectValue.Nodes)-1].ID
+	secondNodeID := secondReceipt.NodeID
 	payload := []byte(`{"title":"脚本","scenes":[{"narration":"旁白","duration":0}]}`)
 	first, err := h.service.CreatePending(context.Background(), workflow.CreatePendingInput{
 		RunID: "r_first", ChainID: "c_" + firstNodeID, ChainPath: []string{topicID, firstNodeID},
@@ -184,16 +221,16 @@ func TestWorkflowHandlerPendingQueriesApplyAndDiscard(t *testing.T) {
 
 func TestWorkflowHandlerValidation(t *testing.T) {
 	h := newWorkflowHandler(t)
-	if _, err := h.AddNode(AddNodeRequest{Type: "render"}); !errors.Is(err, workflow.ErrUnknownNodeType) {
+	if _, err := h.AddNode(AddNodeRequest{ProjectID: activeProjectID(t, h), Type: "render"}); !errors.Is(err, workflow.ErrUnknownNodeType) {
 		t.Fatalf("error = %v, want UNKNOWN_NODE_TYPE", err)
 	}
-	if _, err := h.Connect("", "n_child", nil, false); err == nil || !strings.Contains(err.Error(), "不能为空") {
+	if _, err := h.Connect("", "n_child", nil, false, ""); err == nil || !strings.Contains(err.Error(), "不能为空") {
 		t.Fatalf("Connect error = %v", err)
 	}
-	if _, err := h.MoveNode("", 1, 1); err == nil || !strings.Contains(err.Error(), "不能为空") {
+	if _, err := h.MoveNode("", 1, 1, ""); err == nil || !strings.Contains(err.Error(), "不能为空") {
 		t.Fatalf("MoveNode error = %v", err)
 	}
-	if _, err := h.SelectNode(""); err == nil || !strings.Contains(err.Error(), "不能为空") {
+	if _, err := h.SelectNode("", ""); err == nil || !strings.Contains(err.Error(), "不能为空") {
 		t.Fatalf("SelectNode error = %v", err)
 	}
 }

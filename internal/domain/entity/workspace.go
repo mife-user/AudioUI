@@ -72,3 +72,12 @@ type WorkspaceSnapshotResult struct {
 	Revision uint64            `json:"revision"`
 	Snapshot WorkspaceSnapshot `json:"snapshot"`
 }
+
+// GraphMutationReceipt identifies the authoritative project revision produced
+// by a graph command. NodeID is the created node for AddNode, otherwise the
+// node directly affected by the command.
+type GraphMutationReceipt struct {
+	ProjectID       string `json:"projectId"`
+	ProjectRevision int64  `json:"projectRevision"`
+	NodeID          string `json:"nodeId"`
+}

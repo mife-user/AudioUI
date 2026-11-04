@@ -6,6 +6,7 @@
 import * as entity$0 from "../domain/entity/models.js";
 
 export interface AddNodeRequest {
+    "projectId": string;
     "type": string;
     "title": string;
     "parent": string;

@@ -26,6 +26,24 @@ func (s *Service) loadCurrent(ctx context.Context) (entity.Project, *entity.Grap
 	return project, graph, nil
 }
 
+func (s *Service) loadCurrentForProject(ctx context.Context, expectedProjectID string) (entity.Project, *entity.Graph, error) {
+	project, graph, err := s.loadCurrent(ctx)
+	if err != nil {
+		return entity.Project{}, nil, err
+	}
+	if expectedProjectID != "" && project.ID != expectedProjectID {
+		return entity.Project{}, nil, fmt.Errorf("%w: expected %s, active %s", ErrProjectChanged, expectedProjectID, project.ID)
+	}
+	return project, graph, nil
+}
+
+func firstExpectedProjectID(values []string) string {
+	if len(values) == 0 {
+		return ""
+	}
+	return values[0]
+}
+
 func requireNode(graph *entity.Graph, id, what string) (*entity.Node, error) {
 	node, ok := graph.Node(id)
 	if !ok {

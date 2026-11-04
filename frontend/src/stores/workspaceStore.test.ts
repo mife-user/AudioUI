@@ -32,4 +32,24 @@ describe('workspaceStore', () => {
     expect(useWorkspaceStore.getState().snapshot?.project).toBeNull()
     expect(useWorkspaceStore.getState().snapshot?.nodes).toEqual([])
   })
+
+  it('does not let an in-flight same-project snapshot overwrite the local selection', () => {
+    useWorkspaceStore.getState().applySnapshot(result(8, 'p_one'))
+    useWorkspaceStore.getState().setActiveNode('n_selected')
+    const staleSelection = result(8, 'p_one')
+    if (staleSelection.snapshot.project) staleSelection.snapshot.project.activeNodeId = 'n_old'
+
+    useWorkspaceStore.getState().applySnapshot(staleSelection)
+
+    expect(useWorkspaceStore.getState().snapshot?.project?.activeNodeId).toBe('n_selected')
+  })
+
+  it('updates activeNodeId locally without changing either revision', () => {
+    useWorkspaceStore.getState().applySnapshot(result(8, 'p_one'))
+    useWorkspaceStore.getState().setActiveNode('n_selected')
+
+    expect(useWorkspaceStore.getState().snapshot?.project?.activeNodeId).toBe('n_selected')
+    expect(useWorkspaceStore.getState().snapshot?.project?.revision).toBe(8)
+    expect(useWorkspaceStore.getState().revision).toBe(8)
+  })
 })

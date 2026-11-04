@@ -35,4 +35,5 @@ var (
 	ErrPendingStoreUnavailable  = errors.New("PENDING_STORE_UNAVAILABLE")
 	ErrArtifactStoreUnavailable = errors.New("ARTIFACT_STORE_UNAVAILABLE")
 	ErrContextHasherUnavailable = errors.New("CONTEXT_HASHER_UNAVAILABLE")
+	ErrProjectChanged           = errors.New("PROJECT_CHANGED")
 )

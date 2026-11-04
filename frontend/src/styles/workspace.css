@@ -204,7 +204,7 @@
 }
 
 .workspace-layout {
-  flex: 1;
+  flex: 1 1 0px;
   min-height: 0;
   display: grid;
   grid-template-columns: minmax(0, 1fr) 322px;
@@ -215,7 +215,10 @@
   position: relative;
   min-width: 0;
   min-height: 0;
-  overflow: auto;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   background-color: var(--bg);
   background-image: radial-gradient(var(--grid) 1px, transparent 1px);
   background-size: 22px 22px;
@@ -338,6 +341,517 @@
 .workspace-placeholder-note {
   padding: 10px 16px;
   border-top: 1px solid var(--border);
+}
+
+.workspace-canvas {
+  flex: 1 1 0px;
+  min-height: 0;
+  height: 100%;
+  margin: 16px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--bg-elev) 82%, transparent);
+}
+
+.canvas-toolbar {
+  min-height: 54px;
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--glass);
+}
+
+.canvas-toolbar-title {
+  min-width: 142px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-right: var(--s2);
+}
+
+.canvas-toolbar-title strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.canvas-toolbar-btn {
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+
+.canvas-toolbar-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.canvas-toolbar-btn:disabled {
+  cursor: not-allowed;
+  opacity: .58;
+}
+
+.canvas-toolbar-spacer {
+  flex: 1;
+}
+
+.canvas-keyboard-connect {
+  display: flex;
+  align-items: center;
+  gap: var(--s1);
+  padding-left: var(--s2);
+  border-left: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.canvas-keyboard-connect select {
+  max-width: 180px;
+  min-height: 30px;
+  padding: 0 7px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+  color: var(--text-dim);
+  font: inherit;
+}
+
+.canvas-message {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s2);
+  padding: 7px 11px;
+  border-bottom: 1px solid var(--border);
+  background: var(--accent-soft);
+  color: var(--text-dim);
+  font-size: 10.5px;
+}
+
+.canvas-message-error {
+  border-color: var(--danger);
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.canvas-message button {
+  width: 24px;
+  height: 24px;
+  flex: none;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font-size: 17px;
+}
+
+.canvas-message .canvas-retry-sync {
+  width: auto;
+  min-height: 24px;
+  flex: none;
+  padding: 0 8px;
+  border: 1px solid currentColor;
+  border-radius: var(--radius-sm);
+  font-size: 10px;
+}
+
+.canvas-message button:disabled {
+  cursor: not-allowed;
+  opacity: .65;
+}
+
+.canvas-flow-root {
+  position: relative;
+  min-height: 0;
+  flex: 1 1 0px;
+  overflow: hidden;
+}
+
+.canvas-flow-root > .react-flow {
+  position: absolute;
+  inset: 0;
+  width: auto;
+  height: auto;
+  background: transparent;
+}
+
+.canvas-flow-root .react-flow__background pattern circle {
+  fill: var(--grid);
+}
+
+.workspace-edge .react-flow__edge-path {
+  stroke: var(--edge);
+  stroke-width: 1.5;
+}
+
+.workspace-edge-highlighted .react-flow__edge-path {
+  stroke: var(--accent);
+  stroke-width: 2.2;
+}
+
+.canvas-node {
+  position: relative;
+  width: 276px;
+  overflow: visible;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  color: var(--text);
+}
+
+.react-flow__node.selected .canvas-node {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent-soft), var(--shadow);
+}
+
+.canvas-node.is-path {
+  border-color: var(--edge);
+}
+
+.canvas-node.is-running-locked {
+  border-style: dashed;
+  border-color: var(--warn);
+}
+
+.canvas-node.is-content-locked:not(.is-running-locked) {
+  border-color: var(--border-strong);
+}
+
+.canvas-node-head {
+  min-height: 46px;
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.canvas-node-head strong {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 620;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.canvas-node-kind {
+  flex: none;
+  padding: 2px 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  color: var(--text-dim);
+  font-size: 9px;
+}
+
+.topic-kind {
+  border-color: var(--edge);
+  color: var(--accent);
+}
+
+.prompt-kind {
+  color: var(--text-dim);
+}
+
+.canvas-node-status {
+  flex: none;
+  color: var(--warn);
+  font-size: 9px;
+}
+
+.canvas-node-content {
+  padding: 9px 10px 10px;
+}
+
+.canvas-node-hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 9.5px;
+  line-height: 1.55;
+}
+
+.candidate-port-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.candidate-port-row {
+  position: relative;
+  min-height: 43px;
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: 6px 9px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+}
+
+.candidate-port-copy {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.candidate-port-copy strong,
+.candidate-port-copy span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.candidate-port-copy strong {
+  color: var(--text-dim);
+  font-size: 9.5px;
+  font-weight: 550;
+}
+
+.candidate-port-copy span {
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.candidate-handle,
+.prompt-input-handle,
+.prompt-output-handle {
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--bg-elev);
+  background: var(--accent);
+}
+
+.candidate-handle {
+  right: -6px;
+}
+
+.prompt-input-handle,
+.prompt-output-handle {
+  left: 50%;
+  background: var(--edge);
+}
+
+.topic-edge-anchor {
+  width: 1px;
+  height: 1px;
+  right: 0;
+  border: 0;
+  background: transparent;
+  pointer-events: none;
+  opacity: 0;
+}
+
+.node-add-branch {
+  width: 23px;
+  height: 23px;
+  flex: none;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  color: var(--accent);
+  cursor: pointer;
+  line-height: 1;
+}
+
+.node-add-branch:disabled,
+.node-add-child:disabled {
+  cursor: not-allowed;
+  opacity: .5;
+}
+
+.prompt-node-content {
+  min-height: 84px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--s2);
+}
+
+.node-add-child {
+  min-height: 26px;
+  padding: 0 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 9.5px;
+}
+
+.canvas-empty-overlay {
+  position: absolute;
+  z-index: 2;
+  top: 50%;
+  left: 50%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--s2);
+  transform: translate(-50%, -50%);
+  color: var(--text-dim);
+  pointer-events: none;
+  text-align: center;
+}
+
+.canvas-empty-overlay > span {
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border-strong);
+  border-radius: 50%;
+  color: var(--accent);
+  font-size: 20px;
+}
+
+.canvas-empty-overlay strong {
+  font-size: 12px;
+}
+
+.canvas-empty-overlay p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.canvas-flow-root .react-flow__controls {
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  box-shadow: none;
+}
+
+.canvas-flow-root .react-flow__controls-button {
+  width: 28px;
+  height: 28px;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-dim);
+  fill: currentColor;
+}
+
+.canvas-flow-root .react-flow__controls-button:hover {
+  background: var(--accent-soft);
+}
+
+.canvas-legend {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--glass);
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.canvas-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.legend-mark {
+  width: 7px;
+  height: 7px;
+  display: inline-block;
+  border-radius: 50%;
+}
+
+.path-mark {
+  background: var(--accent);
+}
+
+.lock-mark {
+  background: var(--warn);
+}
+
+.canvas-confirm-backdrop {
+  position: absolute;
+  z-index: 20;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: var(--s4);
+  background: var(--backdrop);
+}
+
+.canvas-confirm-dialog {
+  width: min(480px, 100%);
+  padding: 18px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-elev);
+  box-shadow: var(--shadow-dialog);
+  color: var(--text);
+}
+
+.canvas-confirm-dialog h2 {
+  margin: 0 0 var(--s2);
+  font-size: 14px;
+}
+
+.canvas-confirm-dialog p,
+.canvas-confirm-dialog li {
+  color: var(--text-dim);
+  font-size: 10.5px;
+  line-height: 1.6;
+}
+
+.canvas-confirm-dialog p {
+  margin: 0 0 var(--s2);
+}
+
+.canvas-confirm-dialog ul {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s1);
+  margin: 0;
+  padding-left: 18px;
+}
+
+.canvas-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--s2);
+  margin-top: var(--s4);
+}
+
+.canvas-confirm-primary {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.canvas-flow-root .react-flow__attribution {
+  background: var(--glass);
+  color: var(--muted);
+}
+
+.canvas-flow-root .react-flow__attribution a {
+  color: var(--muted);
 }
 
 .agent-console {
@@ -614,6 +1128,30 @@
   .workspace-canvas-placeholder {
     min-height: 380px;
     margin: 12px;
+  }
+
+  .workspace-canvas {
+    min-height: 500px;
+    margin: 12px;
+  }
+
+  .canvas-toolbar-title {
+    width: 100%;
+  }
+
+  .canvas-toolbar-spacer {
+    display: none;
+  }
+
+  .canvas-keyboard-connect {
+    flex-wrap: wrap;
+    padding-left: 0;
+    border-left: 0;
+  }
+
+  .canvas-legend {
+    max-width: calc(100vw - 90px);
+    flex-wrap: wrap;
   }
 
   .workspace-placeholder-header {

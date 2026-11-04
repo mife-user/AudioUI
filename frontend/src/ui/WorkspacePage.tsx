@@ -1,14 +1,53 @@
+import { useCallback, useEffect, useRef } from 'react'
 import type { WorkspaceSnapshot } from '../../bindings/audio-ui/internal/domain/entity'
+import type { GraphMutationReceipt } from '../../bindings/audio-ui/internal/domain/entity'
 import type { WorkspaceStatus } from '../api/workspace'
+import { useWorkspaceStore } from '../stores/workspaceStore'
+import { graphAPI, type GraphAPI } from '../canvas/graphApi'
+import { WorkspaceCanvas } from '../canvas/WorkspaceCanvas'
 
 type Props = {
   status: WorkspaceStatus
   snapshot: WorkspaceSnapshot | null
   error: string
   onRetry: () => void
+  onGraphMutation?: (receipt: GraphMutationReceipt) => void | Promise<void>
+  api?: GraphAPI
 }
 
-export function WorkspacePage({ status, snapshot, error, onRetry }: Props) {
+export function WorkspacePage({ status, snapshot, error, onRetry, onGraphMutation, api = graphAPI }: Props) {
+  const projectId = snapshot?.project?.id ?? ''
+  const currentProjectId = useRef(projectId)
+  currentProjectId.current = projectId
+  const selectionSequence = useRef(0)
+  const selectionQueue = useRef(Promise.resolve())
+  const confirmedSelection = useRef(snapshot?.project?.activeNodeId ?? '')
+
+  useEffect(() => {
+    selectionSequence.current += 1
+    confirmedSelection.current = snapshot?.project?.activeNodeId ?? ''
+  }, [projectId])
+
+  const selectNode = useCallback(async (id: string) => {
+    const requestId = ++selectionSequence.current
+    const ownerProjectId = projectId
+    const store = useWorkspaceStore.getState()
+    store.setActiveNode(id)
+    const operation = selectionQueue.current.catch(() => undefined).then(async () => {
+      if (currentProjectId.current !== ownerProjectId || requestId !== selectionSequence.current) return
+      try {
+        await api.selectNode(id, ownerProjectId)
+        if (currentProjectId.current === ownerProjectId) confirmedSelection.current = id
+      } catch (failure) {
+        if (currentProjectId.current !== ownerProjectId || requestId !== selectionSequence.current) return
+        store.setActiveNode(confirmedSelection.current)
+        throw failure
+      }
+    })
+    selectionQueue.current = operation.catch(() => undefined)
+    await operation
+  }, [api, projectId])
+
   if (!snapshot && status === 'loading') {
     return (
       <main className="workspace-main" aria-label="工作台">
@@ -56,29 +95,7 @@ export function WorkspacePage({ status, snapshot, error, onRetry }: Props) {
           <button className="agent-mini-btn" type="button" onClick={onRetry}>重试</button>
         </div>
       ) : null}
-      <section className="workspace-canvas-placeholder" aria-label="画布占位区">
-        <div className="workspace-placeholder-header">
-          <div>
-            <span className="workspace-kicker">工作台</span>
-            <h1>{snapshot.project.name}</h1>
-          </div>
-          <div className="workspace-revision">图版本 <code>{snapshot.project.revision}</code></div>
-        </div>
-        {snapshot.nodes?.length ? (
-          <div className="workspace-placeholder-summary">
-            已加载 {snapshot.nodes.length} 个节点 · {snapshot.runs?.length ?? 0} 条运行记录
-          </div>
-        ) : (
-          <div className="workspace-empty-canvas">
-            <span aria-hidden="true">＋</span>
-            <strong>工程已就绪</strong>
-            <p>画布与节点交互将在 M2-09 接入。</p>
-          </div>
-        )}
-        <div className="workspace-placeholder-note">
-          当前阶段可查看工程身份、运行历史与运行控制台；图编辑仍由后续任务接入。
-        </div>
-      </section>
+      <WorkspaceCanvas snapshot={snapshot} onSelectNode={selectNode} onGraphMutation={onGraphMutation} api={api} />
     </main>
   )
 }

@@ -76,6 +76,32 @@ func TestAddNodeValidation(t *testing.T) {
 	}
 }
 
+func TestGraphCommandsRejectStaleProjectScope(t *testing.T) {
+	h := newHarness(t, baseProject())
+	wrongProjectID := "p_old"
+	_, err := h.service.AddNode(context.Background(), AddNodeInput{
+		ProjectID: wrongProjectID, Type: valueobject.NodeTypeTopic, Position: entity.Position{X: 1, Y: 2},
+	})
+	if !errors.Is(err, ErrProjectChanged) {
+		t.Fatalf("AddNode error = %v, want PROJECT_CHANGED", err)
+	}
+	if _, err := h.service.Connect(context.Background(), "n_topic", "n_draft", nil, false, wrongProjectID); !errors.Is(err, ErrProjectChanged) {
+		t.Fatalf("Connect error = %v, want PROJECT_CHANGED", err)
+	}
+	if _, err := h.service.MoveNode(context.Background(), "n_a", 4, 5, wrongProjectID); !errors.Is(err, ErrProjectChanged) {
+		t.Fatalf("MoveNode error = %v, want PROJECT_CHANGED", err)
+	}
+	if _, err := h.service.SelectNode(context.Background(), "n_a", wrongProjectID); !errors.Is(err, ErrProjectChanged) {
+		t.Fatalf("SelectNode error = %v, want PROJECT_CHANGED", err)
+	}
+	if _, err := h.service.UpdateNodeParams(context.Background(), "n_a", "A2", entity.NodeParams{Instruction: "A2"}, wrongProjectID); !errors.Is(err, ErrProjectChanged) {
+		t.Fatalf("UpdateNodeParams error = %v, want PROJECT_CHANGED", err)
+	}
+	if h.session.saveCount != 0 || len(*h.changes) != 0 {
+		t.Fatalf("stale project commands persisted: saves=%d changes=%+v", h.session.saveCount, *h.changes)
+	}
+}
+
 func TestAddNodeTopicCandidateAndPromptParent(t *testing.T) {
 	h := newHarness(t, baseProject())
 	project, err := h.service.AddNode(context.Background(), AddNodeInput{
