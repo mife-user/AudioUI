@@ -15,6 +15,8 @@ export type {
     Round,
     RunRecord,
     RunSnapshot,
+    RunStartError,
+    RunStartResult,
     RunSummary,
     WorkspaceChain,
     WorkspaceProject,

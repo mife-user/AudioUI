@@ -1,5 +1,6 @@
 import { fireEvent, render, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { OutputKind, PendingStatus, RunStatus } from '../../bindings/audio-ui/internal/domain/valueobject'
 import type { Node, WorkspaceSnapshot } from '../../bindings/audio-ui/internal/domain/entity'
 import type { GraphAPI } from './graphApi'
 import { WorkspaceCanvas } from './WorkspaceCanvas'
@@ -87,6 +88,7 @@ function makeAPI(): GraphAPI {
     connect: vi.fn().mockResolvedValue({ projectId: 'p_real_flow', projectRevision: 5, nodeId: 'n_prompt' }),
     moveNode: vi.fn().mockResolvedValue({ projectId: 'p_real_flow', projectRevision: 5, nodeId: 'n_prompt' }),
     selectNode: vi.fn().mockResolvedValue({ projectId: 'p_real_flow', projectRevision: 5, nodeId: 'n_prompt' }),
+    updateNodeParams: vi.fn().mockResolvedValue({ projectId: 'p_real_flow', projectRevision: 5, nodeId: 'n_topic' }),
   }
 }
 
@@ -148,5 +150,24 @@ describe('WorkspaceCanvas with real React Flow', () => {
     await waitFor(() => expect(onSelectNode).toHaveBeenCalledWith('n_prompt'))
     fireEvent.keyDown(topicWrapper, { key: ' ', code: 'Space' })
     await waitFor(() => expect(onSelectNode).toHaveBeenLastCalledWith('n_topic'))
+  })
+
+  it('shows the latest run failure without hiding an older pending result', async () => {
+    const snapshot = makeSnapshot()
+    snapshot.runs = [{
+      id: 'r_failed', nodeId: 'n_topic', status: RunStatus.RunFailed,
+      chainId: 'c_n_topic', chainPath: ['n_topic'], estimatedTokens: 100,
+      startedAt: '2026-11-05T00:00:00Z',
+    }]
+    snapshot.pending = [{
+      id: 'pending_one', nodeId: 'n_topic', runId: 'r_previous', chainId: 'c_n_topic',
+      kind: OutputKind.OutputKindTopics, status: PendingStatus.PendingPending,
+    }]
+    const { container } = render(
+      <WorkspaceCanvas snapshot={snapshot} onSelectNode={vi.fn().mockResolvedValue(undefined)} api={makeAPI()} />,
+    )
+
+    await waitFor(() => expect(container.querySelector('.react-flow__node[data-id="n_topic"] .canvas-node-status'))
+      .toHaveTextContent('运行失败 · 待处理 1'))
   })
 })

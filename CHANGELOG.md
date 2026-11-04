@@ -6,7 +6,7 @@
 
 ## [Unreleased]
 
-M2 图与提示词（进行中：M2-00..09 已验收）。
+M2 图与提示词（进行中：M2-00..09、M2-10A 已验收；M2-10B/10C 及后续未完成）。
 
 ### Added
 
@@ -16,6 +16,10 @@ M2 图与提示词（进行中：M2-00..09 已验收）。
 - M2-09：新增确定性节点避让与创建后聚焦；首次工程载入只 fit 一次，画布 flex 高度链固定；鼠标/键盘选择与位置更新进入统一持久化路径。
 - M2-09：新增服务端回执与工作台快照一致性测试、项目切换范围回归，以及不 mock React Flow 的节点/Handle/SVG/键盘 DOM 集成测试；交互原型见 `docs/design/m2-09-canvas-demo.html`，任务自检证据见 `docs/dev/evidence/m2-09.md`。
 - M2-09：用户于 2026-11-04 在隔离工程的生产 Wails 窗口手工新增 topic 与草稿 prompt，确认「已同步」、工程 revision 与节点数增长、节点可见且不重叠；验收截图见 `docs/dev/evidence/m2-09-webview-manual.png`。
+- M2-10A：选题节点支持标题、想法、方向和 3～10 候选数编辑，防抖保存、字段校验、保存失败保留输入与运行前 flush。
+- M2-10A：节点可按工程作用域启动一次性运行，防止重复提交并显示运行/终态；结构化错误携带稳定 code，`CONTEXT_TOO_LARGE` 使用估算值与预算字段。
+- M2-10A：以工作台快照派生最新运行与 pending 摘要；事件先于启动响应时恢复运行选择；运行结束不自动应用。HTML 演示与验收证据见 `docs/design/m2-10a-topic-run-demo.html`、`docs/dev/evidence/m2-10a.md`。
+- M2-10A：用户于 2026-11-05 指示完成子项验收；Go 与前端自动化、类型检查及前端构建通过，Wails 构建由用户手动完成。真实 CLI、GUI 集成与 M2-10B/10C 留待后续。
 - M2-04：`service/context.Builder` 从真实路径读取祖先最新已应用产物和对应 topic 候选，生成确定性上下文与 `contextHash`/`ancestorHash`/`paramsHash`。
 - M2-04：保守 token 估算、祖先全文→2,000 tokens 原文摘录→引用降级、完整目标参数及 `CONTEXT_TOO_LARGE` 估算/预算详情；提供实际 usage 超预算比较值对象。
 - M2-04：`RunWorkspaceReader` 作用域校验与工作区逻辑文件清单；文件正文不注入上下文，二进制资源仅引用，清单上限和截断显式标记。

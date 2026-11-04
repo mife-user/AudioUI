@@ -9,6 +9,7 @@ import (
 
 	"audio-ui/internal/domain/entity"
 	"audio-ui/internal/domain/valueobject"
+	contextservice "audio-ui/internal/service/context"
 	runservice "audio-ui/internal/service/run"
 )
 
@@ -20,14 +21,44 @@ func NewRunService(manager *runservice.Manager) *RunService {
 	return &RunService{manager: manager}
 }
 
-func (h *RunService) Start(nodeID string) (entity.RunRecord, error) {
+func (h *RunService) Start(nodeID, projectID string) entity.RunStartResult {
 	nodeID = strings.TrimSpace(nodeID)
+	projectID = strings.TrimSpace(projectID)
 	if nodeID == "" {
-		return entity.RunRecord{}, errors.New("节点 ID 不能为空")
+		return entity.RunStartResult{Error: runStartError(errors.New("INVALID_INPUT: 节点 ID 不能为空"))}
+	}
+	if projectID == "" {
+		return entity.RunStartResult{Error: runStartError(errors.New("INVALID_INPUT: 工程 ID 不能为空"))}
+	}
+	if h.manager == nil {
+		return entity.RunStartResult{Error: runStartError(errors.New("RUN_MANAGER_UNAVAILABLE"))}
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	return h.manager.Start(ctx, nodeID)
+	record, err := h.manager.Start(ctx, nodeID, projectID)
+	result := entity.RunStartResult{}
+	if record.ID != "" {
+		result.Run = &record
+	}
+	if err != nil {
+		result.Error = runStartError(err)
+	}
+	return result
+}
+
+func runStartError(err error) *entity.RunStartError {
+	if err == nil {
+		return nil
+	}
+	failure := &entity.RunStartError{Code: runservice.ErrorCode(err), Message: err.Error()}
+	var tooLarge *contextservice.ContextTooLargeError
+	if errors.As(err, &tooLarge) {
+		estimatedTokens := tooLarge.EstimatedTokens
+		tokenBudget := tooLarge.TokenBudget
+		failure.EstimatedTokens = &estimatedTokens
+		failure.TokenBudget = &tokenBudget
+	}
+	return failure
 }
 
 func (h *RunService) ListRuns() ([]entity.RunSummary, error) {

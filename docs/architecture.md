@@ -107,6 +107,8 @@ infra         json / claudecli / edgetts / renderer-bridge
 
 M2-04 的 `service/context.Builder` 从工程快照推导真实路径，并要求 `RunWorkspaceReader.Scope()` 与工程、树、目标和路径一致；祖先产物只取最新已应用轮次及对应 topic 候选。上下文只包含工作区文件清单，不读取文本或二进制文件正文。预算降级、三种哈希和清单限制见 ADR-026。`InputHashes` 不读取工作区，供待应用校验复用；M2-07 记录首个 `AssistantMessage.Usage` 的首次请求 input tokens、估算、预算与是否超预算。缺少该 usage 时不伪造 0。
 
+选题运行入口先以发起时的 `projectId` 保存参数并等待其 `GraphMutationReceipt` 对应的权威快照；再调用 Wails `RunService.Start(nodeID, projectID)`。`workflow.BeginRun` 在图命令共用的互斥锁内核验预期工程 ID，再从该工程快照取得路径并加锁；工程已切换时拒绝启动且不遗留运行锁。启动 RPC 返回应用层 `RunStartResult`（运行记录或结构化错误）；`CONTEXT_TOO_LARGE` 可附 `estimatedTokens` 与 `tokenBudget`，由 UI 按字段呈现。该 DTO 属于应用 RPC，不改变 AgentDriver、CLI stream-json 或 MCP 协议。
+
 ### 6.2 渲染
 
 ```

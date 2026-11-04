@@ -76,7 +76,7 @@ func (s *Service) AcquireRunLock(ctx context.Context, runID, treeID, nodeID stri
 // BeginRun takes an executable project snapshot and records its path lock
 // while holding the same workflow mutex used by graph commands. The caller
 // builds context from the returned immutable snapshot.
-func (s *Service) BeginRun(ctx context.Context, runID, nodeID string) (entity.Project, []string, error) {
+func (s *Service) BeginRun(ctx context.Context, runID, nodeID string, expectedProjectID ...string) (entity.Project, []string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := ctx.Err(); err != nil {
@@ -85,7 +85,7 @@ func (s *Service) BeginRun(ctx context.Context, runID, nodeID string) (entity.Pr
 	if err := valueobject.ValidateID(runID); err != nil {
 		return entity.Project{}, nil, fmt.Errorf("%w: runId: %v", ErrInvalidInput, err)
 	}
-	project, graph, err := s.loadCurrent(ctx)
+	project, graph, err := s.loadCurrentForProject(ctx, firstExpectedProjectID(expectedProjectID))
 	if err != nil {
 		return entity.Project{}, nil, err
 	}

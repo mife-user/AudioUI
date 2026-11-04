@@ -24,6 +24,18 @@ describe('allocateNodePosition', () => {
     expect([second, third].every((position) => Math.abs(position.x - 400) >= 300 || Math.abs(position.y - 300) >= 220)).toBe(true)
   })
 
+  it('keeps expanded topic cards separated when they share an origin', () => {
+    const first = node('one', 400, 300)
+    const secondPosition = allocateNodePosition([first], first.position, 'topic')
+    const second = node('two', secondPosition.x, secondPosition.y)
+    const overlaps = second.position.x < first.position.x + 320 + 36
+      && second.position.x + 320 + 36 > first.position.x
+      && second.position.y < first.position.y + 480 + 36
+      && second.position.y + 480 + 36 > first.position.y
+
+    expect(overlaps).toBe(false)
+  })
+
   it('avoids old nodes that were placed close together', () => {
     const existing = [node('one', 535, 362), node('two', 579, 381)]
     const next = allocateNodePosition(existing, { x: 535, y: 362 })

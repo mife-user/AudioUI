@@ -182,6 +182,26 @@ export interface RunSnapshot {
 }
 
 /**
+ * RunStartError is a safe, read-only error view for a rejected start request.
+ */
+export interface RunStartError {
+    "code": string;
+    "message": string;
+    "estimatedTokens"?: number | null;
+    "tokenBudget"?: number | null;
+}
+
+/**
+ * RunStartResult is the structured response to a UI start request. Expected
+ * business failures stay in the response so callers can render typed details
+ * such as a context-budget estimate without parsing error text.
+ */
+export interface RunStartResult {
+    "run"?: RunRecord | null;
+    "error"?: RunStartError | null;
+}
+
+/**
  * RunSummary is the runs.json index entry. Transcript and context preview
  * live in runs/<runId>.json so listing runs stays cheap.
  */

@@ -1,0 +1,403 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>M2-10A 选题参数与运行 · 本地交互演示</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0a0e11;
+      --bg-elev: #0c1216;
+      --panel: #101a1f;
+      --panel-2: #0b1216;
+      --border: #1e2a30;
+      --border-strong: #2a3f48;
+      --text: #dfe7ea;
+      --text-dim: #9fb2b9;
+      --muted: #6f828a;
+      --accent: #5ad1e6;
+      --accent-soft: rgba(90, 209, 230, .09);
+      --ok: #6fd3a4;
+      --warn: #d8b27a;
+      --warn-soft: rgba(216, 178, 122, .10);
+      --danger: #d98a8a;
+      --radius-sm: 5px;
+      --radius: 9px;
+      --s1: 4px;
+      --s2: 8px;
+      --s3: 12px;
+      --s4: 16px;
+      font: 13px/1.5 "Segoe UI", "Microsoft YaHei UI", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    * { box-sizing: border-box; }
+    body { margin: 0; min-width: 320px; min-height: 100vh; background: var(--bg); }
+    button, input, textarea { font: inherit; }
+    button { color: inherit; }
+    button:focus-visible, input:focus-visible, textarea:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+    .app { min-height: 100vh; display: flex; flex-direction: column; }
+    .topbar {
+      min-height: 50px; display: flex; align-items: center; gap: 14px;
+      padding: 0 18px; background: var(--bg-elev); border-bottom: 1px solid var(--border);
+    }
+    .brand { color: var(--accent); font-weight: 750; letter-spacing: .14em; font-size: 12px; }
+    .project { color: var(--text-dim); border-left: 1px solid var(--border-strong); padding-left: 14px; }
+    .top-spacer { flex: 1; }
+    .live-status { display: inline-flex; align-items: center; gap: 7px; color: var(--text-dim); font-size: 11px; }
+    .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); }
+    .version { color: var(--muted); font: 11px ui-monospace, Consolas, monospace; }
+    .layout { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 300px; }
+    .canvas {
+      position: relative; min-height: 620px; overflow: auto; padding: 40px;
+      background-image: radial-gradient(rgba(111,130,138,.18) 1px, transparent 1px);
+      background-size: 22px 22px;
+    }
+    .canvas-caption { color: var(--muted); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
+    .canvas-stage { min-height: 510px; display: grid; place-items: center; padding: 28px; }
+    .topic-node {
+      width: min(360px, 100%); overflow: hidden; border: 1px solid var(--accent);
+      border-radius: var(--radius); background: var(--panel); box-shadow: 0 12px 32px rgba(0,0,0,.24);
+    }
+    .node-head { display: flex; align-items: center; gap: 9px; min-height: 48px; padding: 9px 12px; border-bottom: 1px solid var(--border); }
+    .kind { flex: none; padding: 2px 7px; border: 1px solid var(--border-strong); border-radius: 999px; color: var(--accent); font-size: 10px; }
+    .node-title { min-width: 0; flex: 1; overflow: hidden; color: var(--text); text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 650; }
+    .node-status { flex: none; color: var(--muted); font-size: 10px; }
+    .node-body { padding: 12px; }
+    .form { display: grid; gap: 10px; }
+    label { display: grid; gap: 4px; color: var(--text-dim); font-size: 11px; }
+    input, textarea {
+      width: 100%; min-width: 0; border: 1px solid var(--border); border-radius: var(--radius-sm);
+      padding: 7px 8px; background: var(--panel-2); color: var(--text); font-size: 12px;
+    }
+    textarea { min-height: 64px; resize: vertical; }
+    input[aria-invalid="true"] { border-color: var(--danger); }
+    .field-error, .error { color: var(--danger); font-size: 10px; }
+    .save-row { min-height: 24px; display: flex; align-items: center; justify-content: space-between; color: var(--muted); font-size: 10px; }
+    .run-button, .retry {
+      min-height: 34px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
+      padding: 0 11px; background: var(--accent-soft); color: var(--accent); font-size: 11px; font-weight: 650; cursor: pointer;
+    }
+    .run-button { width: 100%; }
+    .run-button:disabled, .retry:disabled { opacity: .48; cursor: not-allowed; }
+    .save-error, .run-error { margin: 0; padding: 7px 8px; border: 1px solid rgba(217,138,138,.35); border-radius: var(--radius-sm); background: rgba(217,138,138,.07); }
+    .run-error { margin-top: 9px; }
+    .pending-note { margin: 10px 0 0; border-left: 2px solid var(--warn); padding-left: 8px; color: var(--warn); font-size: 10px; }
+    .no-ports { margin: 10px 0 0; color: var(--muted); font-size: 10px; }
+    .console {
+      border-left: 1px solid var(--border); background: var(--bg-elev); padding: 18px 15px;
+      display: flex; flex-direction: column; gap: 16px;
+    }
+    .console-head { display: flex; align-items: center; justify-content: space-between; }
+    .console-head h1 { margin: 0; font-size: 12px; letter-spacing: .12em; }
+    .tabs { display: flex; gap: 6px; border-bottom: 1px solid var(--border); padding-bottom: 8px; }
+    .tab { border: 0; background: transparent; color: var(--muted); font-size: 11px; padding: 4px 7px; }
+    .tab.active { color: var(--accent); border-bottom: 1px solid var(--accent); }
+    .console-card { border: 1px solid var(--border); border-radius: var(--radius); background: var(--panel); padding: 11px; }
+    .console-card h2 { margin: 0 0 7px; color: var(--text-dim); font-size: 11px; }
+    .empty { margin: 0; color: var(--muted); font-size: 11px; }
+    .run-summary { display: grid; gap: 5px; color: var(--text-dim); font-size: 10px; }
+    .run-summary strong { color: var(--ok); font-size: 11px; }
+    .demo-controls { border-top: 1px solid var(--border); padding-top: 12px; }
+    .demo-controls h2 { margin: 0 0 7px; color: var(--muted); font-size: 10px; font-weight: 600; }
+    .case-buttons { display: flex; flex-wrap: wrap; gap: 5px; }
+    .case {
+      border: 1px solid var(--border); border-radius: 999px; padding: 4px 7px;
+      background: transparent; color: var(--text-dim); font-size: 9px; cursor: pointer;
+    }
+    .case[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+    .demo-caption { margin: 8px 0 0; color: var(--muted); font-size: 9px; }
+    .notice {
+      position: absolute; left: 50%; bottom: 20px; transform: translateX(-50%);
+      max-width: calc(100% - 36px); padding: 8px 12px; border: 1px solid var(--border-strong);
+      border-radius: var(--radius-sm); background: var(--bg-elev); color: var(--text-dim); font-size: 10px;
+    }
+    [hidden] { display: none !important; }
+
+    @media (max-width: 900px) {
+      .layout { grid-template-columns: minmax(0, 1fr); }
+      .canvas { min-height: 560px; padding: 24px 14px; }
+      .console { border-left: 0; border-top: 1px solid var(--border); }
+      .topbar { padding: 0 12px; }
+    }
+    @media (max-width: 480px) {
+      .project { display: none; }
+      .canvas-stage { padding: 20px 0; }
+      .topic-node { width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <span class="brand">AUDIOUI</span>
+      <span class="project">工作区 / 示例工程</span>
+      <span class="top-spacer"></span>
+      <span class="live-status"><span class="dot" aria-hidden="true"></span><span id="global-status">空闲</span></span>
+      <span class="version">M2-10A</span>
+    </header>
+    <main class="layout">
+      <section class="canvas" aria-label="画布示例">
+        <div class="canvas-caption">WORKSPACE CANVAS · TOPIC PARAMETERS</div>
+        <div class="canvas-stage">
+          <article class="topic-node" id="topic-card">
+            <header class="node-head">
+              <span class="kind">选题</span>
+              <strong class="node-title" id="node-title">城市旧店的最后一天</strong>
+              <span class="node-status" id="node-status">未运行</span>
+            </header>
+            <div class="node-body">
+              <form class="form" id="topic-form" novalidate>
+                <label for="title">选题标题
+                  <input id="title" name="title" type="text" maxlength="80" value="城市旧店的最后一天" required aria-describedby="title-error">
+                  <span class="field-error" id="title-error" hidden>选题标题不能为空。</span>
+                </label>
+                <label for="idea">想法
+                  <textarea id="idea" name="idea" rows="3">记录一家经营三十年的修鞋铺，在城市更新前最后一天的日常。</textarea>
+                </label>
+                <label for="direction">方向
+                  <input id="direction" name="direction" type="text" value="人物观察 · 城市记忆">
+                </label>
+                <label for="count">候选数
+                  <input id="count" name="count" type="number" min="3" max="10" step="1" value="3" required aria-describedby="count-error">
+                  <span class="field-error" id="count-error" hidden>候选数必须是 3–10 之间的整数。</span>
+                </label>
+                <div class="save-row">
+                  <span id="save-status" role="status" aria-live="polite">已保存</span>
+                  <button class="retry" id="retry-save" type="button" hidden>重试保存</button>
+                </div>
+                <p class="error save-error" id="save-error" role="alert" hidden></p>
+                <button class="run-button" id="run-button" type="submit">生成候选</button>
+              </form>
+              <p class="error run-error" id="run-error" role="alert" hidden></p>
+              <p class="pending-note" id="pending-note" hidden>候选结果待处理；本阶段不自动应用。</p>
+              <p class="no-ports" id="no-ports">生成结果待用户应用；应用候选后才会出现可连接的输出端口。</p>
+            </div>
+          </article>
+        </div>
+        <div class="notice" id="notice" role="status" aria-live="polite" hidden></div>
+      </section>
+      <aside class="console" aria-label="运行控制台示例">
+        <div class="console-head"><h1>AGENT 交互栏</h1><span class="live-status"><span class="dot" aria-hidden="true"></span><span id="console-status">空闲</span></span></div>
+        <nav class="tabs" aria-label="控制台分页"><button class="tab active" type="button">对话</button><button class="tab" type="button">待处理 <span id="pending-count"></span></button></nav>
+        <section class="console-card" aria-live="polite">
+          <h2>最近运行</h2>
+          <p class="empty" id="console-empty">尚无运行记录。运行完成后，结果仍需用户在待处理区域确认。</p>
+          <div class="run-summary" id="run-summary" hidden>
+            <strong id="run-result-status">启动中</strong>
+            <span>节点：城市旧店的最后一天</span>
+            <span id="run-result-detail">运行 ID 将由后端返回</span>
+          </div>
+        </section>
+        <section class="demo-controls" aria-label="演示状态切换">
+          <h2>原型状态预览（仅演示，不属于产品控件）</h2>
+          <div class="case-buttons" role="group" aria-label="选择演示状态">
+            <button class="case" type="button" data-case="success" aria-pressed="true">正常完成</button>
+            <button class="case" type="button" data-case="cli">CLI 不可用</button>
+            <button class="case" type="button" data-case="busy">BUSY</button>
+            <button class="case" type="button" data-case="context">上下文超限</button>
+            <button class="case" type="button" data-case="locked">运行锁</button>
+            <button class="case" type="button" data-case="save">保存失败</button>
+          </div>
+          <p class="demo-caption">点击状态，再操作选题卡；修改参数会模拟 320ms 防抖保存。演示不连接后端，也不启动 CLI。</p>
+        </section>
+      </aside>
+    </main>
+  </div>
+  <script>
+    (() => {
+      const form = document.querySelector('#topic-form');
+      const title = document.querySelector('#title');
+      const idea = document.querySelector('#idea');
+      const direction = document.querySelector('#direction');
+      const count = document.querySelector('#count');
+      const runButton = document.querySelector('#run-button');
+      const saveStatus = document.querySelector('#save-status');
+      const saveError = document.querySelector('#save-error');
+      const runError = document.querySelector('#run-error');
+      const titleError = document.querySelector('#title-error');
+      const countError = document.querySelector('#count-error');
+      const retrySave = document.querySelector('#retry-save');
+      const nodeStatus = document.querySelector('#node-status');
+      const globalStatus = document.querySelector('#global-status');
+      const consoleStatus = document.querySelector('#console-status');
+      const consoleEmpty = document.querySelector('#console-empty');
+      const runSummary = document.querySelector('#run-summary');
+      const runResultStatus = document.querySelector('#run-result-status');
+      const runResultDetail = document.querySelector('#run-result-detail');
+      const pendingNote = document.querySelector('#pending-note');
+      const pendingCount = document.querySelector('#pending-count');
+      const noPorts = document.querySelector('#no-ports');
+      const notice = document.querySelector('#notice');
+      const titleDisplay = document.querySelector('#node-title');
+      let mode = 'success';
+      let saveTimer = 0;
+      let saving = false;
+      let dirty = false;
+      let starting = false;
+      let running = false;
+      let locked = false;
+      let savedDraft = readDraft();
+      let runSequence = 0;
+
+      function readDraft() {
+        return { title: title.value.trim(), idea: idea.value, direction: direction.value, count: count.value };
+      }
+      function valid() {
+        const titleValid = Boolean(title.value.trim());
+        const countValue = Number(count.value);
+        const countValid = Number.isInteger(countValue) && countValue >= 3 && countValue <= 10;
+        titleError.hidden = titleValid;
+        countError.hidden = countValid;
+        title.setAttribute('aria-invalid', String(!titleValid));
+        count.setAttribute('aria-invalid', String(!countValid));
+        return titleValid && countValid;
+      }
+      function setRunDisabled() {
+        runButton.disabled = locked || running || starting || saving || !valid() || saveStatus.textContent === '保存失败，修改仍保留';
+      }
+      function showNotice(text) {
+        notice.textContent = text;
+        notice.hidden = false;
+        window.clearTimeout(showNotice.timer);
+        showNotice.timer = window.setTimeout(() => { notice.hidden = true; }, 2600);
+      }
+      async function persistDraft() {
+        window.clearTimeout(saveTimer);
+        if (!valid()) { dirty = true; saveStatus.textContent = '未保存'; setRunDisabled(); return false; }
+        if (!dirty && JSON.stringify(readDraft()) === JSON.stringify(savedDraft)) return true;
+        saving = true;
+        saveStatus.textContent = '保存中…';
+        saveError.hidden = true;
+        retrySave.hidden = true;
+        setRunDisabled();
+        await new Promise((resolve) => window.setTimeout(resolve, 360));
+        if (mode === 'save') {
+          saving = false;
+          dirty = true;
+          saveStatus.textContent = '保存失败，修改仍保留';
+          saveError.textContent = '保存失败：模拟磁盘写入错误。请重试；启动已阻止。';
+          saveError.hidden = false;
+          retrySave.hidden = false;
+          setRunDisabled();
+          return false;
+        }
+        savedDraft = readDraft();
+        dirty = false;
+        saving = false;
+        saveStatus.textContent = '已保存';
+        titleDisplay.textContent = savedDraft.title;
+        setRunDisabled();
+        return true;
+      }
+      function queueSave() {
+        dirty = true;
+        saveStatus.textContent = '未保存';
+        saveError.hidden = true;
+        runError.hidden = true;
+        window.clearTimeout(saveTimer);
+        setRunDisabled();
+        saveTimer = window.setTimeout(() => { void persistDraft(); }, 320);
+      }
+      [title, idea, direction, count].forEach((field) => field.addEventListener('input', queueSave));
+      form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        runError.hidden = true;
+        if (locked || running || starting || !valid()) return;
+        if (dirty && !(await persistDraft())) return;
+        if (locked || running || starting) return;
+        if (mode === 'save' && !dirty && saveStatus.textContent === '保存失败，修改仍保留') return;
+        runSequence += 1;
+        const thisRun = runSequence;
+        starting = true;
+        globalStatus.textContent = '启动中';
+        consoleStatus.textContent = '启动中';
+        nodeStatus.textContent = '正在启动';
+        consoleEmpty.hidden = true;
+        runSummary.hidden = false;
+        runResultStatus.textContent = '启动中';
+        runResultDetail.textContent = '正在等待保存快照与运行启动响应';
+        setRunDisabled();
+        await new Promise((resolve) => window.setTimeout(resolve, 450));
+        starting = false;
+        if (thisRun !== runSequence) return;
+        if (mode === 'cli' || mode === 'busy' || mode === 'context') {
+          globalStatus.textContent = '空闲';
+          consoleStatus.textContent = '空闲';
+          nodeStatus.textContent = '启动失败';
+          runResultStatus.textContent = '启动失败';
+          const messages = {
+            cli: 'Claude CLI 不可用。请检查 CLI 安装状态后重试。',
+            busy: '已有运行正在进行，当前无法启动另一个运行。',
+            context: '上下文超过预算：估算 1,200,001 tokens，预算 1,000,000 tokens。',
+          };
+          const codes = { cli: 'AGENT_UNAVAILABLE', busy: 'BUSY', context: 'CONTEXT_TOO_LARGE' };
+          runError.textContent = `${messages[mode]}（${codes[mode]}）`;
+          runError.hidden = false;
+          runResultDetail.textContent = `结构化错误码：${codes[mode]}`;
+          setRunDisabled();
+          return;
+        }
+        running = true;
+        globalStatus.textContent = '运行中';
+        consoleStatus.textContent = '运行中';
+        nodeStatus.textContent = '运行中 · 只读';
+        runResultStatus.textContent = '运行中';
+        runResultDetail.textContent = '估算上下文：12,480 tokens · 预算：1,000,000 tokens';
+        setRunDisabled();
+        window.setTimeout(() => {
+          if (thisRun !== runSequence) return;
+          running = false;
+          globalStatus.textContent = '空闲';
+          consoleStatus.textContent = '空闲';
+          nodeStatus.textContent = '已完成 · 待处理';
+          runResultStatus.textContent = '已完成';
+          runResultDetail.textContent = '已生成 1 条待处理结果；未自动应用';
+          pendingCount.textContent = '1';
+          pendingNote.hidden = false;
+          noPorts.hidden = false;
+          showNotice('运行完成。候选结果保持待处理，未自动应用。');
+          setRunDisabled();
+        }, 1500);
+      });
+      retrySave.addEventListener('click', () => {
+        if (mode === 'save') mode = 'success';
+        void persistDraft();
+      });
+      document.querySelectorAll('[data-case]').forEach((button) => {
+        button.addEventListener('click', () => {
+          mode = button.dataset.case;
+          document.querySelectorAll('[data-case]').forEach((item) => item.setAttribute('aria-pressed', String(item === button)));
+          runError.hidden = true;
+          saveError.hidden = true;
+          if (mode === 'locked') {
+            locked = true;
+            [title, idea, direction, count, retrySave].forEach((field) => { field.disabled = true; });
+            nodeStatus.textContent = '运行路径 · 只读';
+            saveStatus.textContent = '当前路径锁定';
+            showNotice('运行路径节点只读，参数编辑与执行均禁用。');
+          } else {
+            locked = false;
+            [title, idea, direction, count].forEach((field) => { field.disabled = false; });
+            retrySave.disabled = false;
+            nodeStatus.textContent = pendingNote.hidden ? '未运行' : '已完成 · 待处理';
+            if (saveStatus.textContent === '当前路径锁定') saveStatus.textContent = dirty ? '未保存' : '已保存';
+          }
+          if (mode === 'save' && !locked) {
+            dirty = true;
+            saveStatus.textContent = '未保存';
+            void persistDraft();
+          }
+          setRunDisabled();
+        });
+      });
+      setRunDisabled();
+    })();
+  </script>
+</body>
+</html>

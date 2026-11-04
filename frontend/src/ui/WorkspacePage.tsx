@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef } from 'react'
-import type { WorkspaceSnapshot } from '../../bindings/audio-ui/internal/domain/entity'
-import type { GraphMutationReceipt } from '../../bindings/audio-ui/internal/domain/entity'
+import type { GraphMutationReceipt, RunStartResult, WorkspaceSnapshot } from '../../bindings/audio-ui/internal/domain/entity'
 import type { WorkspaceStatus } from '../api/workspace'
 import { useWorkspaceStore } from '../stores/workspaceStore'
 import { graphAPI, type GraphAPI } from '../canvas/graphApi'
@@ -12,10 +11,11 @@ type Props = {
   error: string
   onRetry: () => void
   onGraphMutation?: (receipt: GraphMutationReceipt) => void | Promise<void>
+  onStartRun?: (nodeId: string, projectId: string) => Promise<RunStartResult>
   api?: GraphAPI
 }
 
-export function WorkspacePage({ status, snapshot, error, onRetry, onGraphMutation, api = graphAPI }: Props) {
+export function WorkspacePage({ status, snapshot, error, onRetry, onGraphMutation, onStartRun, api = graphAPI }: Props) {
   const projectId = snapshot?.project?.id ?? ''
   const currentProjectId = useRef(projectId)
   currentProjectId.current = projectId
@@ -95,7 +95,7 @@ export function WorkspacePage({ status, snapshot, error, onRetry, onGraphMutatio
           <button className="agent-mini-btn" type="button" onClick={onRetry}>重试</button>
         </div>
       ) : null}
-      <WorkspaceCanvas snapshot={snapshot} onSelectNode={selectNode} onGraphMutation={onGraphMutation} api={api} />
+      <WorkspaceCanvas snapshot={snapshot} onSelectNode={selectNode} onGraphMutation={onGraphMutation} onStartRun={onStartRun} api={api} />
     </main>
   )
 }

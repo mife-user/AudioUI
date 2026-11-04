@@ -80,6 +80,7 @@ function App() {
   const createProject = useCallback((name: string) => bridge.createProject(name), [bridge])
   const openProject = useCallback((projectId: string) => bridge.openProject(projectId), [bridge])
   const refreshGraph = useCallback((receipt: GraphMutationReceipt) => bridge.syncGraphMutation(receipt), [bridge])
+  const startNodeRun = useCallback((nodeId: string, projectId: string) => bridge.startRun(nodeId, projectId), [bridge])
   const onSelectRun = useCallback((runId: string) => bridge.selectRun(runId), [bridge])
   const onRetryRun = useCallback((runId: string) => bridge.retryRun(runId), [bridge])
 
@@ -134,6 +135,7 @@ function App() {
           error={workspaceError}
           onRetry={() => bridge.retryWorkspace()}
           onGraphMutation={refreshGraph}
+          onStartRun={startNodeRun}
         />
         <AgentConsole
           runs={runSummaries}

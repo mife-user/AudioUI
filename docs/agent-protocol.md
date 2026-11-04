@@ -270,6 +270,12 @@ Schema（M2 最小）：
 
 当前运行由 Wails `RunService` 一次启动并发送首条上下文消息；`Start` 仅在 MCP/权限/driver 完成初始化并成功提交首条消息后返回。M2 同时只允许一个在途运行，竞争请求立即返回 `BUSY`。运行历史经 `ListRuns`/`GetRun` 读取；`Interrupt`、`RespondPermission` 与 `RespondQuestion` 按 runId 定位活动运行。启动时，所有工程中遗留的 `starting`/`running` 记录转为 `interrupted`，不会恢复 Agent 会话。
 
+### 8.1 工作台启动 RPC（非 Agent/CLI/MCP 协议）
+
+选题卡的 Wails 调用为 `RunService.Start(nodeID, projectID)`。`projectID` 是发起请求时的活动工程标识；Workflow 在同一图命令锁内验证当前工程后再取得运行路径锁，工程不匹配则拒绝，不会把旧画布请求改投新工程。
+
+返回值是应用层 DTO `RunStartResult`，包含可选的 `run` 与 `error`。错误包含稳定 `code` 和可读 `message`；`CONTEXT_TOO_LARGE` 另提供整数 `estimatedTokens`、`tokenBudget`，UI 必须读取结构化字段，不从文案推算数值。此 DTO 不改变 `AgentDriver`、CLI stream-json、MCP 工具或 `reply` 契约。
+
 实际运行的 Wails 事件统一按 `run:<type>` 发布，每条事件都有工程/运行身份与单调序号：
 
 ```text
