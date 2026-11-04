@@ -28,6 +28,7 @@ M2 图与提示词（进行中：M2-00..07 已验收）。
 - M2-08A：新增一致的工作台快照、工程作用域变更事件与进程内 workspace revision；图/pending/运行锁回调携带变更所属的 projectId。
 - M2-08A：运行事件加入 projectId；新增 `GetRunSnapshot`，将运行记录、transcript、事件 lastSeq 和活动权限/问题请求置于同一同步点，保留现有运行记录磁盘格式与 `GetRun`。
 - M2-08A：增加工作台链/pending/run 摘要、路径锁快照与并发事件恢复测试；实现自检证据见 `docs/dev/evidence/m2-08a.md`。
+- M2-08B：接入工程切换、工作台快照同步及按 runId 恢复的运行控制台；自动测试与构建通过。用户于 2026-11-03 按截图更名完成验收，证据见 `docs/dev/evidence/m2-08b.md` 与 `docs/dev/evidence/m2-08b.png`。
 - M2-02：`service/workflow` 图命令层——`AddNode`（topic 根 / 带父 prompt / 草稿）、`Connect`（改挂确认）、`MoveNode`（位置）、`UpdateNodeParams`、`SelectNode`、`EnsureExecutable`。
 - M2-02：单父树校验（无环、自连、topic 根、草稿父拒绝）、子树 `stale` 传播与 revision 规则；`SelectNode` 不递增 revision、不广播。
 - M2-02：topic 候选端口解析——0 基 `parentCandidate` 从最新已应用 `topics` 产物计数；非法候选返回 `CANDIDATE_INVALID`；父为 prompt/草稿时清空候选。

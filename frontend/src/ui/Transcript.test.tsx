@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { Transcript } from './Transcript'
-import type { TranscriptItem } from '../api/agent'
+import type { TranscriptItem } from '../api/runs'
 import { TranscriptKind } from '../../bindings/audio-ui/internal/domain/valueobject'
 
 beforeEach(() => {
@@ -23,7 +23,7 @@ function item(overrides: Partial<TranscriptItem> = {}): TranscriptItem {
 describe('Transcript', () => {
   it('shows the empty state', () => {
     render(<Transcript items={[]} />)
-    expect(screen.getByText('还没有会话消息')).toBeInTheDocument()
+    expect(screen.getByText('暂无运行内容')).toBeInTheDocument()
   })
 
   it('renders user and assistant bubbles', () => {

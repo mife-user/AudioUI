@@ -1,50 +1,51 @@
 import { useCallback, useEffect, useState } from 'react'
-import {
-  cancelResume,
-  interrupt,
-  newSession,
-  respondPermission,
-  respondQuestion,
-  sendMessage,
-  type AgentState,
-} from './api/agent'
-import {
-  fetchEnvironment,
-  fetchRecentLogs,
-  type EnvironmentDTO,
-  type LogEntryDTO,
-} from './api/system'
-import { useAgentBridge } from './hooks/useAgentBridge'
-import { useAgentStore } from './stores/agentStore'
+import { fetchEnvironment, fetchRecentLogs, type EnvironmentDTO, type LogEntryDTO } from './api/system'
+import { useWorkspaceBridge } from './hooks/useWorkspaceBridge'
+import { useRunStore } from './stores/runStore'
+import { useWorkspaceStore } from './stores/workspaceStore'
 import { AboutDialog } from './ui/AboutDialog'
+import { AgentConsole } from './ui/AgentConsole'
+import { CLIInstallBanner } from './ui/CLIInstallBanner'
 import { AppShell } from './ui/AppShell'
-import { SessionPage } from './ui/SessionPage'
 import { SystemDrawer } from './ui/SystemDrawer'
 import { WorkbenchTopbar } from './ui/WorkbenchTopbar'
+import { WorkspacePage } from './ui/WorkspacePage'
 
-function messageOf(error: unknown) {
-  return error instanceof Error ? error.message : String(error)
+function messageOf(error: unknown): string {
+  if (error instanceof Error) return error.message
+  if (typeof error === 'string') return error
+  if (error && typeof error === 'object' && 'message' in error) return String((error as { message: unknown }).message)
+  return String(error)
 }
 
 function App() {
-  useAgentBridge()
-  const agentState = useAgentStore((store) => store.state)
+  const bridge = useWorkspaceBridge()
+  const workspaceStatus = useWorkspaceStore((store) => store.status)
+  const workspaceSnapshot = useWorkspaceStore((store) => store.snapshot)
+  const workspaceError = useWorkspaceStore((store) => store.error)
+  const runViews = useRunStore((store) => store.runs)
+  const runSummaries = useRunStore((store) => store.summaries)
+  const selectedRunId = useRunStore((store) => store.selectedRunId)
+  const selectedRun = useRunStore((store) => selectedRunId ? store.runs[selectedRunId] : undefined)
   const [env, setEnv] = useState<EnvironmentDTO | null>(null)
   const [logs, setLogs] = useState<LogEntryDTO[]>([])
   const [systemOpen, setSystemOpen] = useState(false)
   const [aboutOpen, setAboutOpen] = useState(false)
+  const [consoleCollapsed, setConsoleCollapsed] = useState(false)
+  const [cliBannerDismissed, setCliBannerDismissed] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const [logsLoading, setLogsLoading] = useState(false)
-  const [error, setError] = useState('')
+  const [environmentError, setEnvironmentError] = useState('')
   const [logError, setLogError] = useState('')
+  const [consoleError, setConsoleError] = useState('')
 
   const loadEnv = useCallback(async (refresh: boolean) => {
     if (refresh) setRefreshing(true)
     try {
       setEnv(await fetchEnvironment(refresh))
-      setError('')
+      setEnvironmentError('')
     } catch (err) {
-      setError(`环境检查失败：${messageOf(err)}`)
+      setEnvironmentError(`环境检查失败：${messageOf(err)}`)
     } finally {
       setRefreshing(false)
     }
@@ -75,83 +76,84 @@ function App() {
     return () => window.clearInterval(timer)
   }, [systemOpen, loadLogs])
 
-  const send = useCallback(async (text: string) => {
-    setError('')
+  const createProject = useCallback((name: string) => bridge.createProject(name), [bridge])
+  const openProject = useCallback((projectId: string) => bridge.openProject(projectId), [bridge])
+  const onSelectRun = useCallback((runId: string) => bridge.selectRun(runId), [bridge])
+  const onRetryRun = useCallback((runId: string) => bridge.retryRun(runId), [bridge])
+
+  const onPermission = useCallback(async (runId: string, requestId: string, decision: 'allow' | 'allow_session' | 'deny') => {
+    setConsoleError('')
     try {
-      await sendMessage(text)
+      await bridge.respondPermission(runId, requestId, decision)
     } catch (err) {
-      setError(`发送失败：${messageOf(err)}`)
-      throw err
+      setConsoleError(`权限响应失败：${messageOf(err)}`)
     }
-  }, [])
+  }, [bridge])
 
-  const onPermission = useCallback(async (id: string, decision: 'allow' | 'allow_session' | 'deny') => {
-    setError('')
+  const onQuestion = useCallback(async (runId: string, requestId: string, answer: string, via: string) => {
+    setConsoleError('')
     try {
-      await respondPermission(id, decision)
+      await bridge.respondQuestion(runId, requestId, answer, via)
     } catch (err) {
-      setError(`权限响应失败：${messageOf(err)}`)
+      setConsoleError(`问题回答失败：${messageOf(err)}`)
     }
-  }, [])
+  }, [bridge])
 
-  const onQuestion = useCallback(async (id: string, answer: string, via: string) => {
-    setError('')
+  const onInterrupt = useCallback(async (runId: string) => {
+    setConsoleError('')
     try {
-      await respondQuestion(id, answer, via)
+      await bridge.interrupt(runId)
     } catch (err) {
-      setError(`问题回答失败：${messageOf(err)}`)
+      setConsoleError(`停止运行失败：${messageOf(err)}`)
     }
-  }, [])
+  }, [bridge])
 
-  const onNewSession = useCallback(async () => {
-    setError('')
-    try {
-      await newSession()
-    } catch (err) {
-      setError(`新开会话失败：${messageOf(err)}`)
-    }
-  }, [])
-
-  const onCancelResume = useCallback(() => {
-    void cancelResume().catch((err) => setError(`取消失败：${messageOf(err)}`))
-  }, [])
-
-  const onInterrupt = useCallback(async () => {
-    try {
-      await interrupt()
-    } catch (err) {
-      setError(`停止失败：${messageOf(err)}`)
-    }
-  }, [])
-
-  const version = env?.version || '0.1.0'
-  const state: AgentState | null = agentState
+  const isBusy = workspaceSnapshot?.runs?.some((run) => run.status === 'starting' || run.status === 'running') ?? false
+  const version = env?.version || 'dev'
 
   return (
     <AppShell>
       <WorkbenchTopbar
-        state={state}
+        project={workspaceSnapshot?.project ?? null}
+        environment={env}
+        busy={isBusy}
         version={version}
+        onNewProject={createProject}
+        onOpenProject={openProject}
         onAbout={() => setAboutOpen(true)}
         onSystem={() => setSystemOpen(true)}
       />
-      <SessionPage
-        state={state}
-        error={error}
-        onSend={send}
-        onPermission={onPermission}
-        onQuestion={onQuestion}
-        onNewSession={onNewSession}
-        onCancelResume={onCancelResume}
-        onInterrupt={onInterrupt}
-      />
+      {environmentError ? <div className="workspace-banner" role="alert">{environmentError}</div> : null}
+      {env && !env.cli.installed && !cliBannerDismissed ? <CLIInstallBanner onDismiss={() => setCliBannerDismissed(true)} /> : null}
+      <div className="workspace-layout">
+        <WorkspacePage
+          status={workspaceStatus}
+          snapshot={workspaceSnapshot}
+          error={workspaceError}
+          onRetry={() => bridge.retryWorkspace()}
+        />
+        <AgentConsole
+          runs={runSummaries}
+          runViews={runViews}
+          selectedRunId={selectedRunId}
+          selectedRun={selectedRun}
+          actionError={consoleError}
+          collapsed={consoleCollapsed}
+          onToggle={() => setConsoleCollapsed((value) => !value)}
+          onSelectRun={onSelectRun}
+          onRetryRun={onRetryRun}
+          onPermission={onPermission}
+          onQuestion={onQuestion}
+          onInterrupt={onInterrupt}
+        />
+      </div>
       <SystemDrawer
         open={systemOpen}
         env={env}
         logs={logs}
         refreshing={refreshing}
         logsLoading={logsLoading}
-        error={error}
+        error={environmentError}
         logError={logError}
         onRefreshEnv={() => void loadEnv(true)}
         onRefreshLogs={() => void loadLogs()}
