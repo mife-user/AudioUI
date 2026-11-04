@@ -9,6 +9,7 @@ export type WorkspaceStoreState = {
   error: string
   setLoading: () => void
   applySnapshot: (result: WorkspaceSnapshotResult) => boolean
+  setActiveNode: (nodeId: string) => void
   setError: (message: string) => void
   reset: () => void
 }
@@ -26,25 +27,48 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set) => ({
   applySnapshot: (result) => {
     let accepted = true
     set((current) => {
-      const currentProjectId = current.snapshot?.project?.id ?? null
-      const incomingProjectId = result.snapshot.project?.id ?? null
+      const currentProject = current.snapshot?.project
+      const incomingProject = result.snapshot.project
+      const currentProjectId = currentProject?.id ?? null
+      const incomingProjectId = incomingProject?.id ?? null
       if (currentProjectId === incomingProjectId && result.revision < current.revision) {
         accepted = false
         return current
       }
+      let snapshot: WorkspaceSnapshot = result.snapshot
+      if (currentProject && incomingProject && currentProject.id === incomingProject.id) {
+        snapshot = {
+          ...result.snapshot,
+          project: {
+            ...incomingProject,
+            activeNodeId: currentProject.activeNodeId,
+          },
+        }
+      }
       return {
         status: 'ready',
         revision: result.revision,
-        snapshot: result.snapshot,
+        snapshot,
         error: '',
         setLoading: current.setLoading,
         applySnapshot: current.applySnapshot,
+        setActiveNode: current.setActiveNode,
         setError: current.setError,
         reset: current.reset,
       }
     })
     return accepted
   },
+  setActiveNode: (nodeId) => set((current) => {
+    if (!current.snapshot?.project || current.snapshot.project.activeNodeId === nodeId) return current
+    return {
+      ...current,
+      snapshot: {
+        ...current.snapshot,
+        project: { ...current.snapshot.project, activeNodeId: nodeId },
+      },
+    }
+  }),
   setError: (message) => set((current) => ({
     ...current,
     status: 'error',

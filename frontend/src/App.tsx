@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { fetchEnvironment, fetchRecentLogs, type EnvironmentDTO, type LogEntryDTO } from './api/system'
+import type { GraphMutationReceipt } from '../bindings/audio-ui/internal/domain/entity'
 import { useWorkspaceBridge } from './hooks/useWorkspaceBridge'
 import { useRunStore } from './stores/runStore'
 import { useWorkspaceStore } from './stores/workspaceStore'
@@ -78,6 +79,7 @@ function App() {
 
   const createProject = useCallback((name: string) => bridge.createProject(name), [bridge])
   const openProject = useCallback((projectId: string) => bridge.openProject(projectId), [bridge])
+  const refreshGraph = useCallback((receipt: GraphMutationReceipt) => bridge.syncGraphMutation(receipt), [bridge])
   const onSelectRun = useCallback((runId: string) => bridge.selectRun(runId), [bridge])
   const onRetryRun = useCallback((runId: string) => bridge.retryRun(runId), [bridge])
 
@@ -131,6 +133,7 @@ function App() {
           snapshot={workspaceSnapshot}
           error={workspaceError}
           onRetry={() => bridge.retryWorkspace()}
+          onGraphMutation={refreshGraph}
         />
         <AgentConsole
           runs={runSummaries}

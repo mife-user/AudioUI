@@ -10,6 +10,7 @@
 | [design/m0-startup-shell.html](design/m0-startup-shell.html) | 设计 / 前端 | 原型 | M0 启动自检壳（临时） |
 | [design/m1-session-shell.html](design/m1-session-shell.html) | 设计 / 前端 | 原型 | M1 临时会话页与控制台（M2 已删除） |
 | [design/m2-workspace.html](design/m2-workspace.html) | 设计 / 前端 | 原型 | M2 工作台：画布、草稿节点、候选端口、运行分组、待应用、运行路径锁、同父换候选确认 |
+| [design/m2-09-canvas-demo.html](design/m2-09-canvas-demo.html) | 设计 / 前端 | 演示 | M2-09 节点画布、端口、草稿、改挂确认与视图控制本地演示 |
 | [design/m2-topic-closure-demo.html](design/m2-topic-closure-demo.html) | 设计 / 前端 | 演示 | 选题运行、待应用、候选分支及改挂的本地交互示例 |
 | [dev/process.md](dev/process.md) | 开发 / 产品 | 草案 | 阶段、工作分解、门禁、变更控制 |
 | [dev/roadmap.md](dev/roadmap.md) | 产品 / 开发 | 草案 | 需求优先级、批次、暂存需求池 |
@@ -23,6 +24,7 @@
 | [dev/evidence/m2-05.md](dev/evidence/m2-05.md) | 产品 / 测试 | 证据 | M2-05 Pending 后端自检与验收记录（用户已确认通过） |
 | [dev/evidence/m2-06.md](dev/evidence/m2-06.md) | 产品 / 测试 | 证据 | M2-06 MCP 只读图、结构化 reply 与 artifact 分块自检及验收记录 |
 | [dev/evidence/m2-07.md](dev/evidence/m2-07.md) | 产品 / 测试 | 证据 | M2-07 运行管理与运行锁自检及验收记录 |
+| [dev/evidence/m2-09.md](dev/evidence/m2-09.md) | 产品 / 测试 | 证据 | M2-09 画布与节点连接实现自检、门禁结果、真实窗口验收和 AC 映射（已验收） |
 | [agent-protocol.md](agent-protocol.md) | 开发 | 草案 | MCP 工具、能力位、权限、会话 |
 | [acceptance.md](acceptance.md) | 产品 / 测试 | 草案 | 验收标准与发布门禁 |
 | [decisions.md](decisions.md) | 开发 | 草案 | 架构决策记录 |

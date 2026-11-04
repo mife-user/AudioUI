@@ -401,6 +401,35 @@ func TestServiceCurrentReturnsCopy(t *testing.T) {
 	}
 }
 
+func TestServiceSaveReturnsDeepCopy(t *testing.T) {
+	service := newTestService(testLayout(t.TempDir()))
+	if err := service.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.New(context.Background(), "工程"); err != nil {
+		t.Fatal(err)
+	}
+	projectValue, err := service.Current(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectValue.Nodes = []entity.Node{{
+		ID: "n_saved", Type: valueobject.NodeTypeTopic, Title: "保存值",
+		Params: entity.NodeParams{Idea: "original"}, Rounds: []entity.Round{{N: 1, Kind: valueobject.OutputKindTopics, ArtifactID: "artifact"}},
+	}}
+	projectValue.Revision++
+	saved, err := service.Save(context.Background(), projectValue)
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved.Nodes[0].Title = "调用方修改"
+	saved.Nodes[0].Params.Idea = "changed"
+	saved.Nodes[0].Rounds[0].ArtifactID = "changed"
+	if service.active.Nodes[0].Title != "保存值" || service.active.Nodes[0].Params.Idea != "original" || service.active.Nodes[0].Rounds[0].ArtifactID != "artifact" {
+		t.Fatalf("Save return value aliases active project: %+v", service.active.Nodes[0])
+	}
+}
+
 func writeSessionsFile(t *testing.T, layout valueobject.Layout) {
 	t.Helper()
 	file := valueobject.SessionsFile{

@@ -6,6 +6,17 @@
 import * as valueobject$0 from "../valueobject/models.js";
 
 /**
+ * GraphMutationReceipt identifies the authoritative project revision produced
+ * by a graph command. NodeID is the created node for AddNode, otherwise the
+ * node directly affected by the command.
+ */
+export interface GraphMutationReceipt {
+    "projectId": string;
+    "projectRevision": number;
+    "nodeId": string;
+}
+
+/**
  * Node is one persisted graph node. Edges are derived from Parent and
  * ParentCandidate and are never stored separately.
  */

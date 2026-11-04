@@ -20,6 +20,7 @@ func NewWorkflowService(service *workflow.Service) *WorkflowService {
 }
 
 type AddNodeRequest struct {
+	ProjectID       string            `json:"projectId"`
 	Type            string            `json:"type"`
 	Title           string            `json:"title"`
 	Parent          string            `json:"parent"`
@@ -28,10 +29,15 @@ type AddNodeRequest struct {
 	Params          entity.NodeParams `json:"params"`
 }
 
-func (h *WorkflowService) AddNode(request AddNodeRequest) (entity.Project, error) {
+func (h *WorkflowService) AddNode(request AddNodeRequest) (entity.GraphMutationReceipt, error) {
+	request.ProjectID = strings.TrimSpace(request.ProjectID)
+	if request.ProjectID == "" {
+		return entity.GraphMutationReceipt{}, errors.New("工程 ID 不能为空")
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	return h.service.AddNode(ctx, workflow.AddNodeInput{
+	projectValue, err := h.service.AddNode(ctx, workflow.AddNodeInput{
+		ProjectID:       strings.TrimSpace(request.ProjectID),
 		Type:            valueobject.NodeType(strings.TrimSpace(request.Type)),
 		Title:           strings.TrimSpace(request.Title),
 		Parent:          strings.TrimSpace(request.Parent),
@@ -39,47 +45,89 @@ func (h *WorkflowService) AddNode(request AddNodeRequest) (entity.Project, error
 		Position:        request.Position,
 		Params:          request.Params,
 	})
+	if err != nil {
+		return entity.GraphMutationReceipt{}, err
+	}
+	if len(projectValue.Nodes) == 0 {
+		return entity.GraphMutationReceipt{}, errors.New("ADD_NODE_RECEIPT_MISSING_NODE")
+	}
+	return mutationReceipt(projectValue, projectValue.Nodes[len(projectValue.Nodes)-1].ID), nil
 }
 
-func (h *WorkflowService) Connect(parentID, childID string, parentCandidate *int, replace bool) (entity.Project, error) {
+func (h *WorkflowService) Connect(parentID, childID string, parentCandidate *int, replace bool, projectID string) (entity.GraphMutationReceipt, error) {
 	parentID = strings.TrimSpace(parentID)
 	childID = strings.TrimSpace(childID)
+	projectID = strings.TrimSpace(projectID)
 	if parentID == "" || childID == "" {
-		return entity.Project{}, errors.New("父节点与子节点 ID 不能为空")
+		return entity.GraphMutationReceipt{}, errors.New("父节点与子节点 ID 不能为空")
+	}
+	if projectID == "" {
+		return entity.GraphMutationReceipt{}, errors.New("工程 ID 不能为空")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	return h.service.Connect(ctx, parentID, childID, parentCandidate, replace)
+	projectValue, err := h.service.Connect(ctx, parentID, childID, parentCandidate, replace, projectID)
+	if err != nil {
+		return entity.GraphMutationReceipt{}, err
+	}
+	return mutationReceipt(projectValue, childID), nil
 }
 
-func (h *WorkflowService) MoveNode(id string, x, y float64) (entity.Project, error) {
+func (h *WorkflowService) MoveNode(id string, x, y float64, projectID string) (entity.GraphMutationReceipt, error) {
 	id = strings.TrimSpace(id)
+	projectID = strings.TrimSpace(projectID)
 	if id == "" {
-		return entity.Project{}, errors.New("节点 ID 不能为空")
+		return entity.GraphMutationReceipt{}, errors.New("节点 ID 不能为空")
+	}
+	if projectID == "" {
+		return entity.GraphMutationReceipt{}, errors.New("工程 ID 不能为空")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	return h.service.MoveNode(ctx, id, x, y)
+	projectValue, err := h.service.MoveNode(ctx, id, x, y, projectID)
+	if err != nil {
+		return entity.GraphMutationReceipt{}, err
+	}
+	return mutationReceipt(projectValue, id), nil
 }
 
-func (h *WorkflowService) UpdateNodeParams(id, title string, params entity.NodeParams) (entity.Project, error) {
+func (h *WorkflowService) UpdateNodeParams(id, title string, params entity.NodeParams, projectID string) (entity.GraphMutationReceipt, error) {
 	id = strings.TrimSpace(id)
+	projectID = strings.TrimSpace(projectID)
 	if id == "" {
-		return entity.Project{}, errors.New("节点 ID 不能为空")
+		return entity.GraphMutationReceipt{}, errors.New("节点 ID 不能为空")
+	}
+	if projectID == "" {
+		return entity.GraphMutationReceipt{}, errors.New("工程 ID 不能为空")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	return h.service.UpdateNodeParams(ctx, id, strings.TrimSpace(title), params)
+	projectValue, err := h.service.UpdateNodeParams(ctx, id, strings.TrimSpace(title), params, projectID)
+	if err != nil {
+		return entity.GraphMutationReceipt{}, err
+	}
+	return mutationReceipt(projectValue, id), nil
 }
 
-func (h *WorkflowService) SelectNode(id string) (entity.Project, error) {
+func (h *WorkflowService) SelectNode(id, projectID string) (entity.GraphMutationReceipt, error) {
 	id = strings.TrimSpace(id)
+	projectID = strings.TrimSpace(projectID)
 	if id == "" {
-		return entity.Project{}, errors.New("节点 ID 不能为空")
+		return entity.GraphMutationReceipt{}, errors.New("节点 ID 不能为空")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	return h.service.SelectNode(ctx, id)
+	projectValue, err := h.service.SelectNode(ctx, id, projectID)
+	if err != nil {
+		return entity.GraphMutationReceipt{}, err
+	}
+	return mutationReceipt(projectValue, id), nil
+}
+
+func mutationReceipt(projectValue entity.Project, nodeID string) entity.GraphMutationReceipt {
+	return entity.GraphMutationReceipt{
+		ProjectID: projectValue.ID, ProjectRevision: projectValue.Revision, NodeID: nodeID,
+	}
 }
 
 func (h *WorkflowService) ListPending() ([]entity.Pending, error) {

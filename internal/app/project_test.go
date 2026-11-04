@@ -83,13 +83,17 @@ func TestNewWorkflowSetupWiresCommands(t *testing.T) {
 		t.Fatal(err)
 	}
 	workflowSetup := newWorkflowSetup(layout, projectSetup.service)
+	activeProject, err := projectSetup.service.Current(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
 	projectValue, err := workflowSetup.handler.AddNode(handler.AddNodeRequest{
-		Type: "topic", Title: "选题", Position: entity.Position{X: 1, Y: 2},
+		ProjectID: activeProject.ID, Type: "topic", Title: "选题", Position: entity.Position{X: 1, Y: 2},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(projectValue.Nodes) != 1 || projectValue.Nodes[0].Type != valueobject.NodeTypeTopic {
-		t.Fatalf("project = %+v", projectValue)
+	if projectValue.ProjectID == "" || projectValue.ProjectRevision == 0 || projectValue.NodeID == "" {
+		t.Fatalf("mutation receipt = %+v", projectValue)
 	}
 }

@@ -314,7 +314,7 @@ func (s *Service) saveLocked(ctx context.Context, project entity.Project) (entit
 	s.mu.Lock()
 	s.active = &saved
 	s.mu.Unlock()
-	return saved, nil
+	return saved.Clone(), nil
 }
 
 func (s *Service) Config(ctx context.Context) (valueobject.AppConfig, error) {

@@ -43,6 +43,7 @@ func New(opts Options) *Service {
 }
 
 type AddNodeInput struct {
+	ProjectID       string
 	Type            valueobject.NodeType
 	Title           string
 	Parent          string
@@ -70,7 +71,7 @@ func (s *Service) AddNode(ctx context.Context, input AddNodeInput) (entity.Proje
 	if err != nil {
 		return entity.Project{}, err
 	}
-	project, graph, err := s.loadCurrent(ctx)
+	project, graph, err := s.loadCurrentForProject(ctx, input.ProjectID)
 	if err != nil {
 		return entity.Project{}, err
 	}
@@ -124,13 +125,13 @@ func (s *Service) AddNode(ctx context.Context, input AddNodeInput) (entity.Proje
 	return saved, nil
 }
 
-func (s *Service) Connect(ctx context.Context, parentID, childID string, parentCandidate *int, replace bool) (entity.Project, error) {
+func (s *Service) Connect(ctx context.Context, parentID, childID string, parentCandidate *int, replace bool, expectedProjectID ...string) (entity.Project, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := ctx.Err(); err != nil {
 		return entity.Project{}, err
 	}
-	project, graph, err := s.loadCurrent(ctx)
+	project, graph, err := s.loadCurrentForProject(ctx, firstExpectedProjectID(expectedProjectID))
 	if err != nil {
 		return entity.Project{}, err
 	}
@@ -220,7 +221,7 @@ func (s *Service) Connect(ctx context.Context, parentID, childID string, parentC
 	return saved, nil
 }
 
-func (s *Service) MoveNode(ctx context.Context, id string, x, y float64) (entity.Project, error) {
+func (s *Service) MoveNode(ctx context.Context, id string, x, y float64, expectedProjectID ...string) (entity.Project, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := ctx.Err(); err != nil {
@@ -229,7 +230,7 @@ func (s *Service) MoveNode(ctx context.Context, id string, x, y float64) (entity
 	if err := validatePosition(x, y); err != nil {
 		return entity.Project{}, err
 	}
-	project, graph, err := s.loadCurrent(ctx)
+	project, graph, err := s.loadCurrentForProject(ctx, firstExpectedProjectID(expectedProjectID))
 	if err != nil {
 		return entity.Project{}, err
 	}
@@ -250,7 +251,7 @@ func (s *Service) MoveNode(ctx context.Context, id string, x, y float64) (entity
 	return saved, nil
 }
 
-func (s *Service) UpdateNodeParams(ctx context.Context, id, title string, params entity.NodeParams) (entity.Project, error) {
+func (s *Service) UpdateNodeParams(ctx context.Context, id, title string, params entity.NodeParams, expectedProjectID ...string) (entity.Project, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := ctx.Err(); err != nil {
@@ -259,7 +260,7 @@ func (s *Service) UpdateNodeParams(ctx context.Context, id, title string, params
 	if err := validateParams(params); err != nil {
 		return entity.Project{}, err
 	}
-	project, graph, err := s.loadCurrent(ctx)
+	project, graph, err := s.loadCurrentForProject(ctx, firstExpectedProjectID(expectedProjectID))
 	if err != nil {
 		return entity.Project{}, err
 	}
@@ -322,13 +323,13 @@ func (s *Service) EnsureExecutable(ctx context.Context, nodeID string) error {
 	return nil
 }
 
-func (s *Service) SelectNode(ctx context.Context, id string) (entity.Project, error) {
+func (s *Service) SelectNode(ctx context.Context, id string, expectedProjectID ...string) (entity.Project, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := ctx.Err(); err != nil {
 		return entity.Project{}, err
 	}
-	project, graph, err := s.loadCurrent(ctx)
+	project, graph, err := s.loadCurrentForProject(ctx, firstExpectedProjectID(expectedProjectID))
 	if err != nil {
 		return entity.Project{}, err
 	}

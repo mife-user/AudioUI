@@ -50,6 +50,41 @@ func (r *testWorkspaceRevision) workflowChanged(id string, _ int64, _ string) {
 	r.mu.Unlock()
 }
 
+func TestGraphMutationReceiptMatchesAuthoritativeSnapshot(t *testing.T) {
+	service, workflowService, revision, layout := newWorkspaceFixture(t, true)
+	activeProject, err := service.Current(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	workflowHandler := NewWorkflowService(workflowService)
+	receipt, err := workflowHandler.AddNode(AddNodeRequest{
+		ProjectID: activeProject.ID, Type: "topic", Title: "新选题",
+		Position: entity.Position{X: 535, Y: 362}, Params: entity.NodeParams{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := runservice.New(runservice.Options{Projects: service, RunStores: persistence.NewRunStoreProvider(layout)})
+	workspaceHandler := NewWorkspaceService(workflowService, manager, revision)
+	result, err := workspaceHandler.GetWorkspaceSnapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Snapshot.Project == nil || result.Snapshot.Project.ID != receipt.ProjectID || result.Snapshot.Project.Revision < receipt.ProjectRevision {
+		t.Fatalf("receipt/snapshot project mismatch: receipt=%+v project=%+v", receipt, result.Snapshot.Project)
+	}
+	var created *entity.Node
+	for i := range result.Snapshot.Nodes {
+		if result.Snapshot.Nodes[i].ID == receipt.NodeID {
+			created = &result.Snapshot.Nodes[i]
+			break
+		}
+	}
+	if created == nil || created.Type != valueobject.NodeTypeTopic || created.Position != (entity.Position{X: 535, Y: 362}) {
+		t.Fatalf("receipt node missing or differs from snapshot: receipt=%+v node=%+v", receipt, created)
+	}
+}
+
 func TestGetWorkspaceSnapshotReturnsSummariesDerivedChainsAndLocks(t *testing.T) {
 	service, workflowService, revision, layout := newWorkspaceFixture(t, true)
 	projectValue, err := service.New(context.Background(), "工作台")

@@ -6,10 +6,16 @@
 
 ## [Unreleased]
 
-M2 图与提示词（进行中：M2-00..07 已验收）。
+M2 图与提示词（进行中：M2-00..09 已验收）。
 
 ### Added
 
+- M2-09：接入并锁定 `@xyflow/react` 12.x，工作台由快照受控渲染节点和派生连线；支持新增 topic、未连接 prompt 草稿、prompt 子节点、画布平移缩放/重置/聚焦和位置防抖保存。
+- M2-09：新增 Connect 拖拽、改挂确认（子树数量、原上游、跨 topic 树与 steps 迁移提示）、后端失败回弹、SelectNode 本地选中回退、Go 派生路径高亮和运行锁节点/端口展示；候选正文读取留至 M2-10B。
+- M2-09 后续修复：图命令按发起工程 ID 校验并返回 mutation receipt；创建、连接和移动等待 receipt 对应的快照，不混淆命令提交与画布呈现；同步失败时仅重试快照读取，避免重复写入。
+- M2-09：新增确定性节点避让与创建后聚焦；首次工程载入只 fit 一次，画布 flex 高度链固定；鼠标/键盘选择与位置更新进入统一持久化路径。
+- M2-09：新增服务端回执与工作台快照一致性测试、项目切换范围回归，以及不 mock React Flow 的节点/Handle/SVG/键盘 DOM 集成测试；交互原型见 `docs/design/m2-09-canvas-demo.html`，任务自检证据见 `docs/dev/evidence/m2-09.md`。
+- M2-09：用户于 2026-11-04 在隔离工程的生产 Wails 窗口手工新增 topic 与草稿 prompt，确认「已同步」、工程 revision 与节点数增长、节点可见且不重叠；验收截图见 `docs/dev/evidence/m2-09-webview-manual.png`。
 - M2-04：`service/context.Builder` 从真实路径读取祖先最新已应用产物和对应 topic 候选，生成确定性上下文与 `contextHash`/`ancestorHash`/`paramsHash`。
 - M2-04：保守 token 估算、祖先全文→2,000 tokens 原文摘录→引用降级、完整目标参数及 `CONTEXT_TOO_LARGE` 估算/预算详情；提供实际 usage 超预算比较值对象。
 - M2-04：`RunWorkspaceReader` 作用域校验与工作区逻辑文件清单；文件正文不注入上下文，二进制资源仅引用，清单上限和截断显式标记。
@@ -28,7 +34,7 @@ M2 图与提示词（进行中：M2-00..07 已验收）。
 - M2-08A：新增一致的工作台快照、工程作用域变更事件与进程内 workspace revision；图/pending/运行锁回调携带变更所属的 projectId。
 - M2-08A：运行事件加入 projectId；新增 `GetRunSnapshot`，将运行记录、transcript、事件 lastSeq 和活动权限/问题请求置于同一同步点，保留现有运行记录磁盘格式与 `GetRun`。
 - M2-08A：增加工作台链/pending/run 摘要、路径锁快照与并发事件恢复测试；实现自检证据见 `docs/dev/evidence/m2-08a.md`。
-- M2-08B：接入工程切换、工作台快照同步及按 runId 恢复的运行控制台；自动测试与构建通过。用户于 2026-11-03 按截图更名完成验收，证据见 `docs/dev/evidence/m2-08b.md` 与 `docs/dev/evidence/m2-08b.png`。
+- M2-08B：接入工程切换、工作台快照同步及按 runId 恢复的运行控制台；自动测试与构建通过。用户于 2026-11-03 指定截图更名作为验收条件，并于 2026-11-04 确认完成验收，证据见 `docs/dev/evidence/m2-08b.md` 与 `docs/dev/evidence/m2-08b.png`。
 - M2-02：`service/workflow` 图命令层——`AddNode`（topic 根 / 带父 prompt / 草稿）、`Connect`（改挂确认）、`MoveNode`（位置）、`UpdateNodeParams`、`SelectNode`、`EnsureExecutable`。
 - M2-02：单父树校验（无环、自连、topic 根、草稿父拒绝）、子树 `stale` 传播与 revision 规则；`SelectNode` 不递增 revision、不广播。
 - M2-02：topic 候选端口解析——0 基 `parentCandidate` 从最新已应用 `topics` 产物计数；非法候选返回 `CANDIDATE_INVALID`；父为 prompt/草稿时清空候选。
@@ -73,9 +79,14 @@ M2 图与提示词（进行中：M2-00..07 已验收）。
 - `SelectNode` 只持久化 `activeNodeId`，不递增图 revision、不广播；选中与切换链为本地视图操作。
 - M2 设计审计：统一 `scene_dsl` 命名与 `RunSpec`/`AgentRun` 命名；`RUN_ALREADY_ACTIVE` 在 M2 统一为 `BUSY`；节点补 `title` 字段；`parentCandidate` 明确为 0 基。
 
+### Fixed
+
+- M2-09：修复快照并发刷新时创建命令可成功但画布未确认新节点的问题；只有同一工程、足够的工程 revision 与目标节点 ID 都出现在工作台快照后才完成同步。快照失败保留已提交 receipt 并提示只重试读取，禁止重复创建/连接/移动；工程切换不会把迟到命令写入另一工程。
+- M2-09：修复画布高度依赖不确定百分比链、同工程旧快照覆盖本地选择、键盘移动/选择未持久化、节点初始位置重叠，以及改挂提交期间可取消等交互问题。高度链、React Flow DOM 与键盘能力通过自动化测试，创建与快照同步链路已由用户在真实 Wails 窗口手工确认。
+
 ### 说明
 
-- 本节记录 M2 设计与 M2-01..07 后端实现；M2-06/M2-07 已由用户验收；画布、选题/提示词 UI、前端事件桥、GUI/live CLI 与 M2 整体验收仍待后续任务。
+- 本节记录 M2 设计与 M2-01..07 后端实现及后续进展；M2-06/M2-07、M2-08、M2-09 已由用户验收；选题/提示词流程、GUI/live CLI 与 M2 整体验收仍待后续任务。
 
 ---
 
