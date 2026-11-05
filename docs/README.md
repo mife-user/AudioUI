@@ -1,5 +1,7 @@
 # 文档索引
 
+> 现行 M2 基线和新目标设计并存：产品目标见 [PRD 1.1](prd.md#11-新目标需求草案未实现)，设计见 ADR-027/028，是否排入当前批次以[路线图](dev/roadmap.md)和用户决定为准。旧原型及验收证据不代表新目标已实现。
+
 | 文档 | 读者 | 状态 | 说明 |
 |---|---|---|---|
 | [product.md](product.md) | 产品 / 设计 / 开发 | 草案 | 产品总览：概念、流程、架构、数据模型 |
@@ -27,6 +29,7 @@
 | [dev/evidence/m2-07.md](dev/evidence/m2-07.md) | 产品 / 测试 | 证据 | M2-07 运行管理与运行锁自检及验收记录 |
 | [dev/evidence/m2-09.md](dev/evidence/m2-09.md) | 产品 / 测试 | 证据 | M2-09 画布与节点连接实现自检、门禁结果、真实窗口验收和 AC 映射（已验收） |
 | [dev/evidence/m2-10a.md](dev/evidence/m2-10a.md) | 产品 / 测试 | 证据 | M2-10A 选题参数与一次性运行验收证据（已验收；M2-10B/10C 未开始） |
+| [design/target-agent-flow-demo.html](design/target-agent-flow-demo.html) | 产品 / 设计 / 开发 | 目标演示 | 候选节点、提示词、Agent、指定/自动生成输出及改挂上下文；模拟数据，未实现 |
 | [agent-protocol.md](agent-protocol.md) | 开发 | 草案 | MCP 工具、能力位、权限、会话 |
 | [acceptance.md](acceptance.md) | 产品 / 测试 | 草案 | 验收标准与发布门禁 |
 | [decisions.md](decisions.md) | 开发 | 草案 | 架构决策记录 |
