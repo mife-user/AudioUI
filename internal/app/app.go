@@ -35,6 +35,10 @@ type Config struct {
 
 // Run starts the GUI or one of the headless diagnostic modes.
 func Run(cfg Config) int {
+	if err := disableSDKVersionProbe(); err != nil {
+		fmt.Fprintf(os.Stderr, "AudioUI 无法配置 Agent SDK: %v\n", err)
+		return 1
+	}
 	mode := parseMode(os.Args[1:])
 	switch mode {
 	case modeVersion:
@@ -88,39 +92,16 @@ func Run(cfg Config) int {
 
 	bus := newWailsEventBus()
 	workspaceCoordinator := newWorkspaceCoordinator(bus)
-	projectSetup := newProjectSetup(layout, logger.Zap, workspaceCoordinator.ProjectChanged)
-	workflowSetup := newWorkflowSetup(layout, projectSetup.service, workspaceCoordinator.WorkflowChanged)
-	if activeProject, err := projectSetup.service.Current(context.Background()); err == nil {
-		workspaceCoordinator.Initialize(activeProject.ID, activeProject.Revision)
-	} else {
-		workspaceCoordinator.Initialize("", 0)
-		if !errors.Is(err, project.ErrNoActiveProject) {
-			logger.Zap.Warn("workspace initial project unavailable", zap.Error(err))
-		}
-	}
-	agentSetup := newAgentSetup(layout)
-	runSetup, err := newRunSetup(layout, cfg.Version, logger.Zap, bus, projectSetup.service, workflowSetup.service)
-	if err != nil {
-		logger.Zap.Error("run setup failed", zap.Error(err))
-		winmsg.Error("AudioUI 启动失败", "运行管理初始化失败: "+err.Error())
-		return 1
-	}
-	workspaceHandler := handler.NewWorkspaceService(workflowSetup.service, runSetup.manager, workspaceCoordinator)
-
 	var mainWindow atomic.Pointer[application.WebviewWindow]
 	var pendingFocus atomic.Bool
+	var agentComponents *agentSetup
+	var runComponents *runSetup
 
+	// Acquire the single-instance lock before project initialization or recovery
+	// can mutate run data. SDK CLI version probes may launch this executable too.
 	app := application.New(application.Options{
 		Name:        appName,
 		Description: "本地运行的节点化内容生产工作台",
-		Services: []application.Service{
-			application.NewService(systemHandler),
-			application.NewService(projectSetup.handler),
-			application.NewService(workflowSetup.handler),
-			application.NewService(agentSetup.handler),
-			application.NewService(runSetup.handler),
-			application.NewService(workspaceHandler),
-		},
 		Assets: application.AssetOptions{
 			Handler: application.AssetFileServerFS(cfg.Assets),
 		},
@@ -144,13 +125,49 @@ func Run(cfg Config) int {
 			winmsg.Error("AudioUI 运行错误", err.Error())
 		},
 		OnShutdown: func() {
-			runSetup.manager.Close()
-			agentSetup.session.Close()
-			if runSetup.audit != nil {
-				_ = runSetup.audit.Close()
+			if runComponents != nil {
+				if runComponents.manager != nil {
+					runComponents.manager.Close()
+				}
+				if runComponents.audit != nil {
+					_ = runComponents.audit.Close()
+				}
+			}
+			if agentComponents != nil && agentComponents.session != nil {
+				agentComponents.session.Close()
 			}
 		},
 	})
+
+	projectSetup := newProjectSetup(layout, logger.Zap, workspaceCoordinator.ProjectChanged)
+	workflowSetup := newWorkflowSetup(layout, projectSetup.service, workspaceCoordinator.WorkflowChanged)
+	if activeProject, err := projectSetup.service.Current(context.Background()); err == nil {
+		workspaceCoordinator.Initialize(activeProject.ID, activeProject.Revision)
+	} else {
+		workspaceCoordinator.Initialize("", 0)
+		if !errors.Is(err, project.ErrNoActiveProject) {
+			logger.Zap.Warn("workspace initial project unavailable", zap.Error(err))
+		}
+	}
+	agentComponents = newAgentSetup(layout)
+	runComponents, err = newRunSetup(layout, cfg.Version, logger.Zap, bus, projectSetup.service, workflowSetup.service)
+	if err != nil {
+		logger.Zap.Error("run setup failed", zap.Error(err))
+		winmsg.Error("AudioUI 启动失败", "运行管理初始化失败: "+err.Error())
+		return 1
+	}
+	workspaceHandler := handler.NewWorkspaceService(workflowSetup.service, runComponents.manager, workspaceCoordinator)
+
+	for _, service := range []application.Service{
+		application.NewService(systemHandler),
+		application.NewService(projectSetup.handler),
+		application.NewService(workflowSetup.handler),
+		application.NewService(agentComponents.handler),
+		application.NewService(runComponents.handler),
+		application.NewService(workspaceHandler),
+	} {
+		app.RegisterService(service)
+	}
 
 	window := app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Name:             "main",

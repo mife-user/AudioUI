@@ -18,7 +18,10 @@ var (
 	absoluteExePattern  = regexp.MustCompile(`([A-Za-z]:\\[^"\r\n]*?claude\.exe)`)
 )
 
-const minimumCLIVersion = "2.1.224"
+const (
+	minimumCLIVersion    = "2.1.224"
+	nativeResolveTimeout = 10 * time.Second
+)
 
 type NativeCLI struct {
 	Path    string
@@ -26,6 +29,8 @@ type NativeCLI struct {
 }
 
 func ResolveNative(ctx context.Context, explicit string) (NativeCLI, error) {
+	ctx, cancel := context.WithTimeout(ctx, nativeResolveTimeout)
+	defer cancel()
 	candidates := candidatePaths(explicit)
 	seen := map[string]bool{}
 	var lastErr error

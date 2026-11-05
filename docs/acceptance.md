@@ -142,13 +142,13 @@
 
 ## 4. 测试矩阵
 
-M2-07 的运行管理组件测试覆盖一次性会话、BUSY/资源释放、活动运行租约、usage 持久化、路径锁与重启恢复。该组件覆盖不表示 AC-M2-9 的 GUI 关闭/重启验收、真实 CLI 验收或 AC-M2-11 的完整端到端验收已通过；这些项目保留在 M2-13。
+M2-07 的运行管理组件测试覆盖一次性会话、BUSY/资源释放、活动运行租约、usage 持久化、路径锁、重启恢复，以及 per-run MCP 配置在启动前可读并仅在终态清理。该组件覆盖不表示 AC-M2-9 的 GUI 关闭/重启验收、真实 CLI 验收或 AC-M2-11 的完整端到端验收已通过；这些项目保留在 M2-13。
 
 | 类型 | 范围 | 工具/方式 |
 |---|---|---|
 | 单元 | domain 实体、校验、缓存键 | Go test |
 | 上下文 | 路径祖先、候选解析、token 估算、预算降级、哈希 | Go test + golden |
-| 运行 | 一次性会话、TurnGate、中断标记、运行路径锁、每运行 token | Go test + live CLI |
+| 运行 | 一次性会话、TurnGate、中断标记、运行路径锁、每运行 MCP 配置写入/启动前校验/host 边界复验/终态清理、每运行 token | Go test + live CLI |
 | 图 | 改挂/子树移动、候选端口、单父/无环/运行锁 | Go test |
 | 协议 | stream-json 事件解析、权限应答、MCP 工具清单/作用域、reply 原始 payload 与 pending、read_artifact 候选过滤/UTF-8 分块/限额/歧义拒绝 | 回放 fixture + MCP 集成 |
 | 渲染 | DSL 解析、golden frame | 截图对比 |

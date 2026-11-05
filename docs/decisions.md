@@ -120,7 +120,7 @@
 ## ADR-018 Windows Agent Host 代理
 
 - **背景**：Claude CLI 是 console 子系统；SDK 直接启动会闪控制台，且只终止直接子进程。Windows batch shim 又有命令注入风险。
-- **决策**：同一 exe 以 `AUDIOUI_AGENT_HOST=1` 作为 stdio 代理启动；代理用 `CREATE_NO_WINDOW` 隐藏原生 Claude，用 Windows Job Object（kill-on-close）绑定子进程树，并透明转发参数/标准流。SDK 的 CLI 路径指向该 exe，原生路径由环境变量传入。
+- **决策**：同一 exe 以 `AUDIOUI_AGENT_HOST=1` 作为 stdio 代理启动；代理用 `CREATE_NO_WINDOW` 隐藏原生 Claude，用 Windows Job Object（kill-on-close）绑定子进程树，并透明转发参数/标准流。SDK 的 CLI 路径指向该 exe，原生路径由环境变量传入。主 GUI 在工程初始化与 `starting`/`running` 恢复前取得单实例锁，避免二次启动清理活动运行；因 SDK 的版本探测目标是该 host 而非 Claude CLI，应用关闭 SDK 重复探测，原生 CLI 版本仍由 `ResolveNative` 校验，`-v` 只输出版本并立即退出。
 - **代价**：多一层进程与转发；host 模式必须避免递归、stdout 只能承载 Claude 协议数据。
 - **回退**：spike 失败时直接启动原生 CLI，记录 RM；不得接受无界子进程泄漏。
 

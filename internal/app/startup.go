@@ -1,6 +1,18 @@
 package app
 
-import "fmt"
+import (
+	"fmt"
+	"os"
+)
+
+const sdkSkipVersionCheckEnv = "CLAUDE_AGENT_SDK_SKIP_VERSION_CHECK"
+
+// disableSDKVersionProbe prevents the SDK from treating AudioUI's host
+// executable as the Claude CLI. The native Claude CLI is version-checked by
+// claudecli.ResolveNative before every run.
+func disableSDKVersionProbe() error {
+	return os.Setenv(sdkSkipVersionCheckEnv, "1")
+}
 
 type runMode int
 
@@ -14,7 +26,7 @@ const (
 func parseMode(args []string) runMode {
 	for _, arg := range args {
 		switch arg {
-		case "--version", "-version":
+		case "--version", "-version", "-v":
 			return modeVersion
 		case "--help", "-h", "-help":
 			return modeHelp
@@ -30,7 +42,7 @@ func printHelp() {
 	fmt.Println()
 	fmt.Println("用法:")
 	fmt.Println("  audio-ui.exe              启动工作台")
-	fmt.Println("  audio-ui.exe --version    输出版本")
+	fmt.Println("  audio-ui.exe --version, -v 输出版本")
 	fmt.Println("  audio-ui.exe --self-check 无界面环境自检并写入 logs/self-check.json")
 	fmt.Println()
 	fmt.Println("环境变量:")

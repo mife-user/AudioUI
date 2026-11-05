@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"sync"
 	"testing"
@@ -52,6 +54,9 @@ func TestStartRunUsesOneShotSpecAndPersistsTerminalUsage(t *testing.T) {
 	if h.driver.spec.MCPConfigPath == "" || h.driver.spec.MCPToken != "secret-test-token" {
 		t.Fatalf("MCP credentials missing from driver spec: %+v", h.driver.spec)
 	}
+	if _, err := os.Stat(h.driver.spec.MCPConfigPath); err != nil {
+		t.Fatalf("MCP config should exist throughout the active run: %v", err)
+	}
 	if !errors.Is(func() error { _, err := h.manager.Start(context.Background(), "n_other"); return err }(), ErrBusy) {
 		t.Fatal("parallel run should be rejected with BUSY")
 	}
@@ -72,6 +77,9 @@ func TestStartRunUsesOneShotSpecAndPersistsTerminalUsage(t *testing.T) {
 	if !h.workflow.released || !h.configs.cleaned || !h.tool.stopped || !h.session.closed {
 		t.Fatalf("cleanup incomplete: workflow=%v config=%v tool=%v session=%v", h.workflow.released, h.configs.cleaned, h.tool.stopped, h.session.closed)
 	}
+	if _, err := os.Stat(h.driver.spec.MCPConfigPath); !os.IsNotExist(err) {
+		t.Fatalf("MCP config should be removed after the run, stat error = %v", err)
+	}
 	waitFor(t, func() bool { return len(h.publisher.snapshot()) >= 3 })
 	events := h.publisher.snapshot()
 	if len(events) < 3 {
@@ -81,6 +89,39 @@ func TestStartRunUsesOneShotSpecAndPersistsTerminalUsage(t *testing.T) {
 		if event.RunID != record.ID || event.ProjectID != "p_test" || event.TreeID != "n_topic" || event.NodeID != "n_topic" || !slices.Equal(event.ChainPath, []string{"n_topic"}) {
 			t.Fatalf("run event identity missing: %+v", event)
 		}
+	}
+}
+
+func TestStartResolvesDriverAgainAfterUnavailableProbe(t *testing.T) {
+	h := newRunHarness(t)
+	h.manager.opts.Driver = nil
+	attempts := 0
+	h.manager.opts.DriverProvider = func(context.Context) (port.AgentDriver, error) {
+		attempts++
+		if attempts == 1 {
+			return nil, errors.New("native CLI unavailable")
+		}
+		return h.driver, nil
+	}
+
+	if _, err := h.manager.Start(context.Background(), "n_topic"); err == nil || ErrorCode(err) != "AGENT_UNAVAILABLE" {
+		t.Fatalf("first Start error = %v, want AGENT_UNAVAILABLE", err)
+	}
+	if h.manager.IsBusy() || h.workflow.locked {
+		t.Fatal("unavailable driver left a run or graph lock active")
+	}
+
+	record, err := h.manager.Start(context.Background(), "n_topic")
+	if err != nil {
+		t.Fatalf("second Start error = %v", err)
+	}
+	if attempts != 2 {
+		t.Fatalf("driver provider attempts = %d, want 2", attempts)
+	}
+	h.driver.spec.EventSink(valueobject.AgentEvent{Type: valueobject.EventStatus, State: &valueobject.AgentState{Status: valueobject.SessionIdle}})
+	waitFor(t, func() bool { return !h.manager.IsBusy() })
+	if _, err := h.store.Load(context.Background(), record.ID); err != nil {
+		t.Fatalf("load completed run: %v", err)
 	}
 }
 
@@ -523,7 +564,7 @@ func newRunHarness(t *testing.T) *runHarness {
 	workflow := &fakeWorkflow{project: project, path: []string{"n_topic"}}
 	projects := &fakeProjects{project: project, config: valueobject.AppConfig{ContextTokenBudget: 100}}
 	store := &memoryRunStore{records: make(map[string]entity.RunRecord)}
-	configs := &fakeRunConfigs{}
+	configs := &fakeRunConfigs{root: t.TempDir()}
 	tool := &fakeTool{token: "secret-test-token", stopStarted: make(chan struct{}, 1)}
 	toolFactory := &fakeToolFactory{tool: tool}
 	session := &fakeAgentSession{}
@@ -691,15 +732,25 @@ func (s *memoryRunStore) Save(_ context.Context, record entity.RunRecord) error 
 }
 
 type fakeRunConfigs struct {
+	root       string
 	mu         sync.Mutex
 	cleaned    bool
 	cleanedIDs []string
 }
 
 func (c *fakeRunConfigs) Prepare(_ context.Context, projectID, runID string) (string, error) {
-	return `C:\data\agent\` + projectID + `\` + runID + `\mcp.json`, nil
+	dir := filepath.Join(c.root, projectID, runID)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "mcp.json"), nil
 }
-func (c *fakeRunConfigs) Cleanup(_ context.Context, _, runID string) error {
+func (c *fakeRunConfigs) Cleanup(_ context.Context, projectID, runID string) error {
+	if c.root != "" {
+		if err := os.RemoveAll(filepath.Join(c.root, projectID, runID)); err != nil {
+			return err
+		}
+	}
 	c.mu.Lock()
 	c.cleaned = true
 	c.cleanedIDs = append(c.cleanedIDs, runID)
@@ -736,9 +787,14 @@ func (t *fakeTool) Stop(context.Context) error {
 	}
 	return nil
 }
-func (*fakeTool) URL() string              { return "http://127.0.0.1:1/mcp" }
-func (t *fakeTool) Token() string          { return t.token }
-func (*fakeTool) WriteConfig(string) error { return nil }
+func (*fakeTool) URL() string     { return "http://127.0.0.1:1/mcp" }
+func (t *fakeTool) Token() string { return t.token }
+func (*fakeTool) WriteConfig(path string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	return os.WriteFile(path, []byte(`{"mcpServers":{"audioui":{"type":"http","url":"http://127.0.0.1:1/mcp"}}}`), 0o600)
+}
 
 type fakePermissionFactory struct{ permissions *fakeRunPermissions }
 
@@ -788,6 +844,9 @@ type fakeDriver struct {
 
 func (d *fakeDriver) Start(_ context.Context, spec port.DriverSpec) (port.AgentSession, error) {
 	d.spec = spec
+	if _, err := os.Stat(spec.MCPConfigPath); err != nil {
+		return nil, fmt.Errorf("MCP_CONFIG_NOT_FOUND: %w", err)
+	}
 	if d.startErr != nil {
 		return nil, d.startErr
 	}

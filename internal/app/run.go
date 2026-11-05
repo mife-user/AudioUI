@@ -51,18 +51,9 @@ func newRunSetup(layout valueobject.Layout, version string, logger *zap.Logger, 
 	permissionFactory := &runPermissionFactory{audit: auditLogger}
 
 	resolveCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	native, nativeErr := claudecli.ResolveNative(resolveCtx, os.Getenv("AUDIOUI_CLAUDE_PATH"))
+	_, nativeErr := claudecli.ResolveNative(resolveCtx, os.Getenv("AUDIOUI_CLAUDE_PATH"))
 	cancel()
-	var driver port.AgentDriver
-	if nativeErr == nil {
-		hostPath, execErr := os.Executable()
-		if execErr != nil {
-			hostPath = ""
-		}
-		driver = claudecli.NewDriver(native, hostPath, func(format string, args ...any) {
-			logger.Info("agent", zap.String("detail", fmt.Sprintf(format, args...)))
-		})
-	} else {
+	if nativeErr != nil {
 		logger.Warn("claude native cli unavailable", zap.Error(nativeErr))
 	}
 
@@ -73,7 +64,11 @@ func newRunSetup(layout valueobject.Layout, version string, logger *zap.Logger, 
 		Projects: projectService, Workflow: workflowService,
 		Contexts: contextBuilder, Workspaces: workspace.NewRunProvider(layout),
 		RunStores: persistence.NewRunStoreProvider(layout), RunConfigs: paths.NewRunConfigStore(layout),
-		ToolServers: toolServers, Permissions: permissionFactory, Driver: driver, Publisher: bus,
+		ToolServers: toolServers, Permissions: permissionFactory,
+		DriverProvider: func(ctx context.Context) (port.AgentDriver, error) {
+			return resolveNativeDriver(ctx, logger)
+		},
+		Publisher: bus,
 		Logf: func(format string, args ...any) {
 			logger.Info("run", zap.String("detail", fmt.Sprintf(format, args...)))
 		},
@@ -86,4 +81,18 @@ func newRunSetup(layout valueobject.Layout, version string, logger *zap.Logger, 
 	}
 	projectService.SetRunActiveCheck(manager.IsBusy)
 	return &runSetup{handler: handler.NewRunService(manager), manager: manager, audit: auditLogger}, nil
+}
+
+func resolveNativeDriver(ctx context.Context, logger *zap.Logger) (port.AgentDriver, error) {
+	native, err := claudecli.ResolveNative(ctx, os.Getenv("AUDIOUI_CLAUDE_PATH"))
+	if err != nil {
+		return nil, err
+	}
+	hostPath, err := os.Executable()
+	if err != nil {
+		hostPath = ""
+	}
+	return claudecli.NewDriver(native, hostPath, func(format string, args ...any) {
+		logger.Info("agent", zap.String("detail", fmt.Sprintf(format, args...)))
+	}), nil
 }

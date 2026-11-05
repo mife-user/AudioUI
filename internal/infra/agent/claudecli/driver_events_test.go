@@ -295,3 +295,17 @@ func TestPermissionPathsCollectsKnownKeys(t *testing.T) {
 		t.Fatalf("paths = %v", paths)
 	}
 }
+
+func TestResultMessagePreservesMissingMCPConfigError(t *testing.T) {
+	rec := &eventRecorder{}
+	session := newEventSession(rec)
+	session.spec.MCPConfigPath = `C:\data\agent\p_test\r_test\mcp.json`
+	session.diagnostics = &startupDiagnostics{}
+	session.diagnostics.observeStderr("MCP config file not found: " + session.spec.MCPConfigPath)
+
+	session.handle(&claudecode.ResultMessage{IsError: true, Errors: []string{"Invalid MCP configuration"}})
+
+	if len(rec.events) != 2 || rec.events[0].Error == nil || rec.events[0].Error.Code != "MCP_CONFIG_NOT_FOUND" {
+		t.Fatalf("MCP config failure events = %+v", rec.events)
+	}
+}

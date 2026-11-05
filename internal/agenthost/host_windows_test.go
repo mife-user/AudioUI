@@ -3,6 +3,9 @@
 package agenthost
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -51,5 +54,33 @@ func TestIsHostReadsModeEnv(t *testing.T) {
 	t.Setenv(EnvMode, "")
 	if IsHost() {
 		t.Fatal("IsHost() = true without AUDIOUI_AGENT_HOST")
+	}
+}
+
+func TestMCPConfigArgumentAcceptsBothForms(t *testing.T) {
+	for _, args := range [][]string{
+		{"--mcp-config", `C:\data\mcp.json`},
+		{`--mcp-config=C:\data\mcp.json`},
+	} {
+		path, ok := mcpConfigArgument(args)
+		if !ok || path != `C:\data\mcp.json` {
+			t.Fatalf("mcpConfigArgument(%v) = %q, %v", args, path, ok)
+		}
+	}
+}
+
+func TestValidateMCPConfigPath(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "mcp.json")
+	if err := validateMCPConfigPath(path); err == nil || !strings.HasPrefix(err.Error(), "MCP_CONFIG_NOT_FOUND:") {
+		t.Fatalf("missing config error = %v", err)
+	}
+	if err := os.WriteFile(path, []byte(`{"mcpServers":{}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateMCPConfigPath(path); err != nil {
+		t.Fatalf("existing config error = %v", err)
+	}
+	if err := validateMCPConfigPath(t.TempDir()); err == nil || !strings.HasPrefix(err.Error(), "MCP_CONFIG_INVALID:") {
+		t.Fatalf("directory config error = %v", err)
 	}
 }

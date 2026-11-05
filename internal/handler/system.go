@@ -88,13 +88,13 @@ type LogEntryDTO struct {
 }
 
 func (h *SystemService) GetEnvironment() EnvironmentDTO {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
 	defer cancel()
 	return toEnvironmentDTO(h.service.Environment(ctx))
 }
 
 func (h *SystemService) RefreshEnvironment() EnvironmentDTO {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
 	defer cancel()
 	return toEnvironmentDTO(h.service.Refresh(ctx))
 }

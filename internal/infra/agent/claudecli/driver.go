@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -20,6 +21,96 @@ type Driver struct {
 	Native   NativeCLI
 	HostPath string
 	Logf     func(format string, args ...any)
+}
+
+type startupDiagnostics struct {
+	mu                 sync.Mutex
+	mcpConfigErrorCode string
+}
+
+func (d *startupDiagnostics) observeStderr(line string) {
+	code := mcpConfigCodeFromMessage(line)
+	if code == "" {
+		return
+	}
+	d.mu.Lock()
+	if d.mcpConfigErrorCode == "" || code == "MCP_CONFIG_NOT_FOUND" {
+		d.mcpConfigErrorCode = code
+	}
+	d.mu.Unlock()
+}
+
+func (d *startupDiagnostics) mcpConfigFailureCode() string {
+	if d == nil {
+		return ""
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.mcpConfigErrorCode
+}
+
+func mcpConfigCodeFromMessage(message string) string {
+	switch {
+	case strings.Contains(message, "MCP_CONFIG_NOT_FOUND:") || strings.Contains(message, "MCP config file not found:"):
+		return "MCP_CONFIG_NOT_FOUND"
+	case strings.Contains(message, "MCP_CONFIG_UNREADABLE:"):
+		return "MCP_CONFIG_UNREADABLE"
+	case strings.Contains(message, "MCP_CONFIG_INVALID:") || strings.Contains(message, "Invalid MCP configuration"):
+		return "MCP_CONFIG_INVALID"
+	default:
+		return ""
+	}
+}
+
+func mcpConfigFailureMessage(code, path string) string {
+	switch code {
+	case "MCP_CONFIG_NOT_FOUND":
+		return "MCP config file not found: " + path
+	case "MCP_CONFIG_UNREADABLE":
+		return "MCP config file cannot be read: " + path
+	case "MCP_CONFIG_INVALID":
+		return "MCP config file is invalid: " + path
+	default:
+		return code + ": " + path
+	}
+}
+
+func validateMCPConfig(path string) error {
+	if strings.TrimSpace(path) == "" {
+		return errors.New("MCP_CONFIG_NOT_FOUND: MCP config path is empty")
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("MCP_CONFIG_NOT_FOUND: %s", path)
+		}
+		return fmt.Errorf("MCP_CONFIG_UNREADABLE: %s: %w", path, err)
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("MCP_CONFIG_INVALID: not a regular file: %s", path)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("MCP_CONFIG_UNREADABLE: %s: %w", path, err)
+	}
+	var config struct {
+		MCPServers map[string]json.RawMessage `json:"mcpServers"`
+	}
+	if err := json.Unmarshal(data, &config); err != nil || len(config.MCPServers) == 0 {
+		return fmt.Errorf("MCP_CONFIG_INVALID: %s", path)
+	}
+	return nil
+}
+
+func agentStartError(err error, configPath string, diagnostics *startupDiagnostics) error {
+	code := diagnostics.mcpConfigFailureCode()
+	if code == "" {
+		code = mcpConfigCodeFromMessage(err.Error())
+	}
+	if code != "" {
+		return fmt.Errorf("%s: %s", code, configPath)
+	}
+	return fmt.Errorf("AGENT_START_FAILED: %w", err)
 }
 
 func NewDriver(native NativeCLI, hostPath string, logf func(string, ...any)) *Driver {
@@ -38,28 +129,37 @@ func (d *Driver) Resume(ctx context.Context, spec port.DriverSpec, ref json.RawM
 }
 
 func (d *Driver) start(ctx context.Context, spec port.DriverSpec, ref json.RawMessage) (port.AgentSession, error) {
-	options, err := d.options(spec, ref)
+	if err := validateMCPConfig(spec.MCPConfigPath); err != nil {
+		return nil, err
+	}
+	diagnostics := &startupDiagnostics{}
+	options, err := d.optionsWithStderr(spec, ref, diagnostics.observeStderr)
 	if err != nil {
 		return nil, err
 	}
 	client := claudecode.NewClient(options...)
 	if err := client.Connect(ctx); err != nil {
-		return nil, fmt.Errorf("AGENT_UNAVAILABLE: %w", err)
+		return nil, agentStartError(err, spec.MCPConfigPath, diagnostics)
 	}
 	sessionCtx, cancel := context.WithCancel(context.Background())
 	s := &agentSession{
-		driver:   d,
-		spec:     spec,
-		client:   client,
-		ctx:      sessionCtx,
-		cancel:   cancel,
-		streamID: fmt.Sprintf("stream-%d", time.Now().UnixNano()),
+		driver:      d,
+		spec:        spec,
+		client:      client,
+		ctx:         sessionCtx,
+		cancel:      cancel,
+		streamID:    fmt.Sprintf("stream-%d", time.Now().UnixNano()),
+		diagnostics: diagnostics,
 	}
 	go s.readLoop()
 	return s, nil
 }
 
 func (d *Driver) options(spec port.DriverSpec, ref json.RawMessage) ([]claudecode.Option, error) {
+	return d.optionsWithStderr(spec, ref, nil)
+}
+
+func (d *Driver) optionsWithStderr(spec port.DriverSpec, ref json.RawMessage, observeStderr func(string)) ([]claudecode.Option, error) {
 	binary := d.Native.Path
 	opts := []claudecode.Option{
 		claudecode.WithCLIPath(binary),
@@ -71,6 +171,9 @@ func (d *Driver) options(spec port.DriverSpec, ref json.RawMessage) ([]claudecod
 		claudecode.WithPermissionMode(claudecode.PermissionModeDefault),
 		claudecode.WithIncludePartialMessages(true),
 		claudecode.WithStderrCallback(func(line string) {
+			if observeStderr != nil {
+				observeStderr(line)
+			}
 			d.Logf("claude stderr: %s", sanitize(line))
 		}),
 		claudecode.WithCanUseTool(func(ctx context.Context, tool string, input map[string]any, _ claudecode.ToolPermissionContext) (claudecode.PermissionResult, error) {
@@ -179,6 +282,7 @@ type agentSession struct {
 	client          claudecode.Client
 	ctx             context.Context
 	cancel          context.CancelFunc
+	diagnostics     *startupDiagnostics
 	streamID        string
 	streamFinalized bool
 	inputUsage      *int
@@ -222,8 +326,18 @@ func (s *agentSession) readLoop() {
 			if msg == nil {
 				if s.ctx.Err() == nil {
 					err := s.client.Err()
+					code := "SESSION_ENDED"
+					message := errorString(err)
+					configCode := s.diagnostics.mcpConfigFailureCode()
+					if configCode == "" {
+						configCode = mcpConfigCodeFromMessage(message)
+					}
+					if configCode != "" {
+						code = configCode
+						message = mcpConfigFailureMessage(configCode, s.spec.MCPConfigPath)
+					}
 					s.emit(valueobject.AgentEvent{Version: 1, Type: valueobject.EventError, Error: &valueobject.AgentError{
-						Code: "SESSION_ENDED", Message: errorString(err), Recoverable: true,
+						Code: code, Message: message, Recoverable: true,
 					}})
 				}
 				return
@@ -302,8 +416,18 @@ func (s *agentSession) handle(msg claudecode.Message) {
 		// budget compares against the first AssistantMessage usage instead.
 		actualInputTokens := s.firstInputUsage()
 		if m.IsError {
+			message := strings.Join(m.Errors, "; ")
+			code := "TURN_FAILED"
+			configCode := s.diagnostics.mcpConfigFailureCode()
+			if configCode == "" {
+				configCode = mcpConfigCodeFromMessage(message)
+			}
+			if configCode != "" {
+				code = configCode
+				message = mcpConfigFailureMessage(configCode, s.spec.MCPConfigPath)
+			}
 			s.emit(valueobject.AgentEvent{Version: 1, Type: valueobject.EventError, Error: &valueobject.AgentError{
-				Code: "TURN_FAILED", Message: strings.Join(m.Errors, "; "), Recoverable: true,
+				Code: code, Message: message, Recoverable: true,
 			}, ActualInputTokens: actualInputTokens})
 			status = valueobject.SessionError
 		}

@@ -48,10 +48,10 @@
 | 项 | 约定 |
 |---|---|
 | MCP 传输 | Streamable HTTP，仅监听 `127.0.0.1`，随机端口 |
-| 配置 | App 在 `<exe>/data/agent/<projectId>/<runId>/mcp.json` 生成配置，使用 `--strict-mcp-config`；不写 OS temp |
+| 配置 | App 在 `<exe>/data/agent/<projectId>/<runId>/mcp.json` 生成配置，使用 `--strict-mcp-config`；适配器验证 JSON，Windows host 在启动原生 CLI 前再次验证文件存在且可读；不写 OS temp |
 | 鉴权 | **每运行**独立 bearer token；`Authorization: Bearer <token>` |
 | 作用域 | token → runId + treeId（topic 根）+ nodeId；工具只能访问本运行目标节点与该运行路径的祖先 |
-| 运行 | 每次节点执行启动一次性会话；原生 `claude.exe`，stream-json 双向，`--permission-prompt-tool stdio` |
+| 运行 | 每次节点执行启动一次性会话；原生 `claude.exe`，stream-json 双向，`--permission-prompt-tool stdio`；SDK 的 host 版本探测关闭，原生 CLI 版本由 `ResolveNative` 校验 |
 | 权限 | `PreToolUse` 硬门禁 + `CanUseTool` 交互确认 |
 | 服务器名 | `audioui`；工具名 `mcp__audioui__<tool>` |
 | `alwaysLoad` | `true`，避免依赖 `ToolSearch` |
@@ -306,7 +306,7 @@ Schema（M2 最小）：
 | `result` | `RunCompleted`（含 usage） |
 | 错误/断连 | `RunErrored` |
 
-当前运行由 Wails `RunService` 一次启动并发送首条上下文消息；`Start` 仅在 MCP/权限/driver 完成初始化并成功提交首条消息后返回。M2 同时只允许一个在途运行，竞争请求立即返回 `BUSY`。运行历史经 `ListRuns`/`GetRun` 读取；`Interrupt`、`RespondPermission` 与 `RespondQuestion` 按 runId 定位活动运行。启动时，所有工程中遗留的 `starting`/`running` 记录转为 `interrupted`，不会恢复 Agent 会话。
+当前运行由 Wails `RunService` 一次启动并发送首条上下文消息；`Start` 仅在 MCP/权限/driver 完成初始化并成功提交首条消息后返回。M2 同时只允许一个在途运行，竞争请求立即返回 `BUSY`。运行历史经 `ListRuns`/`GetRun` 读取；`Interrupt`、`RespondPermission` 与 `RespondQuestion` 按 runId 定位活动运行。主 GUI 仅在取得单实例锁后执行启动恢复：所有工程中遗留的 `starting`/`running` 记录转为 `interrupted`，不会恢复 Agent 会话。
 
 ### 8.1 工作台启动 RPC（非 Agent/CLI/MCP 协议）
 
@@ -408,6 +408,10 @@ run:request_resolved { v, seq, runId, projectId, treeId, chainId, nodeId, chainP
 | `BUSY` | 已有在途运行 |
 | `AUDIT_UNAVAILABLE` | 审计写失败，拒绝允许 |
 | `TOKEN_INVALID` | MCP token 缺失/错误 |
+| `MCP_CONFIG_NOT_FOUND` | 每运行 MCP 配置文件在 CLI 启动时不存在 |
+| `MCP_CONFIG_UNREADABLE` | 每运行 MCP 配置文件无法读取 |
+| `MCP_CONFIG_INVALID` | 每运行 MCP 配置不是有效的 MCP server JSON |
+| `AGENT_START_FAILED` | CLI 已发现，但会话初始化失败 |
 | `UNSUPPORTED_UNTIL_M3` | `scene_dsl` 等 M3 能力 |
 | `MIGRATION_FAILED` | M1 数据迁移失败 |
 

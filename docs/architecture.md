@@ -101,7 +101,8 @@ infra         json / claudecli / edgetts / renderer-bridge
 
 ## 5. 进程与并发
 
-- 单主进程；前端在 WebView。每次 Agent 运行通过同一 exe 的 host 辅助进程管理原生 CLI（隐藏窗口 + Job Object），不参与应用状态。
+- 单主进程；前端在 WebView。主 GUI 在项目/运行恢复前取得单实例锁；每次 Agent 运行通过同一 exe 的 host 辅助进程管理原生 CLI（隐藏窗口 + Job Object），不参与应用状态。
+- Claude Agent SDK 的 CLI 路径指向 AudioUI host，因此关闭 SDK 对 host 的重复版本探测；原生 CLI 仍在每次运行前由 `ResolveNative` 校验。`-v`/`--version` 均在应用路径解析和数据恢复之前无副作用退出。
 - 每次节点执行一个一次性运行；运行与该运行路径绑定，运行之间不共享 Agent 上下文。
 - M2 全局同一时间只允许一个在途运行；M5 并发上限 3，按在途运行计数，队列全局 FIFO，可取消、停止、调整顺序。
 - 同一节点同一时间只允许一个运行；运行/排队路径（topic 根 → 运行节点）与共享祖先只读，路径外分支可编辑。
@@ -164,7 +165,8 @@ UI / handler
 ```
 
 - 图写入只在 `service/workflow`，handler 只做参数转换；`ProjectSession.Save` 是唯一持久化入口。变更回调带写入快照所属的 projectId，不在 workflow 锁内二次查询当前工程。
-- `parentCandidate` 为 0 基；候选数量从父 topic 最新已应用 `topics` 产物读取，不复制到 project.json。
+- `parentCandidate` 为 0 基；候选数量从父 topic 最新已应用 `topics` 产物读取，不复制到 project.json。工作台 `GetTopicCandidates(nodeId, projectId)` 读取最新已应用 topics round 所引用的 artifact，校验节点类型、round kind、artifact ID 与 payload 后返回稳定索引及候选字段；不存在已应用轮次时返回空列表，损坏或不可读时失败关闭。
+- 待应用摘要来自工程作用域工作台快照；`GetPending`、`ApplyPending`、`DiscardPending` 与 `GetTopicCandidates` 均携带调用方的 `projectId`，在工程操作锁内校验活动工程，避免工程切换竞态将请求路由到另一工程。
 - `AcquireRunLock` 记录 topic 根 → 运行节点的真实父子路径；路径节点与共享祖先只读，路径外分支可编辑。`EnsureExecutable` 拒绝内容锁定、运行路径与草稿节点。
 - `SelectNode` 只写 `activeNodeId`，不递增 revision、不触发 `OnChange`。
 - 链由 `entity.Graph.LeafChains` 派生（`c_<tail>`），不落盘；M2-08A 的 `WorkspaceView` 与 `GetWorkspaceSnapshot` 组合节点、pending 摘要、run 摘要、派生链和路径锁。
@@ -213,8 +215,8 @@ M2 收口后 `sessions.json` 不再写入；M2 开发期保留 M1 Wails binding 
 - pending 原文与索引分离；创建/应用/丢弃先原子写 `pending.txn.json` 和必需原文/CAS，再保存带目标 revision 的 `project.json`，最后更新 `pending.json` 并删除日志。工程加载/打开按 base/target revision 回滚未提交事务或幂等重放已提交事务；日志损坏、revision 无法判定或恢复失败时拒绝暴露工程。原文上限 256 KiB，无效 Schema 也保留原文；`pending` 与 `invalid` 计入每树 50 条上限，应用/丢弃释放名额。
 - 结构化产物规范化使用保留 `json.Number` 精度的确定性 JSON；payload SHA-256 为 CAS ID。`Round.Kind` 是当前产物种类的授权真相，CAS `meta.json` 仅为首次写入元数据；元数据种类不一致时按轮次种类校验 payload。
 - `contextTokenBudget` 默认 1,000,000；上下文估算与实际 usage 记入 run。
-- 运行管理启动时扫描所有工程，把残留 `starting`/`running` 记录标记为 `interrupted` 并删除其 per-run MCP 配置；运行记录继续保留作历史。
-- 每次运行的 MCP 配置位于 `data/agent/<projectId>/<runId>/mcp.json`；终态清理整个 run 目录。`runs.json` 仍只存摘要，运行详情最多保存 500 条 transcript 项与不超过 16 KiB 的上下文预览。
+- 单实例锁取得后，运行管理扫描所有工程，把残留 `starting`/`running` 记录标记为 `interrupted` 并删除其 per-run MCP 配置；运行记录继续保留作历史。
+- 每次运行的 MCP 配置位于 `data/agent/<projectId>/<runId>/mcp.json`；适配器在启动前验证文件存在、可读且 JSON 有效，Windows host 在启动原生 CLI 前再次检查文件可读；运行终态先关闭 CLI 与 MCP 服务，再清理整个 run 目录。`runs.json` 仍只存摘要，运行详情最多保存 500 条 transcript 项与不超过 16 KiB 的上下文预览。
 - 运行看门狗按 60 分钟无有效进展计时；流式消息、工具/权限/问题事件和活动 MCP 请求会重置计时，不按固定总时长终止仍在工作的运行。
 - 工程 ID、节点 ID、运行 ID、pending ID 只使用 `[a-z0-9_]`，由程序生成；迁移使用确定性 ID。
 
@@ -242,6 +244,7 @@ topic 树 cwd = `data/projects/<id>/trees/<rootTopicId>/`；MCP 逻辑读取顺�
 
 - 每次运行启动本机 HTTP MCP 服务，`127.0.0.1:0`，每运行独立 token（绑定 runId/treeId/nodeId）；结束即删配置。
 - 使用 Claude 适配器：`claude-agent-sdk-go v0.10.0` + 原生 `claude.exe` + `--strict-mcp-config`；不使用 SDK 的临时 MCP/stderr 文件。
+- 系统面板与运行入口共用原生 CLI 解析规则（路径、最低版本及 shim 解析）；每次 `RunService.Start` 重新解析，CLI 在当前进程环境中变得可发现后可直接重试。
 - Windows 通过 agent host 代理启动原生 CLI，`CREATE_NO_WINDOW` + Job Object 回收进程树。
 - 运行级会话：App 构建上下文，首条消息注入；不依赖 Agent 记忆，不使用 resume/fork；Adapter 细节留在 `infra/agent/claudecli`。
 - `RunSpec` 注入 M2 工具集与系统提示；`AgentRun` 表示运行内会话，不硬编码 M1 工具列表；MCP 工具按 runId/projectId/treeId/nodeId/chainPath 绑定；`get_graph`/`get_node` 只暴露路径快照，`read_artifact` 按祖先轮次授权并对 topic 产物过滤当前候选。

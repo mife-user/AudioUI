@@ -57,21 +57,22 @@ type RunSpec struct {
 }
 
 type Options struct {
-	Projects    ProjectService
-	Workflow    WorkflowService
-	Contexts    port.RunContextBuilder
-	Workspaces  port.RunWorkspaceProvider
-	RunStores   port.RunStoreProvider
-	RunConfigs  port.RunConfigPaths
-	ToolServers port.RunToolServerFactory
-	Permissions port.RunPermissionFactory
-	Driver      port.AgentDriver
-	Publisher   port.RunEventPublisher
-	Gate        *TurnGate
-	RunTimeout  time.Duration
-	NewTimer    func(time.Duration, func()) RunTimer
-	Now         func() time.Time
-	Logf        func(format string, args ...any)
+	Projects       ProjectService
+	Workflow       WorkflowService
+	Contexts       port.RunContextBuilder
+	Workspaces     port.RunWorkspaceProvider
+	RunStores      port.RunStoreProvider
+	RunConfigs     port.RunConfigPaths
+	ToolServers    port.RunToolServerFactory
+	Permissions    port.RunPermissionFactory
+	Driver         port.AgentDriver
+	DriverProvider func(context.Context) (port.AgentDriver, error)
+	Publisher      port.RunEventPublisher
+	Gate           *TurnGate
+	RunTimeout     time.Duration
+	NewTimer       func(time.Duration, func()) RunTimer
+	Now            func() time.Time
+	Logf           func(format string, args ...any)
 }
 
 type Manager struct {
@@ -149,7 +150,16 @@ func (m *Manager) Start(ctx context.Context, nodeID string, expectedProjectID ..
 	if closed {
 		return entity.RunRecord{}, ErrManagerClosed
 	}
-	if m.opts.Driver == nil {
+	driver := m.opts.Driver
+	if m.opts.DriverProvider != nil {
+		resolved, err := m.opts.DriverProvider(ctx)
+		if err != nil {
+			m.opts.Logf("resolve agent driver: %v", err)
+			return entity.RunRecord{}, ErrAgentUnavailable
+		}
+		driver = resolved
+	}
+	if driver == nil {
 		return entity.RunRecord{}, ErrAgentUnavailable
 	}
 	if err := m.validateDependencies(); err != nil {
@@ -330,7 +340,7 @@ func (m *Manager) Start(ctx context.Context, nodeID string, expectedProjectID ..
 		PermissionGate: permissions, QuestionGate: permissions, ToolPolicy: permissions,
 		EventSink: func(event valueobject.AgentEvent) { m.onAgentEvent(state, event) },
 	}
-	session, err := m.opts.Driver.Start(setupCtx, driverSpec)
+	session, err := driver.Start(setupCtx, driverSpec)
 	if err != nil {
 		return failStartup(err)
 	}
