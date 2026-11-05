@@ -15,10 +15,14 @@
 | [design/m2-09-canvas-demo.html](design/m2-09-canvas-demo.html) | 设计 / 前端 | 演示 | M2-09 节点画布、端口、草稿、改挂确认与视图控制本地演示 |
 | [design/m2-10a-topic-run-demo.html](design/m2-10a-topic-run-demo.html) | 设计 / 前端 | 演示 | M2-10A 选题参数保存、一次性运行状态与结构化错误本地演示 |
 | [design/m2-topic-closure-demo.html](design/m2-topic-closure-demo.html) | 设计 / 前端 | 演示 | 选题运行、待应用、候选分支及改挂的本地交互示例 |
+| [design/target-agent-flow-demo.html](design/target-agent-flow-demo.html) | 产品 / 设计 / 开发 | 目标演示 | 候选节点、提示词、Agent、指定/自动生成输出及改挂上下文；模拟数据，未实现 |
+| [design/canvas-edge-008-diagnosis.html](design/canvas-edge-008-diagnosis.html) | 开发 / 测试 | 诊断示意 | React Flow 动态候选端口、测量缓存与错误 008 的时序说明 |
+| [design/canvas-drag-measurement-diagnosis.html](design/canvas-drag-measurement-diagnosis.html) | 开发 / 测试 | 诊断示意 | 拖动时节点测量状态丢失及修复思路的独立交互示意 |
 | [dev/process.md](dev/process.md) | 开发 / 产品 | 草案 | 阶段、工作分解、门禁、变更控制 |
 | [dev/roadmap.md](dev/roadmap.md) | 产品 / 开发 | 草案 | 需求优先级、批次、暂存需求池 |
 | [dev/m2-workplan.md](dev/m2-workplan.md) | 开发 | 草案 | M2 逐任务执行手册、开工协议、任务卡与状态 |
 | [dev/m2-topic-closure-plan.md](dev/m2-topic-closure-plan.md) | 开发 / 测试 | 计划 | M2 工作台至选题闭环的分项实现、测试与验收计划 |
+| [dev/canvas-drag-rendering-fix-plan.md](dev/canvas-drag-rendering-fix-plan.md) | 开发 / 测试 | 草案 | 提示词节点拖动渲染错误的复现证据与修复计划 |
 | [dev/m2-backend-closure-plan.md](dev/m2-backend-closure-plan.md) | 开发 | 草案 | M2-05～07 后端闭环实现计划与已确认决策 |
 | [dev/evidence/m0.md](dev/evidence/m0.md) | 产品 / 测试 | 证据 | M0 自测与 GUI 冒烟记录 |
 | [dev/evidence/m1.md](dev/evidence/m1.md) | 产品 / 测试 | 证据 | M1 会话/权限/resume 冒烟记录 |
@@ -28,8 +32,12 @@
 | [dev/evidence/m2-06.md](dev/evidence/m2-06.md) | 产品 / 测试 | 证据 | M2-06 MCP 只读图、结构化 reply 与 artifact 分块自检及验收记录 |
 | [dev/evidence/m2-07.md](dev/evidence/m2-07.md) | 产品 / 测试 | 证据 | M2-07 运行管理与运行锁自检及验收记录 |
 | [dev/evidence/m2-09.md](dev/evidence/m2-09.md) | 产品 / 测试 | 证据 | M2-09 画布与节点连接实现自检、门禁结果、真实窗口验收和 AC 映射（已验收） |
-| [dev/evidence/m2-10a.md](dev/evidence/m2-10a.md) | 产品 / 测试 | 证据 | M2-10A 选题参数与一次性运行验收证据（已验收；M2-10B/10C 未开始） |
-| [design/target-agent-flow-demo.html](design/target-agent-flow-demo.html) | 产品 / 设计 / 开发 | 目标演示 | 候选节点、提示词、Agent、指定/自动生成输出及改挂上下文；模拟数据，未实现 |
+| [dev/evidence/m2-10a.md](dev/evidence/m2-10a.md) | 产品 / 测试 | 证据 | M2-10A 选题参数与一次性运行验收证据（已验收；M2-10B 已验收，M2-10C 已验收） |
+| [dev/evidence/canvas-edge-008.md](dev/evidence/canvas-edge-008.md) | 开发 / 测试 | 证据 | 候选端口动态测量与派生边竞态修复自检、测试和浏览器截图 |
+| [dev/evidence/canvas-drag-015-fix.md](dev/evidence/canvas-drag-015-fix.md) | 开发 / 测试 | 证据 | 节点拖动测量竞态修复、前端门禁、浏览器操作和 exe 资源核对 |
+| [dev/evidence/agent-mcp-startup-race.md](dev/evidence/agent-mcp-startup-race.md) | 开发 / 测试 | 证据 | SDK 版本探测触发重复启动并清理活动 MCP 配置的原因、修复与验证 |
+| [dev/evidence/m2-10b.md](dev/evidence/m2-10b.md) | 产品 / 测试 | 证据 | M2-10B 待应用与候选端口验收证据（已验收；浏览器实测留在 M2-10C） |
+| [dev/evidence/m2-10c.md](dev/evidence/m2-10c.md) | 产品 / 测试 | 证据 | M2-10C 页面验收已由用户确认；附件截图未归档到仓库 |
 | [agent-protocol.md](agent-protocol.md) | 开发 | 草案 | MCP 工具、能力位、权限、会话 |
 | [acceptance.md](acceptance.md) | 产品 / 测试 | 草案 | 验收标准与发布门禁 |
 | [decisions.md](decisions.md) | 开发 | 草案 | 架构决策记录 |
