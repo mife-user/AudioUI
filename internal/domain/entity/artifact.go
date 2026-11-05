@@ -19,3 +19,11 @@ type Artifact struct {
 	Path      string                 `json:"path"`
 	CreatedAt string                 `json:"createdAt"`
 }
+
+// TopicCandidate is one output port from an applied topic artifact.
+type TopicCandidate struct {
+	Index int    `json:"index"`
+	Title string `json:"title"`
+	Angle string `json:"angle"`
+	Hook  string `json:"hook"`
+}

@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>节点拖动 015：测量状态丢失诊断</title>
+  <style>
+    :root { color-scheme: dark; --bg:#0a0e11; --panel:#101a1f; --panel2:#15252c; --edge:#345660; --fg:#e4eff0; --muted:#a5b8bd; --accent:#83d1c9; --warning:#efc080; --danger:#f09e9e; }
+    * { box-sizing:border-box }
+    body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.6 "Microsoft YaHei",system-ui,sans-serif }
+    main { width:min(1120px,100%); margin:auto; padding:32px 20px 54px }
+    h1 { margin:0 0 6px; font-size:clamp(24px,3vw,34px); line-height:1.3 }
+    h2 { margin:0 0 12px; font-size:18px }
+    p { margin:8px 0 }
+    .lead,.muted { color:var(--muted) }
+    .callout { margin:18px 0; padding:12px 16px; border-left:3px solid var(--warning); background:var(--panel); color:var(--muted) }
+    .toolbar { display:flex; flex-wrap:wrap; gap:8px; margin:20px 0 12px }
+    button { font:inherit }
+    .toolbar button { border:1px solid var(--edge); border-radius:8px; padding:9px 14px; color:var(--fg); background:var(--panel); cursor:pointer }
+    .toolbar button[aria-pressed="true"] { border-color:var(--accent); color:var(--accent); background:var(--panel2) }
+    button:focus-visible, a:focus-visible { outline:2px solid var(--accent); outline-offset:3px }
+    .workspace { overflow:hidden; border:1px solid var(--edge); border-radius:10px; background:var(--panel) }
+    .workspace-head { display:flex; gap:10px; align-items:center; justify-content:space-between; padding:12px 16px; border-bottom:1px solid var(--edge); flex-wrap:wrap }
+    .badge { display:inline-block; border:1px solid var(--edge); border-radius:999px; padding:2px 10px; color:var(--accent); font-size:12px }
+    .alert { padding:9px 16px; border-bottom:1px solid var(--danger); background:rgba(240,158,158,.09); color:var(--danger); overflow-wrap:anywhere }
+    .alert[hidden] { display:none }
+    .surface { position:relative; height:300px; overflow:hidden; background-color:var(--bg); background-image:radial-gradient(#20343c 1px,transparent 1px); background-size:22px 22px }
+    .topic { position:absolute; top:90px; left:5%; width:260px; max-width:40%; border:1px solid var(--edge); border-radius:10px; padding:18px; background:var(--panel); color:var(--muted) }
+    .topic strong { display:block; color:var(--fg) }
+    .node { position:absolute; top:112px; left:57%; width:260px; max-width:40%; min-height:116px; display:block; text-align:left; border:1px solid var(--accent); border-radius:10px; padding:14px; background:var(--panel2); color:var(--fg); cursor:grab; touch-action:none; user-select:none }
+    .node:active { cursor:grabbing }
+    .node strong,.node span { display:block }
+    .node span { margin-top:10px; color:var(--muted); font-size:12px }
+    .status { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); border-top:1px solid var(--edge) }
+    .status div { padding:12px 16px; min-width:0 }
+    .status div + div { border-left:1px solid var(--edge) }
+    .status span { display:block; color:var(--muted); font-size:12px }
+    .status strong { color:var(--accent); overflow-wrap:anywhere }
+    .status strong.bad { color:var(--danger) }
+    .grid { display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-top:16px }
+    .card { border:1px solid var(--edge); border-radius:10px; padding:18px; background:var(--panel) }
+    .card p,.card li { color:var(--muted) }
+    ol,ul { padding-left:21px; margin:8px 0 }
+    li + li { margin-top:6px }
+    code { color:var(--accent); overflow-wrap:anywhere }
+    a { color:var(--accent) }
+    @media(max-width:700px) { main { padding:24px 14px } .grid,.status { grid-template-columns:1fr } .status div + div { border-left:0; border-top:1px solid var(--edge) } .surface { height:260px } .topic,.node { width:40%; max-width:none; font-size:12px } .node { left:55% } }
+    @media(prefers-reduced-motion:reduce) { * { scroll-behavior:auto !important } }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>拖动节点时，测量状态发生了什么？</h1>
+    <p class="lead">对照“覆盖旧节点”和“合并本地测量”的区别；这是机制模拟，不是正式产品界面。修复已实现，真实浏览器拖动证据见下方。</p>
+    <div class="callout">模拟为了稳定展示竞态，故意将测量回调延迟约 350ms；实际环境是否出现错误取决于调度。鼠标拖动右侧节点，或聚焦节点后按方向键。切换模式后可重新操作。</div>
+    <div class="toolbar" role="group" aria-label="选择模拟方式">
+      <button id="old" type="button" aria-pressed="true">现状：覆盖测量状态</button>
+      <button id="merge" type="button" aria-pressed="false">修复后：合并测量状态</button>
+      <button id="reset" type="button">复位演示</button>
+    </div>
+    <section class="workspace" aria-label="测量状态示意画布">
+      <div class="workspace-head"><strong>交互诊断示意</strong><span class="badge" id="mode">现状 · 受控延迟</span></div>
+      <div class="alert" id="alert" role="alert" hidden>模拟：画布渲染错误 015 —— 拖动计算时，节点尺寸尚未重新测量。</div>
+      <div class="surface" id="surface">
+        <div class="topic"><strong>选题节点</strong>仅作背景；示意不读取工程。</div>
+        <button class="node" id="node" type="button" aria-label="可拖动的提示词节点；方向键也可模拟移动"><strong>提示词 · 草稿</strong><span>拖动此处，或按方向键</span></button>
+      </div>
+      <div class="status" role="status" aria-live="polite">
+        <div><span>快照更新</span><strong id="snapshot">等待选择节点</strong></div>
+        <div><span>节点尺寸测量</span><strong id="measurement">已就绪</strong></div>
+        <div><span>拖动结果</span><strong id="result">尚未移动</strong></div>
+      </div>
+    </section>
+    <div class="grid">
+      <section class="card">
+        <h2>实际代码中的关键顺序</h2>
+        <ol>
+          <li>选择节点更新工作台快照，重新生成画布节点。</li>
+          <li>旧实现直接用新对象覆盖本地受控节点；修复后仅将同身份节点的有效测量状态合并入快照。</li>
+          <li>若拖动先于尺寸重新测量，React Flow 可能触发 <code>015</code>。</li>
+          <li>端口错误 <code>008</code> 是另一条检查路径：源或目标 Handle 缺失，不能与 015 混同。</li>
+        </ol>
+      </section>
+      <section class="card">
+        <h2>本次验证的边界</h2>
+        <ul>
+          <li>真实组件、浏览器及内存 fixture；Viewport 为 1410 × 858。</li>
+          <li>正常拖动未复现；人为延迟测量时，草稿和已连接节点均可复现 015。</li>
+          <li>修复版本地浏览器在延迟测量下，草稿、已连接提示词和选题拖动均未出现 015；详见验收截图和修复记录。</li>
+          <li>没有操作 Wails 窗口；用户看到的错误编号和实际启动路径仍未知。</li>
+        </ul>
+        <p><a href="../dev/evidence/canvas-drag-015-repro.png">查看 015 受控复现截图</a></p>
+        <p><a href="../dev/evidence/canvas-drag-015-fixed.png">查看最终浏览器拖动验收截图</a></p>
+      </section>
+    </div>
+  </main>
+  <script>
+    (() => {
+      const old = document.getElementById('old'), merge = document.getElementById('merge'), reset = document.getElementById('reset');
+      const node = document.getElementById('node'), surface = document.getElementById('surface');
+      const alert = document.getElementById('alert'), modeText = document.getElementById('mode');
+      const snapshot = document.getElementById('snapshot'), measurement = document.getElementById('measurement'), result = document.getElementById('result');
+      let mode = 'old', ready = true, timer = 0, x = 0, y = 0, start = null;
+      function paint() { node.style.transform = `translate(${x}px, ${y}px)`; }
+      function resetScene() {
+        clearTimeout(timer); ready = true; x = 0; y = 0; start = null; paint();
+        alert.hidden = true; snapshot.textContent = '等待选择节点'; measurement.textContent = '已就绪'; measurement.classList.remove('bad'); result.textContent = '尚未移动'; result.classList.remove('bad');
+      }
+      function choose(next) {
+        mode = next; old.setAttribute('aria-pressed', String(mode === 'old')); merge.setAttribute('aria-pressed', String(mode === 'merge'));
+        modeText.textContent = mode === 'old' ? '现状 · 受控延迟' : '已实施修复 · 受控延迟'; resetScene();
+      }
+      function begin() {
+        clearTimeout(timer); alert.hidden = true; snapshot.textContent = '选择后生成新快照'; result.textContent = '正在拖动'; result.classList.remove('bad');
+        if (mode === 'old') {
+          ready = false; measurement.textContent = '被覆盖，等待重新测量'; measurement.classList.add('bad');
+          timer = setTimeout(() => { ready = true; measurement.textContent = '重新测量完成'; measurement.classList.remove('bad'); }, 350);
+        } else { ready = true; measurement.textContent = '保留已有测量'; measurement.classList.remove('bad'); }
+      }
+      function move(dx,dy) {
+        const r = node.getBoundingClientRect(), s = surface.getBoundingClientRect();
+        x += Math.max(s.left-r.left, Math.min(dx, s.right-r.right));
+        y += Math.max(s.top-r.top, Math.min(dy, s.bottom-r.bottom)); paint();
+        if (!ready) { alert.hidden = false; result.textContent = '模拟触发 015'; result.classList.add('bad'); }
+        else if (alert.hidden) { result.textContent = '移动中，未触发 015'; result.classList.remove('bad'); }
+      }
+      old.addEventListener('click', () => choose('old')); merge.addEventListener('click', () => choose('merge')); reset.addEventListener('click', resetScene);
+      node.addEventListener('pointerdown', event => { if (event.button !== 0) return; begin(); start = { x:event.clientX, y:event.clientY }; node.setPointerCapture(event.pointerId); });
+      node.addEventListener('pointermove', event => { if (!start) return; const dx=event.clientX-start.x,dy=event.clientY-start.y; if (dx || dy) { move(dx,dy); start={x:event.clientX,y:event.clientY}; } });
+      node.addEventListener('pointerup', () => { start = null; });
+      node.addEventListener('pointercancel', () => { start = null; });
+      node.addEventListener('keydown', event => {
+        const steps = { ArrowLeft:[-16,0], ArrowRight:[16,0], ArrowUp:[0,-16], ArrowDown:[0,16] };
+        if (!steps[event.key]) return; event.preventDefault(); begin(); move(...steps[event.key]);
+      });
+    })();
+  </script>
+</body>
+</html>

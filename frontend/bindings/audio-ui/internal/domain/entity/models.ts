@@ -227,6 +227,16 @@ export interface RunSummary {
 }
 
 /**
+ * TopicCandidate is one output port from an applied topic artifact.
+ */
+export interface TopicCandidate {
+    "index": number;
+    "title": string;
+    "angle": string;
+    "hook": string;
+}
+
+/**
  * WorkspaceChain is a leaf path derived from Graph.LeafChains.
  */
 export interface WorkspaceChain {

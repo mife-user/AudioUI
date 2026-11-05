@@ -18,6 +18,7 @@ export type {
     RunStartError,
     RunStartResult,
     RunSummary,
+    TopicCandidate,
     WorkspaceChain,
     WorkspaceProject,
     WorkspaceRunSummary,

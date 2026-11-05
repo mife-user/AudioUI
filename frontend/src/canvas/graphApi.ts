@@ -1,7 +1,6 @@
 import { WorkflowService } from '../../bindings/audio-ui/internal/handler'
 import type { AddNodeRequest } from '../../bindings/audio-ui/internal/handler'
-import type { GraphMutationReceipt } from '../../bindings/audio-ui/internal/domain/entity'
-import type { NodeParams } from '../../bindings/audio-ui/internal/domain/entity'
+import type { GraphMutationReceipt, NodeParams, TopicCandidate } from '../../bindings/audio-ui/internal/domain/entity'
 
 export type GraphAPI = {
   addNode: (request: AddNodeRequest) => Promise<GraphMutationReceipt>
@@ -9,6 +8,7 @@ export type GraphAPI = {
   moveNode: (id: string, x: number, y: number, projectId: string) => Promise<GraphMutationReceipt>
   selectNode: (id: string, projectId: string) => Promise<GraphMutationReceipt>
   updateNodeParams: (id: string, title: string, params: NodeParams, projectId: string) => Promise<GraphMutationReceipt>
+  getTopicCandidates: (nodeId: string, projectId: string) => Promise<TopicCandidate[]>
 }
 
 export const graphAPI: GraphAPI = {
@@ -17,10 +17,7 @@ export const graphAPI: GraphAPI = {
   moveNode: (id, x, y, projectId) => WorkflowService.MoveNode(id, x, y, projectId),
   selectNode: (id, projectId) => WorkflowService.SelectNode(id, projectId),
   updateNodeParams: (id, title, params, projectId) => WorkflowService.UpdateNodeParams(id, title, params, projectId),
+  getTopicCandidates: async (nodeId, projectId) => (await WorkflowService.GetTopicCandidates(nodeId, projectId)) ?? [],
 }
 
-export type TopicCandidateFixture = {
-  title: string
-  angle?: string
-  hook?: string
-}
+export type TopicCandidateFixture = Pick<TopicCandidate, 'title'> & Partial<Pick<TopicCandidate, 'index' | 'angle' | 'hook'>>

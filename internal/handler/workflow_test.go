@@ -59,7 +59,8 @@ func newWorkflowHandler(t *testing.T) *WorkflowService {
 	artifactStores := persistence.NewArtifactStoreProvider(layout)
 	workflowService := workflow.New(workflow.Options{
 		Project: projectService, Candidates: handlerCandidates{},
-		Pending: persistence.NewPendingStoreProvider(layout), Artifacts: artifactStores,
+		CandidateReader: workflow.NewArtifactCandidateCounter(artifactStores),
+		Pending:         persistence.NewPendingStoreProvider(layout), Artifacts: artifactStores,
 		ContextHasher: handlerContextHasher{},
 	})
 	return NewWorkflowService(workflowService)
@@ -164,6 +165,13 @@ func TestWorkflowHandlerPendingQueriesApplyAndDiscard(t *testing.T) {
 		t.Fatal(err)
 	}
 	topicID := topicReceipt.NodeID
+	candidates, err := h.GetTopicCandidates(topicID, projectID)
+	if err != nil || len(candidates) != 0 {
+		t.Fatalf("unapplied candidates = %+v err=%v", candidates, err)
+	}
+	if _, err := h.GetTopicCandidates(topicID, "p_other"); !errors.Is(err, workflow.ErrProjectChanged) {
+		t.Fatalf("candidate project scope error = %v", err)
+	}
 	candidate := 0
 	firstReceipt, err := h.AddNode(AddNodeRequest{
 		ProjectID: projectID, Type: "prompt", Title: "脚本 A", Parent: topicID, ParentCandidate: &candidate,
@@ -198,22 +206,25 @@ func TestWorkflowHandlerPendingQueriesApplyAndDiscard(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	list, err := h.ListPending()
+	list, err := h.ListPending(activeProjectID(t, h))
 	if err != nil || len(list) != 2 {
 		t.Fatalf("pending list = %+v err=%v", list, err)
 	}
-	detail, err := h.GetPending(second.ID)
+	detail, err := h.GetPending(second.ID, activeProjectID(t, h))
 	if err != nil || string(detail.RawPayload) != string(payload) {
 		t.Fatalf("pending detail=%+v err=%v", detail, err)
 	}
-	applied, err := h.ApplyPending(first.ID, false)
+	if _, err := h.ApplyPending(first.ID, false, "p_other"); !errors.Is(err, workflow.ErrProjectChanged) {
+		t.Fatalf("pending apply project scope error = %v", err)
+	}
+	applied, err := h.ApplyPending(first.ID, false, activeProjectID(t, h))
 	if err != nil || !applied.Nodes[1].Locked {
 		t.Fatalf("apply result=%+v err=%v", applied, err)
 	}
-	if _, err := h.DiscardPending(second.ID); err != nil {
+	if _, err := h.DiscardPending(second.ID, activeProjectID(t, h)); err != nil {
 		t.Fatal(err)
 	}
-	list, err = h.ListPending()
+	list, err = h.ListPending(activeProjectID(t, h))
 	if err != nil || list[0].Status != valueobject.PendingApplied || list[1].Status != valueobject.PendingDiscarded {
 		t.Fatalf("pending statuses = %+v err=%v", list, err)
 	}

@@ -17,13 +17,14 @@ import type { GraphMutationReceipt, Node, NodeParams, RunStartResult, WorkspaceS
 import { startRun as startRunAPI } from '../api/runs'
 import { graphAPI, type GraphAPI, type TopicCandidateFixture } from './graphApi'
 import { allocateNodePosition } from './nodePosition'
-import { buildFlowModel, nodeMap, subtreeSize, topicRootId, type CanvasFlowNode } from './flowModel'
+import { buildFlowEdges, buildFlowModel, candidateAt, nodeMap, subtreeSize, topicRootId, type CanvasFlowNode } from './flowModel'
+import { preserveCanvasNodeViewState } from './nodeState'
 import { PromptNode } from './PromptNode'
 import { TopicNode } from './TopicNode'
 
 const nodeTypes = { topic: TopicNode, prompt: PromptNode }
 const MOVE_DEBOUNCE_MS = 240
-const EMPTY_CANDIDATES: Record<string, TopicCandidateFixture[]> = {}
+const EMPTY_HANDLE_LAYOUTS: Record<string, string> = {}
 
 function scheduleFrame(callback: FrameRequestCallback): number {
   if (typeof window.requestAnimationFrame === 'function') return window.requestAnimationFrame(callback)
@@ -55,6 +56,28 @@ type PendingPosition = {
   y: number
 }
 
+type CandidateReadEntry = {
+  signature: string
+  candidates?: TopicCandidateFixture[]
+  loading: boolean
+  error?: string
+}
+
+type CandidateReadState = {
+  projectId: string
+  entries: Record<string, CandidateReadEntry>
+}
+
+type CandidateReadQuery = {
+  nodeId: string
+  signature: string
+}
+
+type MeasuredHandleState = {
+  projectId: string
+  byNode: Record<string, string>
+}
+
 type ConnectIntent = {
   projectId: string
   parentId: string
@@ -79,11 +102,61 @@ function candidateFromHandle(handleId: string | null | undefined, parent: Node):
   return match ? Number(match[1]) : null
 }
 
+function candidateQueryKey(nodes: Node[] | undefined): string {
+  const queries: CandidateReadQuery[] = []
+  for (const node of nodes ?? []) {
+    if (node.type !== 'topic' || !node.rounds?.length) continue
+    const latest = node.rounds.reduce((current, round) => round.n > current.n ? round : current)
+    if (latest.kind !== 'topics') continue
+    queries.push({
+      nodeId: node.id,
+      signature: JSON.stringify([latest.n, latest.kind, latest.artifactId]),
+    })
+  }
+  queries.sort((a, b) => a.nodeId.localeCompare(b.nodeId))
+  return JSON.stringify(queries)
+}
+
 function CanvasBody({ snapshot, onSelectNode, onGraphMutation, api, candidateFixtures, onStartRun }: Props & { api: GraphAPI }) {
-  const candidateMap = candidateFixtures ?? EMPTY_CANDIDATES
   const projectId = snapshot.project?.id ?? ''
+  const graphNodes = snapshot.nodes ?? []
+  const [candidateState, setCandidateState] = useState<CandidateReadState>({ projectId: '', entries: {} })
+  const [measuredHandleState, setMeasuredHandleState] = useState<MeasuredHandleState>({ projectId: '', byNode: {} })
+  const candidateStateRef = useRef(candidateState)
+  candidateStateRef.current = candidateState
   const currentProjectId = useRef(projectId)
   currentProjectId.current = projectId
+  const onNodeHandlesMeasured = useCallback((nodeId: string, layoutKey: string, ownerProjectId: string) => {
+    if (!ownerProjectId || currentProjectId.current !== ownerProjectId) return
+    setMeasuredHandleState((current) => {
+      const byNode = current.projectId === ownerProjectId ? current.byNode : {}
+      if (byNode[nodeId] === layoutKey) return current
+      return { projectId: ownerProjectId, byNode: { ...byNode, [nodeId]: layoutKey } }
+    })
+  }, [])
+  const measuredHandleLayouts = measuredHandleState.projectId === projectId
+    ? measuredHandleState.byNode
+    : EMPTY_HANDLE_LAYOUTS
+  const topicCandidateQueryKey = useMemo(() => candidateQueryKey(snapshot.nodes ?? undefined), [snapshot.nodes])
+  const topicCandidateQueries = useMemo(() => JSON.parse(topicCandidateQueryKey) as CandidateReadQuery[], [topicCandidateQueryKey])
+  const candidateStateForProject = candidateState.projectId === projectId ? candidateState : null
+  const candidateData = useMemo(() => {
+    if (candidateFixtures !== undefined) return { candidates: candidateFixtures, loading: {} as Record<string, boolean>, errors: {} as Record<string, string> }
+    const candidates: Record<string, TopicCandidateFixture[]> = {}
+    const loading: Record<string, boolean> = {}
+    const errors: Record<string, string> = {}
+    for (const query of topicCandidateQueries) {
+      const entry = candidateStateForProject?.entries[query.nodeId]
+      if (!entry || entry.signature !== query.signature) continue
+      if (entry.candidates !== undefined) candidates[query.nodeId] = entry.candidates
+      if (entry.loading) loading[query.nodeId] = true
+      if (entry.error) errors[query.nodeId] = entry.error
+    }
+    return { candidates, loading, errors }
+  }, [candidateFixtures, candidateStateForProject, topicCandidateQueries])
+  const candidateMap = candidateData.candidates
+  const candidateErrors = candidateData.errors
+  const candidateLoading = candidateData.loading
   const snapshotNodeCount = useRef(snapshot.nodes?.length ?? 0)
   snapshotNodeCount.current = snapshot.nodes?.length ?? 0
   const flow = useReactFlow<CanvasFlowNode>()
@@ -123,6 +196,49 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, api, candidateFix
   runStartBlockedRef.current = busy || connectSubmitting || pendingSync !== null
   const confirmCancelRef = useRef<HTMLButtonElement>(null)
   const confirmReturnFocus = useRef<HTMLElement | null>(null)
+
+  useEffect(() => {
+    if (candidateFixtures !== undefined) {
+      setCandidateState({ projectId, entries: {} })
+      return undefined
+    }
+    let cancelled = false
+    const currentEntries = candidateStateRef.current.projectId === projectId ? candidateStateRef.current.entries : {}
+    const nextEntries: Record<string, CandidateReadEntry> = {}
+    const queriesToRead: CandidateReadQuery[] = []
+    for (const query of topicCandidateQueries) {
+      const previous = currentEntries[query.nodeId]
+      if (previous?.signature === query.signature && previous.candidates !== undefined) {
+        nextEntries[query.nodeId] = previous
+        continue
+      }
+      nextEntries[query.nodeId] = { signature: query.signature, loading: true }
+      queriesToRead.push(query)
+    }
+    setCandidateState({ projectId, entries: nextEntries })
+    for (const query of queriesToRead) {
+      void api.getTopicCandidates(query.nodeId, projectId).then((candidates) => {
+        if (cancelled || currentProjectId.current !== projectId) return
+        setCandidateState((current) => {
+          if (current.projectId !== projectId || current.entries[query.nodeId]?.signature !== query.signature) return current
+          return {
+            ...current,
+            entries: { ...current.entries, [query.nodeId]: { signature: query.signature, candidates, loading: false } },
+          }
+        })
+      }).catch((failure: unknown) => {
+        if (cancelled || currentProjectId.current !== projectId) return
+        setCandidateState((current) => {
+          if (current.projectId !== projectId || current.entries[query.nodeId]?.signature !== query.signature) return current
+          return {
+            ...current,
+            entries: { ...current.entries, [query.nodeId]: { signature: query.signature, loading: false, error: errorMessage(failure) } },
+          }
+        })
+      })
+    }
+    return () => { cancelled = true }
+  }, [api, candidateFixtures, projectId, snapshot.project?.revision, topicCandidateQueryKey, topicCandidateQueries])
 
   const syncMutation = useCallback(async (receipt: GraphMutationReceipt, label: string, focusNodeId?: string) => {
     setNotice(`${label}已提交，正在同步工程图。`)
@@ -179,14 +295,14 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, api, candidateFix
 
   const addChild = useCallback((parentId: string, candidate: number | null) => {
     if (mutationBlockedRef.current) return
-    const parent = (snapshot.nodes ?? []).find((node) => node.id === parentId)
+    const parent = graphNodes.find((node) => node.id === parentId)
     if (!parent) return
-    const position = allocateNodePosition(snapshot.nodes ?? [], {
+    const position = allocateNodePosition(graphNodes, {
       x: parent.position.x + 380,
       y: parent.position.y + (candidate ?? 0) * 155,
     })
     void addPrompt({ parentId, candidate, position })
-  }, [snapshot])
+  }, [api, graphNodes, projectId, syncMutation])
 
   const saveTopicParams = useCallback(async (nodeId: string, title: string, params: NodeParams, ownerProjectId: string) => {
     if (currentProjectId.current !== ownerProjectId) throw new Error('PROJECT_CHANGED: 工程已切换，未保存旧工程参数。')
@@ -230,14 +346,17 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, api, candidateFix
   const model = useMemo(
     () => buildFlowModel(snapshot, addChild, candidateMap, mutationBlocked, {
       runSubmittingNodeId,
+      candidateErrors,
+      candidateLoading,
       onUpdateTopicParams: saveTopicParams,
       onStartTopicRun: startTopicRun,
+      onNodeHandlesMeasured,
     }),
-    [snapshot, addChild, candidateMap, mutationBlocked, runSubmittingNodeId, saveTopicParams, startTopicRun],
+    [snapshot, addChild, candidateMap, candidateErrors, candidateLoading, mutationBlocked, runSubmittingNodeId, saveTopicParams, startTopicRun, onNodeHandlesMeasured],
   )
 
   useEffect(() => {
-    setNodes(model.nodes.map((node) => {
+    setNodes((current) => preserveCanvasNodeViewState(model.nodes, current, projectId).map((node) => {
       const key = `${projectId}:${node.id}`
       const pending = pendingPositions.current.get(key)
       if (pending && pending.x === node.position.x && pending.y === node.position.y) {
@@ -246,8 +365,7 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, api, candidateFix
         return node
       }
       if (pending) return { ...node, position: pending }
-      if (!lastPersistedPositions.current.has(key)) lastPersistedPositions.current.set(key, { ...node.position })
-      else lastPersistedPositions.current.set(key, { ...node.position })
+      lastPersistedPositions.current.set(key, { ...node.position })
       return node
     }))
   }, [model, projectId])
@@ -347,13 +465,12 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, api, candidateFix
   }, [onSelectNode, projectId, schedulePositionSave, snapshot.project?.activeNodeId])
 
   const selectedNode = nodes.find((node) => node.selected)?.data.node
-  const graphNodes = snapshot.nodes ?? []
   const byId = useMemo(() => nodeMap(graphNodes), [graphNodes])
   const connectionTargets = graphNodes.filter((node) => node.type === 'prompt' && node.id !== selectedNode?.id)
   const selectedCandidates = selectedNode?.type === 'topic'
     ? candidateMap[selectedNode.id] ?? []
     : []
-  const edges = model.edges
+  const edges = useMemo(() => buildFlowEdges(nodes, measuredHandleLayouts), [nodes, measuredHandleLayouts])
 
   useEffect(() => {
     setCandidateSelection('0')
@@ -458,7 +575,7 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, api, candidateFix
     if (model.nodes.find((node) => node.id === child.id)?.data.runningLocked) return false
     if (parent.type === 'topic') {
       const candidate = candidateFromHandle(connection.sourceHandle, parent)
-      return candidate !== null && Boolean(candidateMap[parent.id]?.[candidate])
+      return candidate !== null && Boolean(candidateAt(candidateMap[parent.id], candidate))
     }
     return connection.sourceHandle === 'prompt-output'
   }
@@ -577,7 +694,10 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, api, candidateFix
             </select>
             {selectedNode?.type === 'topic' && selectedCandidates.length ? (
               <select value={candidateSelection} onChange={(event) => setCandidateSelection(event.currentTarget.value)} aria-label="选择候选输出端口">
-                {selectedCandidates.map((candidate, index) => <option key={`${selectedNode.id}-${index}`} value={index}>候选 {index + 1} · {candidate.title}</option>)}
+                {selectedCandidates.map((candidate, index) => {
+                  const candidateIndex = candidate.index ?? index
+                  return <option key={`${selectedNode.id}-${candidateIndex}`} value={candidateIndex}>候选 {candidateIndex + 1} · {candidate.title}</option>
+                })}
               </select>
             ) : null}
             <button type="button" className="canvas-toolbar-btn" onClick={() => void connectSelectedTarget()} disabled={mutationBlocked || !connectionTarget}>

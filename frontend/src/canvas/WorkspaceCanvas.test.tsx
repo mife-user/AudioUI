@@ -23,7 +23,14 @@ const flowMocks = vi.hoisted(() => ({ fitView: vi.fn(), setViewport: vi.fn() }))
 
 vi.mock('@xyflow/react', async () => {
   const React = await import('react')
-  const ReactFlow = (props: MockFlowProps) => React.createElement('div', { 'data-testid': 'mock-flow' },
+  const flowModel = await import('./flowModel')
+  const ReactFlow = (props: MockFlowProps) => {
+    React.useEffect(() => {
+      for (const node of props.nodes) {
+        node.data.onNodeHandlesMeasured?.(node.id, flowModel.nodeHandleLayoutKey(node.type, node.data), node.data.projectId ?? '')
+      }
+    }, [props.nodes])
+    return React.createElement('div', { 'data-testid': 'mock-flow' },
     React.createElement('output', { 'data-testid': 'edge-count' }, String(props.edges.length)),
     React.createElement('output', { 'data-testid': 'zoom-range' }, `${props.minZoom}-${props.maxZoom}`),
     React.createElement('output', { 'data-testid': 'child-position' }, (() => {
@@ -83,7 +90,8 @@ vi.mock('@xyflow/react', async () => {
         }
       },
     }, 'simulate-drag'),
-  )
+    )
+  }
   return {
     applyNodeChanges: (changes: NodeChange<CanvasFlowNode>[], nodes: CanvasFlowNode[]) => changes.reduce((current, change) => {
       if (change.type === 'select') return current.map((node) => node.id === change.id ? { ...node, selected: change.selected } : node)
@@ -142,6 +150,7 @@ function makeAPI(): GraphAPI {
     moveNode: vi.fn().mockResolvedValue({ projectId: 'p_test', projectRevision: 3, nodeId: 'n_child' }),
     selectNode: vi.fn().mockResolvedValue({ projectId: 'p_test', projectRevision: 3, nodeId: 'n_child' }),
     updateNodeParams: vi.fn().mockResolvedValue({ projectId: 'p_test', projectRevision: 3, nodeId: 'n_topic_a' }),
+    getTopicCandidates: vi.fn().mockResolvedValue([]),
   }
 }
 

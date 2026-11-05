@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { fetchEnvironment, fetchRecentLogs, type EnvironmentDTO, type LogEntryDTO } from './api/system'
+import { pendingAPI } from './api/pending'
 import type { GraphMutationReceipt } from '../bindings/audio-ui/internal/domain/entity'
 import { useWorkspaceBridge } from './hooks/useWorkspaceBridge'
 import { useRunStore } from './stores/runStore'
@@ -83,6 +84,14 @@ function App() {
   const startNodeRun = useCallback((nodeId: string, projectId: string) => bridge.startRun(nodeId, projectId), [bridge])
   const onSelectRun = useCallback((runId: string) => bridge.selectRun(runId), [bridge])
   const onRetryRun = useCallback((runId: string) => bridge.retryRun(runId), [bridge])
+  const onGetPending = useCallback((id: string, projectId: string) => pendingAPI.getPending(id, projectId), [])
+  const onApplyPending = useCallback(async (id: string, force: boolean, projectId: string) => {
+    await pendingAPI.applyPending(id, force, projectId)
+  }, [])
+  const onDiscardPending = useCallback(async (id: string, projectId: string) => {
+    await pendingAPI.discardPending(id, projectId)
+  }, [])
+  const onRefreshWorkspace = useCallback(() => bridge.retryWorkspace(), [bridge])
 
   const onPermission = useCallback(async (runId: string, requestId: string, decision: 'allow' | 'allow_session' | 'deny') => {
     setConsoleError('')
@@ -139,6 +148,8 @@ function App() {
         />
         <AgentConsole
           runs={runSummaries}
+          projectId={workspaceSnapshot?.project?.id ?? null}
+          pending={workspaceSnapshot?.pending ?? []}
           runViews={runViews}
           selectedRunId={selectedRunId}
           selectedRun={selectedRun}
@@ -150,6 +161,10 @@ function App() {
           onPermission={onPermission}
           onQuestion={onQuestion}
           onInterrupt={onInterrupt}
+          onGetPending={onGetPending}
+          onApplyPending={onApplyPending}
+          onDiscardPending={onDiscardPending}
+          onRefreshWorkspace={onRefreshWorkspace}
         />
       </div>
       <SystemDrawer

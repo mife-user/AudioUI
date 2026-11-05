@@ -21,18 +21,20 @@ type workflowSetup struct {
 func newWorkflowSetup(layout valueobject.Layout, projectService *project.Service, onChange ...func(string, int64, string)) *workflowSetup {
 	artifactStores := persistence.NewArtifactStoreProvider(layout)
 	contextBuilder := contextservice.NewBuilder(artifactStores)
+	candidates := workflow.NewArtifactCandidateCounter(artifactStores)
 	var changed func(string, int64, string)
 	if len(onChange) > 0 {
 		changed = onChange[0]
 	}
 	service := workflow.New(workflow.Options{
-		Project:       projectService,
-		Candidates:    workflow.NewArtifactCandidateCounter(artifactStores),
-		Workspace:     workspace.NewMover(layout),
-		Pending:       persistence.NewPendingStoreProvider(layout),
-		Artifacts:     artifactStores,
-		ContextHasher: workflowContextHasher{builder: contextBuilder},
-		OnChange:      changed,
+		Project:         projectService,
+		Candidates:      candidates,
+		CandidateReader: candidates,
+		Workspace:       workspace.NewMover(layout),
+		Pending:         persistence.NewPendingStoreProvider(layout),
+		Artifacts:       artifactStores,
+		ContextHasher:   workflowContextHasher{builder: contextBuilder},
+		OnChange:        changed,
 	})
 	return &workflowSetup{handler: handler.NewWorkflowService(service), service: service}
 }

@@ -1,7 +1,7 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
-import { PermissionTier, RunStatus, TranscriptKind } from '../../bindings/audio-ui/internal/domain/valueobject'
-import type { RunSnapshot, WorkspaceRunSummary } from '../../bindings/audio-ui/internal/domain/entity'
+import { OutputKind, PendingStatus, PermissionTier, RunStatus, TranscriptKind } from '../../bindings/audio-ui/internal/domain/valueobject'
+import type { PendingDetail, PendingSummary, RunSnapshot, WorkspaceRunSummary } from '../../bindings/audio-ui/internal/domain/entity'
 import type { RunView } from '../stores/runStore'
 import { AgentConsole } from './AgentConsole'
 
@@ -50,9 +50,45 @@ const historyView: RunView = {
   error: '',
 }
 
+const pendingSummary: PendingSummary = {
+  id: 'pending_topics',
+  nodeId: 'n_topic',
+  runId: 'r_topics',
+  chainId: 'c_n_topic',
+  kind: OutputKind.OutputKindTopics,
+  status: PendingStatus.PendingPending,
+  summary: '3 个候选',
+}
+
+const topicsPayload = JSON.stringify({ topics: [
+  { title: '候选甲', angle: '人物观察', hook: '凌晨出发' },
+  { title: '候选乙', angle: '城市声音', hook: '末班车' },
+  { title: '候选丙', angle: '手艺记录', hook: '灯仍亮着' },
+] })
+
+function encodePayload(payload: string): string {
+  return btoa(Array.from(new TextEncoder().encode(payload), (byte) => String.fromCharCode(byte)).join(''))
+}
+
+function pendingDetail(status: PendingSummary['status'] = PendingStatus.PendingPending, payload = topicsPayload): PendingDetail {
+  return {
+    pending: {
+      ...pendingSummary,
+      status,
+      error: status === PendingStatus.PendingInvalid ? 'SCHEMA_INVALID: topics must contain 3 to 10 candidates' : '',
+      payload: 'pending/pending_topics.json',
+      chainPath: ['n_topic'],
+      createdAt: '2026-11-05T12:00:00Z',
+    },
+    rawPayload: encodePayload(payload),
+  }
+}
+
 function renderConsole(overrides: Partial<React.ComponentProps<typeof AgentConsole>> = {}) {
   const props: React.ComponentProps<typeof AgentConsole> = {
     runs: [summary],
+    projectId: 'p_demo',
+    pending: [],
     runViews: { [summary.id]: historyView },
     selectedRunId: summary.id,
     selectedRun: historyView,
@@ -64,6 +100,10 @@ function renderConsole(overrides: Partial<React.ComponentProps<typeof AgentConso
     onPermission: vi.fn().mockResolvedValue(undefined),
     onQuestion: vi.fn().mockResolvedValue(undefined),
     onInterrupt: vi.fn().mockResolvedValue(undefined),
+    onGetPending: vi.fn().mockResolvedValue(pendingDetail()),
+    onApplyPending: vi.fn().mockResolvedValue(undefined),
+    onDiscardPending: vi.fn().mockResolvedValue(undefined),
+    onRefreshWorkspace: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   }
   return { ...render(<AgentConsole {...props} />), props }
@@ -84,12 +124,105 @@ describe('AgentConsole', () => {
     expect(screen.getByText('未知')).toBeInTheDocument()
   })
 
-  it('does not expose pending artifact actions before the pending UI task', () => {
+  it('shows an empty pending state without adding a free-chat input', () => {
     renderConsole()
     fireEvent.click(screen.getByRole('tab', { name: /待处理/ }))
-    expect(screen.getByText('待应用产物预览与操作将在 M2-10B 接入。')).toBeInTheDocument()
+    expect(screen.getByText('暂无待处理结果')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '应用' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '丢弃' })).not.toBeInTheDocument()
+  })
+
+  it('loads pending payload on selection, previews candidates, then applies and refreshes', async () => {
+    const onGetPending = vi.fn().mockResolvedValue(pendingDetail())
+    const onApplyPending = vi.fn().mockResolvedValue(undefined)
+    const onRefreshWorkspace = vi.fn().mockResolvedValue(undefined)
+    renderConsole({ pending: [pendingSummary], onGetPending, onApplyPending, onRefreshWorkspace })
+    fireEvent.click(screen.getByRole('tab', { name: /待处理/ }))
+    expect(onGetPending).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: /n_topic/ }))
+    expect(await screen.findByText(/候选甲/)).toBeInTheDocument()
+    expect(screen.getByText('人物观察')).toBeInTheDocument()
+    expect(screen.getByText('凌晨出发')).toBeInTheDocument()
+    expect(onGetPending).toHaveBeenCalledWith('pending_topics', 'p_demo')
+
+    fireEvent.click(screen.getByRole('button', { name: '应用' }))
+    await waitFor(() => expect(onApplyPending).toHaveBeenCalledWith('pending_topics', false, 'p_demo'))
+    await waitFor(() => expect(onRefreshWorkspace).toHaveBeenCalledOnce())
+    expect(screen.getByText(/操作已提交/)).toBeInTheDocument()
+  })
+
+  it('prevents duplicate pending mutations while an action is in flight', async () => {
+    let resolveApply!: () => void
+    const onApplyPending = vi.fn(() => new Promise<void>((resolve) => { resolveApply = resolve }))
+    const onRefreshWorkspace = vi.fn().mockResolvedValue(undefined)
+    renderConsole({ pending: [pendingSummary], onApplyPending, onRefreshWorkspace })
+    fireEvent.click(screen.getByRole('tab', { name: /待处理/ }))
+    fireEvent.click(screen.getByRole('button', { name: /n_topic/ }))
+    await screen.findByText(/候选甲/)
+    const apply = screen.getByRole('button', { name: '应用' })
+
+    fireEvent.click(apply)
+    fireEvent.click(apply)
+    expect(onApplyPending).toHaveBeenCalledOnce()
+    resolveApply()
+    await waitFor(() => expect(onRefreshWorkspace).toHaveBeenCalledOnce())
+  })
+
+  it('shows invalid raw output and only allows discarding it', async () => {
+    const invalid = { ...pendingSummary, status: PendingStatus.PendingInvalid, error: 'SCHEMA_INVALID: topics must contain 3 to 10 candidates' }
+    const onApplyPending = vi.fn().mockResolvedValue(undefined)
+    const onDiscardPending = vi.fn().mockResolvedValue(undefined)
+    renderConsole({
+      pending: [invalid],
+      onGetPending: vi.fn().mockResolvedValue(pendingDetail(PendingStatus.PendingInvalid, '{"topics":[]}')),
+      onApplyPending,
+      onDiscardPending,
+    })
+    fireEvent.click(screen.getByRole('tab', { name: /待处理/ }))
+    fireEvent.click(screen.getByRole('button', { name: /n_topic/ }))
+
+    expect(await screen.findByText('{"topics":[]}')).toBeInTheDocument()
+    expect(screen.getByText(/SCHEMA_INVALID/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '应用' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '丢弃' }))
+    await waitFor(() => expect(onDiscardPending).toHaveBeenCalledWith('pending_topics', 'p_demo'))
+    expect(onApplyPending).not.toHaveBeenCalled()
+  })
+
+  it('requires explicit confirmation before force-applying changed inputs', async () => {
+    const onApplyPending = vi.fn()
+      .mockRejectedValueOnce(new Error('PARAMS_CHANGED'))
+      .mockRejectedValueOnce(new Error('CONTEXT_CHANGED'))
+      .mockResolvedValueOnce(undefined)
+    renderConsole({ pending: [pendingSummary], onApplyPending })
+    fireEvent.click(screen.getByRole('tab', { name: /待处理/ }))
+    fireEvent.click(screen.getByRole('button', { name: /n_topic/ }))
+    await screen.findByText(/候选甲/)
+
+    fireEvent.click(screen.getByRole('button', { name: '应用' }))
+    const confirmation = await screen.findByRole('alertdialog')
+    expect(confirmation).toHaveTextContent('参数或上游上下文已变化')
+    fireEvent.click(screen.getByRole('button', { name: '取消' }))
+    expect(screen.getByRole('button', { name: '应用' })).toBeInTheDocument()
+    expect(onApplyPending).toHaveBeenCalledTimes(1)
+
+    fireEvent.click(screen.getByRole('button', { name: '应用' }))
+    await screen.findByRole('alertdialog')
+    fireEvent.click(screen.getByRole('button', { name: '确认并强制应用' }))
+    await waitFor(() => expect(onApplyPending).toHaveBeenNthCalledWith(3, 'pending_topics', true, 'p_demo'))
+  })
+
+  it('ignores a late pending detail after the active project changes', async () => {
+    let resolveDetail!: (detail: PendingDetail) => void
+    const pendingLoad = new Promise<PendingDetail>((resolve) => { resolveDetail = resolve })
+    const { rerender, props } = renderConsole({ pending: [pendingSummary], onGetPending: vi.fn(() => pendingLoad) })
+    fireEvent.click(screen.getByRole('tab', { name: /待处理/ }))
+    fireEvent.click(screen.getByRole('button', { name: /n_topic/ }))
+    rerender(<AgentConsole {...props} projectId="p_other" pending={[]} />)
+    resolveDetail(pendingDetail())
+    await waitFor(() => expect(screen.queryByText('候选甲')).not.toBeInTheDocument())
+    expect(screen.getByText('暂无待处理结果')).toBeInTheDocument()
   })
 
   it('routes permission responses with both run and request IDs', () => {

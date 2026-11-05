@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { Node, WorkspaceSnapshot } from '../../bindings/audio-ui/internal/domain/entity'
 import { OutputKind, PendingStatus, RunStatus } from '../../bindings/audio-ui/internal/domain/valueobject'
-import { buildFlowModel, deriveHighlightedPath, subtreeSize, topicRootId } from './flowModel'
+import { buildFlowEdges, buildFlowModel, deriveHighlightedPath, nodeHandleLayoutKey, subtreeSize, topicRootId } from './flowModel'
 
 function makeNode(id: string, type: 'topic' | 'prompt', parent = '', parentCandidate?: number, overrides: Partial<Node> = {}): Node {
   return {
@@ -47,6 +47,36 @@ describe('flowModel', () => {
       targetHandle: 'prompt-input',
     })
     expect(model.nodes.find((node) => node.id === draft.id)?.data.node.parent).toBeFalsy()
+  })
+
+  it('uses the candidate DTO index rather than its array position', () => {
+    const topic = makeNode('n_topic', 'topic')
+    const child = makeNode('n_child', 'prompt', topic.id, 3)
+    const model = buildFlowModel(snapshot([topic, child]), vi.fn(), {
+      [topic.id]: [{ index: 3, title: '候选四' }],
+    })
+
+    expect(model.edges[0]?.sourceHandle).toBe('candidate-3')
+  })
+
+  it('waits for source and target handle layouts before exposing edges', () => {
+    const topic = makeNode('n_topic', 'topic')
+    const prompt = makeNode('n_prompt', 'prompt', topic.id, 0)
+    const model = buildFlowModel(snapshot([topic, prompt]), vi.fn(), {
+      [topic.id]: [{ index: 0, title: '候选甲' }],
+    })
+    const topicFlowNode = model.nodes.find((node) => node.id === topic.id)
+    const promptFlowNode = model.nodes.find((node) => node.id === prompt.id)
+    if (!topicFlowNode || !promptFlowNode) throw new Error('flow nodes missing from fixture')
+    const ready = {
+      [topic.id]: nodeHandleLayoutKey(topicFlowNode.type, topicFlowNode.data),
+      [prompt.id]: nodeHandleLayoutKey(promptFlowNode.type, promptFlowNode.data),
+    }
+
+    expect(buildFlowEdges(model.nodes, {})).toEqual([])
+    expect(buildFlowEdges(model.nodes, { [topic.id]: ready[topic.id] })).toEqual([])
+    expect(buildFlowEdges(model.nodes, ready)).toHaveLength(1)
+    expect(buildFlowEdges(model.nodes, ready)[0]?.sourceHandle).toBe('candidate-0')
   })
 
   it('keeps edges visible without inventing candidate ports before candidate data is available', () => {

@@ -1,6 +1,6 @@
-import { useState } from 'react'
-import { RunStatus } from '../../bindings/audio-ui/internal/domain/valueobject'
-import type { WorkspaceRunSummary } from '../../bindings/audio-ui/internal/domain/entity'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { PendingStatus, RunStatus } from '../../bindings/audio-ui/internal/domain/valueobject'
+import type { PendingDetail, PendingSummary, WorkspaceRunSummary } from '../../bindings/audio-ui/internal/domain/entity'
 import type { PermissionDecision, PermissionRequest, QuestionRequest } from '../api/runs'
 import type { RunView } from '../stores/runStore'
 import { PermissionCard } from './PermissionCard'
@@ -8,9 +8,12 @@ import { QuestionCard } from './QuestionCard'
 import { RunList } from './RunList'
 import { ConsoleTabs, type ConsoleTab } from './ConsoleTabs'
 import { Transcript } from './Transcript'
+import { PendingArtifactCard } from './PendingArtifactCard'
 
 type Props = {
   runs: WorkspaceRunSummary[]
+  projectId: string | null
+  pending: PendingSummary[]
   runViews: Record<string, RunView>
   selectedRunId: string | null
   selectedRun: RunView | undefined
@@ -22,6 +25,10 @@ type Props = {
   onPermission: (runId: string, requestId: string, decision: PermissionDecision) => Promise<void>
   onQuestion: (runId: string, requestId: string, answer: string, via: string) => Promise<void>
   onInterrupt: (runId: string) => Promise<void>
+  onGetPending: (id: string, projectId: string) => Promise<PendingDetail>
+  onApplyPending: (id: string, force: boolean, projectId: string) => Promise<void>
+  onDiscardPending: (id: string, projectId: string) => Promise<void>
+  onRefreshWorkspace: () => Promise<void>
 }
 
 function active(status: string | undefined): boolean {
@@ -61,8 +68,27 @@ function formatTime(value: string | undefined): string {
   return Number.isNaN(date.getTime()) ? '未知' : date.toLocaleString()
 }
 
+function messageOf(error: unknown): string {
+  if (error instanceof Error) return error.message
+  if (typeof error === 'string') return error
+  if (error && typeof error === 'object' && 'message' in error) return String((error as { message: unknown }).message)
+  return String(error)
+}
+
+function pendingStatusLabel(status: PendingSummary['status']): string {
+  if (status === PendingStatus.PendingInvalid) return '无效'
+  if (status === PendingStatus.PendingPending) return '待应用'
+  return String(status)
+}
+
+function isPendingHashConflict(message: string): boolean {
+  return message.includes('PARAMS_CHANGED') || message.includes('CONTEXT_CHANGED')
+}
+
 export function AgentConsole({
   runs,
+  projectId,
+  pending,
   runViews,
   selectedRunId,
   selectedRun,
@@ -74,8 +100,132 @@ export function AgentConsole({
   onPermission,
   onQuestion,
   onInterrupt,
+  onGetPending,
+  onApplyPending,
+  onDiscardPending,
+  onRefreshWorkspace,
 }: Props) {
   const [tab, setTab] = useState<ConsoleTab>('conversation')
+  const pendingItems = useMemo(
+    () => pending.filter((item) => item.status === PendingStatus.PendingPending || item.status === PendingStatus.PendingInvalid),
+    [pending],
+  )
+  const [selectedPendingId, setSelectedPendingId] = useState('')
+  const [pendingDetail, setPendingDetail] = useState<PendingDetail | null>(null)
+  const [pendingLoading, setPendingLoading] = useState(false)
+  const [pendingLoadError, setPendingLoadError] = useState('')
+  const [pendingActionId, setPendingActionId] = useState('')
+  const [pendingActionError, setPendingActionError] = useState('')
+  const [forceConfirmationId, setForceConfirmationId] = useState('')
+  const [pendingSyncError, setPendingSyncError] = useState('')
+  const [resolvedPendingIds, setResolvedPendingIds] = useState<Set<string>>(() => new Set())
+  const pendingGeneration = useRef(0)
+  const pendingActionInFlight = useRef(false)
+  const currentProjectId = useRef(projectId)
+  currentProjectId.current = projectId
+  const selectedPending = pendingItems.find((item) => item.id === selectedPendingId)
+
+  useEffect(() => {
+    pendingGeneration.current += 1
+    pendingActionInFlight.current = false
+    setSelectedPendingId('')
+    setPendingDetail(null)
+    setPendingLoading(false)
+    setPendingLoadError('')
+    setPendingActionId('')
+    setPendingActionError('')
+    setForceConfirmationId('')
+    setPendingSyncError('')
+    setResolvedPendingIds(new Set())
+  }, [projectId])
+
+  useEffect(() => {
+    const activeIDs = new Set(pendingItems.map((item) => item.id))
+    setResolvedPendingIds((current) => new Set([...current].filter((id) => activeIDs.has(id))))
+    if (selectedPendingId && !activeIDs.has(selectedPendingId)) {
+      pendingGeneration.current += 1
+      setSelectedPendingId('')
+      setPendingDetail(null)
+      setPendingLoading(false)
+      setPendingLoadError('')
+      setPendingActionError('')
+      setForceConfirmationId('')
+      setPendingSyncError('')
+    }
+  }, [pendingItems, selectedPendingId])
+
+  async function loadPending(id: string) {
+    if (!projectId) return
+    const ownerProjectId = projectId
+    const generation = ++pendingGeneration.current
+    setSelectedPendingId(id)
+    setPendingDetail(null)
+    setPendingLoading(true)
+    setPendingLoadError('')
+    setPendingActionError('')
+    setForceConfirmationId('')
+    setPendingSyncError('')
+    try {
+      const detail = await onGetPending(id, ownerProjectId)
+      if (generation !== pendingGeneration.current || currentProjectId.current !== ownerProjectId) return
+      setPendingDetail(detail)
+    } catch (failure) {
+      if (generation !== pendingGeneration.current || currentProjectId.current !== ownerProjectId) return
+      setPendingLoadError(messageOf(failure))
+    } finally {
+      if (generation === pendingGeneration.current && currentProjectId.current === ownerProjectId) setPendingLoading(false)
+    }
+  }
+
+  async function mutatePending(action: 'apply' | 'discard', force = false) {
+    const id = selectedPendingId
+    const ownerProjectId = projectId
+    if (!id || !ownerProjectId || pendingActionInFlight.current || resolvedPendingIds.has(id)) return
+    pendingActionInFlight.current = true
+    setPendingActionId(id)
+    setPendingActionError('')
+    setPendingSyncError('')
+    try {
+      if (action === 'apply') await onApplyPending(id, force, ownerProjectId)
+      else await onDiscardPending(id, ownerProjectId)
+      if (currentProjectId.current !== ownerProjectId) return
+      setResolvedPendingIds((current) => new Set(current).add(id))
+      setForceConfirmationId('')
+      try {
+        await onRefreshWorkspace()
+      } catch (failure) {
+        if (currentProjectId.current === ownerProjectId) {
+          setPendingSyncError(`操作已成功，但工程状态同步失败：${messageOf(failure)}`)
+        }
+      }
+    } catch (failure) {
+      if (currentProjectId.current !== ownerProjectId) return
+      const message = messageOf(failure)
+      if (action === 'apply' && !force && isPendingHashConflict(message)) {
+        setForceConfirmationId(id)
+        setPendingActionError('')
+      } else {
+        setPendingActionError(`${action === 'apply' ? '应用' : '丢弃'}失败：${message}`)
+      }
+    } finally {
+      if (currentProjectId.current === ownerProjectId) {
+        pendingActionInFlight.current = false
+        setPendingActionId('')
+      }
+    }
+  }
+
+  async function retryWorkspace() {
+    const ownerProjectId = projectId
+    if (!ownerProjectId) return
+    try {
+      await onRefreshWorkspace()
+      if (currentProjectId.current === ownerProjectId) setPendingSyncError('')
+    } catch (failure) {
+      if (currentProjectId.current === ownerProjectId) setPendingSyncError(`工程状态同步失败：${messageOf(failure)}`)
+    }
+  }
+
   const requestGroups = Object.values(runViews).flatMap((view) => {
     const summary = requestSummary(view)
     return summary ? [summary] : []
@@ -129,11 +279,59 @@ export function AgentConsole({
         ])}
         {requestsCount === 0 ? <div className="agent-console-empty">没有待确认请求</div> : null}
 
-        <ConsoleTabs active={tab} pendingCount={0} onChange={setTab} />
+        <ConsoleTabs active={tab} pendingCount={pendingItems.length} onChange={setTab} />
         {tab === 'pending' ? (
-          <section id="console-panel-pending" role="tabpanel" aria-labelledby="console-tab-pending" className="console-pending-empty">
-            <strong>暂无待处理内容</strong>
-            <p>待应用产物预览与操作将在 M2-10B 接入。</p>
+          <section id="console-panel-pending" role="tabpanel" aria-labelledby="console-tab-pending" className="console-pending-panel">
+            {pendingItems.length ? (
+              <>
+                <ul className="console-pending-list" aria-label="当前工程的待处理结果">
+                  {pendingItems.map((item) => {
+                    const resolved = resolvedPendingIds.has(item.id)
+                    return (
+                      <li key={item.id}>
+                        <button
+                          type="button"
+                          className={`console-pending-list-item${selectedPendingId === item.id ? ' is-selected' : ''}`}
+                          aria-pressed={selectedPendingId === item.id}
+                          disabled={!projectId || resolved}
+                          onClick={() => void loadPending(item.id)}
+                        >
+                          <span className="console-pending-list-status">{resolved ? '已提交' : pendingStatusLabel(item.status)}</span>
+                          <strong>{item.nodeId}</strong>
+                          <span>{item.summary || item.kind}</span>
+                        </button>
+                      </li>
+                    )
+                  })}
+                </ul>
+                {selectedPending ? (
+                  <PendingArtifactCard
+                    summary={selectedPending}
+                    detail={pendingDetail?.pending.id === selectedPending.id ? pendingDetail : null}
+                    loading={pendingLoading}
+                    loadError={pendingLoadError}
+                    actionError={pendingActionError}
+                    forceConfirmation={forceConfirmationId === selectedPending.id}
+                    actionBusy={pendingActionId === selectedPending.id}
+                    resolved={resolvedPendingIds.has(selectedPending.id)}
+                    syncError={pendingSyncError}
+                    onRetryDetail={() => void loadPending(selectedPending.id)}
+                    onApply={() => void mutatePending('apply')}
+                    onDiscard={() => void mutatePending('discard')}
+                    onConfirmForce={() => void mutatePending('apply', true)}
+                    onCancelForce={() => { setForceConfirmationId(''); setPendingActionError('') }}
+                    onRetryWorkspace={() => void retryWorkspace()}
+                  />
+                ) : (
+                  <p className="console-pending-message">选择一项以按需读取正文。</p>
+                )}
+              </>
+            ) : (
+              <div className="console-pending-empty">
+                <strong>暂无待处理结果</strong>
+                <p>结构化运行结果会出现在这里，应用后才会改变节点内容。</p>
+              </div>
+            )}
           </section>
         ) : (
           <section id="console-panel-conversation" role="tabpanel" aria-labelledby="console-tab-conversation" className="console-conversation">

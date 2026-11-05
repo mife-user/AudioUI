@@ -1,9 +1,14 @@
 import { memo } from 'react'
 import { Handle, Position, type NodeProps } from '@xyflow/react'
-import type { CanvasFlowNode } from './flowModel'
+import { nodeHandleLayoutKey, type CanvasFlowNode } from './flowModel'
+import { useMeasuredNodeHandles } from './useMeasuredNodeHandles'
 
-export const PromptNode = memo(function PromptNode({ data }: NodeProps<CanvasFlowNode>) {
+export const PromptNode = memo(function PromptNode({ id, data }: NodeProps<CanvasFlowNode>) {
   const { node, runningLocked, pathHighlighted, mutationsDisabled, onAddChild } = data
+  const requiredHandles = node.parent
+    ? [{ id: 'prompt-input', type: 'target' as const }, { id: 'prompt-output', type: 'source' as const }]
+    : [{ id: 'prompt-input', type: 'target' as const }]
+  useMeasuredNodeHandles(id, nodeHandleLayoutKey('prompt', data), data.projectId ?? '', requiredHandles, data.onNodeHandlesMeasured)
   const isDraft = !node.parent
   return (
     <article className={`canvas-node prompt-node${pathHighlighted ? ' is-path' : ''}${runningLocked ? ' is-running-locked' : ''}${node.locked ? ' is-content-locked' : ''}${isDraft ? ' is-draft' : ''}`}>

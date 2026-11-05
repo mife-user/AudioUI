@@ -130,38 +130,68 @@ func mutationReceipt(projectValue entity.Project, nodeID string) entity.GraphMut
 	}
 }
 
-func (h *WorkflowService) ListPending() ([]entity.Pending, error) {
+func (h *WorkflowService) ListPending(projectID string) ([]entity.Pending, error) {
+	projectID = strings.TrimSpace(projectID)
+	if projectID == "" {
+		return nil, errors.New("工程 ID 不能为空")
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	return h.service.ListPending(ctx)
+	return h.service.ListPending(ctx, projectID)
 }
 
-func (h *WorkflowService) GetPending(id string) (entity.PendingDetail, error) {
+func (h *WorkflowService) GetPending(id, projectID string) (entity.PendingDetail, error) {
 	id = strings.TrimSpace(id)
+	projectID = strings.TrimSpace(projectID)
 	if id == "" {
 		return entity.PendingDetail{}, errors.New("待应用 ID 不能为空")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	return h.service.GetPending(ctx, id)
-}
-
-func (h *WorkflowService) ApplyPending(id string, force bool) (entity.Project, error) {
-	id = strings.TrimSpace(id)
-	if id == "" {
-		return entity.Project{}, errors.New("待应用 ID 不能为空")
+	if projectID == "" {
+		return entity.PendingDetail{}, errors.New("工程 ID 不能为空")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	return h.service.ApplyPending(ctx, id, force)
+	return h.service.GetPending(ctx, id, projectID)
 }
 
-func (h *WorkflowService) DiscardPending(id string) (entity.Project, error) {
+func (h *WorkflowService) ApplyPending(id string, force bool, projectID string) (entity.Project, error) {
 	id = strings.TrimSpace(id)
+	projectID = strings.TrimSpace(projectID)
 	if id == "" {
 		return entity.Project{}, errors.New("待应用 ID 不能为空")
 	}
+	if projectID == "" {
+		return entity.Project{}, errors.New("工程 ID 不能为空")
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	return h.service.DiscardPending(ctx, id)
+	return h.service.ApplyPending(ctx, id, force, projectID)
+}
+
+func (h *WorkflowService) DiscardPending(id, projectID string) (entity.Project, error) {
+	id = strings.TrimSpace(id)
+	projectID = strings.TrimSpace(projectID)
+	if id == "" {
+		return entity.Project{}, errors.New("待应用 ID 不能为空")
+	}
+	if projectID == "" {
+		return entity.Project{}, errors.New("工程 ID 不能为空")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	return h.service.DiscardPending(ctx, id, projectID)
+}
+
+func (h *WorkflowService) GetTopicCandidates(nodeID, projectID string) ([]entity.TopicCandidate, error) {
+	nodeID = strings.TrimSpace(nodeID)
+	projectID = strings.TrimSpace(projectID)
+	if nodeID == "" {
+		return nil, errors.New("节点 ID 不能为空")
+	}
+	if projectID == "" {
+		return nil, errors.New("工程 ID 不能为空")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	return h.service.GetTopicCandidates(ctx, nodeID, projectID)
 }

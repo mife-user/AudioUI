@@ -1,7 +1,8 @@
 import { memo } from 'react'
 import { Handle, Position, type NodeProps } from '@xyflow/react'
 import { TopicParameters } from './TopicParameters'
-import type { CanvasFlowNode } from './flowModel'
+import { nodeHandleLayoutKey, type CanvasFlowNode } from './flowModel'
+import { useMeasuredNodeHandles } from './useMeasuredNodeHandles'
 
 function runStatusLabel(status: string | undefined): string {
   switch (status) {
@@ -15,13 +16,15 @@ function runStatusLabel(status: string | undefined): string {
   }
 }
 
-export const TopicNode = memo(function TopicNode({ data }: NodeProps<CanvasFlowNode>) {
+export const TopicNode = memo(function TopicNode({ id, data }: NodeProps<CanvasFlowNode>) {
   const {
     node,
     projectId,
     runningLocked,
     pathHighlighted,
     candidates,
+    candidateError,
+    candidateLoading = false,
     mutationsDisabled,
     globalRunBusy,
     runSubmitting,
@@ -31,6 +34,10 @@ export const TopicNode = memo(function TopicNode({ data }: NodeProps<CanvasFlowN
     onUpdateTopicParams,
     onStartTopicRun,
   } = data
+  const requiredHandles = candidates.length
+    ? candidates.map((candidate, index) => ({ id: `candidate-${candidate.index ?? index}`, type: 'source' as const }))
+    : data.hasUnmappedChildren ? [{ id: 'topic-connection-anchor', type: 'source' as const }] : []
+  useMeasuredNodeHandles(id, nodeHandleLayoutKey('topic', data), projectId ?? '', requiredHandles, data.onNodeHandlesMeasured)
   const runState = runSubmitting ? '正在启动' : runStatusLabel(runStatus)
   const status = runningLocked
     ? `${runStatus === 'starting' ? '启动中' : '运行中'} · 只读`
@@ -58,38 +65,46 @@ export const TopicNode = memo(function TopicNode({ data }: NodeProps<CanvasFlowN
         />
         {pendingCount > 0 ? (
           <p className="canvas-node-hint topic-pending-hint" role="status">
-            候选结果待处理；预览与应用将在 M2-10B 接入。
+            候选结果待处理；请在控制台预览并应用。
           </p>
         ) : null}
-        {candidates.length ? (
+        {candidateError ? (
+          <p className="canvas-node-hint topic-candidate-error" role="alert">候选读取失败：{candidateError}</p>
+        ) : candidateLoading ? (
+          <p className="canvas-node-hint topic-candidate-hint" role="status">正在读取已应用候选…</p>
+        ) : candidates.length ? (
           <div className="candidate-port-list" aria-label={`${node.title} 的候选输出端口`}>
-            {candidates.map((candidate, index) => (
-              <div className="candidate-port-row" key={`${node.id}-${index}`}>
-                <div className="candidate-port-copy">
-                  <strong>{index + 1}. {candidate.title}</strong>
-                  {candidate.angle ? <span>{candidate.angle}</span> : null}
+            {candidates.map((candidate, index) => {
+              const candidateIndex = candidate.index ?? index
+              return (
+                <div className="candidate-port-row" key={`${node.id}-${candidateIndex}`}>
+                  <div className="candidate-port-copy">
+                    <strong>{candidateIndex + 1}. {candidate.title}</strong>
+                    {candidate.angle ? <span>{candidate.angle}</span> : null}
+                    {candidate.hook ? <span>{candidate.hook}</span> : null}
+                  </div>
+                  <Handle
+                    id={`candidate-${candidateIndex}`}
+                    type="source"
+                    position={Position.Right}
+                    isConnectable={!runningLocked && !candidateError && !candidateLoading}
+                    isConnectableStart={!runningLocked && !candidateError && !candidateLoading}
+                    isConnectableEnd={false}
+                    aria-label={`候选 ${candidateIndex + 1}：${candidate.title} 输出端口`}
+                    className="candidate-handle"
+                  />
+                  <button
+                    type="button"
+                    className="node-add-branch nodrag"
+                    disabled={runningLocked || mutationsDisabled || candidateLoading || Boolean(candidateError)}
+                    onClick={() => onAddChild(node.id, candidateIndex)}
+                    aria-label={`从候选 ${candidateIndex + 1} 新增提示词`}
+                  >
+                    ＋
+                  </button>
                 </div>
-                <Handle
-                  id={`candidate-${index}`}
-                  type="source"
-                  position={Position.Right}
-                  isConnectable={!runningLocked}
-                  isConnectableStart={!runningLocked}
-                  isConnectableEnd={false}
-                  aria-label={`候选 ${index + 1}：${candidate.title} 输出端口`}
-                  className="candidate-handle"
-                />
-                <button
-                  type="button"
-                  className="node-add-branch nodrag"
-                  disabled={runningLocked || mutationsDisabled}
-                  onClick={() => onAddChild(node.id, index)}
-                  aria-label={`从候选 ${index + 1} 新增提示词`}
-                >
-                  ＋
-                </button>
-              </div>
-            ))}
+              )
+            })}
           </div>
         ) : (
           <p className="canvas-node-hint topic-candidate-hint">

@@ -23,13 +23,14 @@ const (
 )
 
 type Options struct {
-	Project       port.ProjectSession
-	Candidates    CandidateCounter
-	Workspace     port.WorkspaceMover
-	Pending       port.PendingStoreProvider
-	Artifacts     port.ArtifactStoreProvider
-	ContextHasher port.ContextHasher
-	OnChange      func(projectID string, revision int64, reason string)
+	Project         port.ProjectSession
+	Candidates      CandidateCounter
+	CandidateReader TopicCandidateReader
+	Workspace       port.WorkspaceMover
+	Pending         port.PendingStoreProvider
+	Artifacts       port.ArtifactStoreProvider
+	ContextHasher   port.ContextHasher
+	OnChange        func(projectID string, revision int64, reason string)
 }
 
 type Service struct {

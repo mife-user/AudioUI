@@ -61,6 +61,7 @@ describe('WorkspacePage', () => {
       moveNode: vi.fn().mockResolvedValue({ projectId: 'p_one', projectRevision: 4, nodeId: 'n_selected' }),
       selectNode: vi.fn(() => selected.promise),
       updateNodeParams: vi.fn().mockResolvedValue({ projectId: 'p_one', projectRevision: 4, nodeId: 'n_selected' }),
+      getTopicCandidates: vi.fn().mockResolvedValue([]),
     }
     render(<WorkspacePage status="ready" snapshot={projectSnapshot} error="" onRetry={vi.fn()} api={api} />)
 
@@ -84,6 +85,7 @@ describe('WorkspacePage', () => {
       moveNode: vi.fn().mockResolvedValue({ projectId: 'p_one', projectRevision: 4, nodeId: 'n_selected' }),
       selectNode: vi.fn().mockRejectedValue(new Error('select failed')),
       updateNodeParams: vi.fn().mockResolvedValue({ projectId: 'p_one', projectRevision: 4, nodeId: 'n_selected' }),
+      getTopicCandidates: vi.fn().mockResolvedValue([]),
     }
     render(<WorkspacePage status="ready" snapshot={projectSnapshot} error="" onRetry={vi.fn()} api={api} />)
 

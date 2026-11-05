@@ -696,6 +696,12 @@
   margin-top: var(--s2);
 }
 
+.topic-candidate-error {
+  margin-top: var(--s2);
+  color: var(--danger);
+  overflow-wrap: anywhere;
+}
+
 .candidate-port-list {
   display: flex;
   flex-direction: column;
@@ -1035,6 +1041,178 @@
 
 .console-pending-empty p {
   margin: 6px 0 0;
+}
+
+.console-pending-panel {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+}
+
+.console-pending-list {
+  max-height: 150px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s1);
+  overflow: auto;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.console-pending-list-item {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 7px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+  color: var(--text-dim);
+  text-align: left;
+  cursor: pointer;
+}
+
+.console-pending-list-item:hover,
+.console-pending-list-item.is-selected {
+  border-color: var(--border-strong);
+  background: var(--accent-soft);
+}
+
+.console-pending-list-item:disabled {
+  cursor: not-allowed;
+  opacity: .65;
+}
+
+.console-pending-list-status,
+.console-pending-status {
+  color: var(--warn);
+  font-size: 9px;
+}
+
+.console-pending-list-item strong,
+.console-pending-card-head strong {
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 10px;
+}
+
+.console-pending-message,
+.console-pending-summary,
+.console-pending-error {
+  margin: 0;
+  color: var(--muted);
+  font-size: 10.5px;
+  overflow-wrap: anywhere;
+}
+
+.console-pending-error,
+.console-pending-status.is-invalid {
+  color: var(--danger);
+}
+
+.console-pending-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  padding: var(--s2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+}
+
+.console-pending-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--s2);
+}
+
+.console-pending-card-head > div {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.console-pending-topics {
+  max-height: 240px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s1);
+  overflow: auto;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.console-pending-topics li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 7px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+  font-size: 10px;
+  overflow-wrap: anywhere;
+}
+
+.console-pending-topics li strong {
+  color: var(--text);
+}
+
+.console-pending-topics li span {
+  color: var(--text-dim);
+}
+
+.console-pending-raw {
+  color: var(--text-dim);
+  font-size: 10px;
+}
+
+.console-pending-raw pre {
+  max-height: 220px;
+  overflow: auto;
+  margin: var(--s1) 0 0;
+  padding: var(--s2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+  color: var(--text);
+  font-family: var(--mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.console-pending-force {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s1);
+  padding: var(--s2);
+  border: 1px solid var(--warn);
+  border-radius: var(--radius-sm);
+  background: var(--warn-soft);
+  color: var(--text-dim);
+  font-size: 10px;
+}
+
+.console-pending-force strong {
+  color: var(--warn);
+}
+
+.console-pending-force p {
+  margin: 0;
+}
+
+.console-pending-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--s1);
 }
 
 .run-list {

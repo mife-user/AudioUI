@@ -8,6 +8,8 @@ export type CanvasNodeData = {
   pathHighlighted: boolean
   hasUnmappedChildren: boolean
   candidates: TopicCandidateFixture[]
+  candidateError?: string
+  candidateLoading?: boolean
   mutationsDisabled: boolean
   projectId?: string
   runStatus?: string
@@ -16,6 +18,7 @@ export type CanvasNodeData = {
   runSubmitting?: boolean
   onUpdateTopicParams?: (nodeId: string, title: string, params: NodeParams, projectId: string) => Promise<boolean | void>
   onStartTopicRun?: (nodeId: string, projectId: string) => Promise<RunStartResult>
+  onNodeHandlesMeasured?: (nodeId: string, layoutKey: string, projectId: string) => void
   onAddChild: (nodeId: string, candidate: number | null) => void
 }
 
@@ -31,8 +34,69 @@ export function deriveHighlightedPath(snapshot: WorkspaceSnapshot): Set<string> 
 
 type TopicCallbacks = {
   runSubmittingNodeId?: string
+  candidateErrors?: Record<string, string>
+  candidateLoading?: Record<string, boolean>
   onUpdateTopicParams?: CanvasNodeData['onUpdateTopicParams']
   onStartTopicRun?: CanvasNodeData['onStartTopicRun']
+  onNodeHandlesMeasured?: CanvasNodeData['onNodeHandlesMeasured']
+}
+
+export function candidateAt(candidates: TopicCandidateFixture[] | undefined, index: number | null | undefined): TopicCandidateFixture | undefined {
+  if (index === null || index === undefined) return undefined
+  return candidates?.find((candidate, position) => (candidate.index ?? position) === index)
+}
+
+export function nodeHandleLayoutKey(type: CanvasFlowNode['type'], data: CanvasNodeData): string {
+  if (type === 'topic') {
+    return JSON.stringify({
+      type,
+      candidates: data.candidates.map((candidate, position) => ({
+        index: candidate.index ?? position,
+        title: candidate.title,
+        angle: candidate.angle ?? '',
+        hook: candidate.hook ?? '',
+      })),
+      hasUnmappedChildren: data.hasUnmappedChildren,
+      candidateError: data.candidateError ?? '',
+      candidateLoading: Boolean(data.candidateLoading),
+    })
+  }
+  return JSON.stringify({ type, hasOutput: Boolean(data.node.parent) })
+}
+
+export function buildFlowEdges(
+  nodes: CanvasFlowNode[],
+  measuredHandleLayouts?: Record<string, string>,
+): Edge[] {
+  const byId = new Map(nodes.map((node) => [node.id, node]))
+  return nodes.flatMap((childFlowNode) => {
+    const child = childFlowNode.data.node
+    if (!child.parent) return []
+    const parentFlowNode = byId.get(child.parent)
+    if (!parentFlowNode) return []
+    const sourceHandle = parentFlowNode.type === 'topic'
+      ? candidateAt(parentFlowNode.data.candidates, child.parentCandidate)
+        ? `candidate-${child.parentCandidate}`
+        : 'topic-connection-anchor'
+      : 'prompt-output'
+    if (measuredHandleLayouts && (
+      measuredHandleLayouts[parentFlowNode.id] !== nodeHandleLayoutKey(parentFlowNode.type, parentFlowNode.data)
+      || measuredHandleLayouts[childFlowNode.id] !== nodeHandleLayoutKey(childFlowNode.type, childFlowNode.data)
+    )) return []
+    const highlightedEdge = parentFlowNode.data.pathHighlighted && childFlowNode.data.pathHighlighted
+    return [{
+      id: `edge-${parentFlowNode.id}-${childFlowNode.id}`,
+      source: parentFlowNode.id,
+      sourceHandle,
+      target: childFlowNode.id,
+      targetHandle: 'prompt-input',
+      type: 'smoothstep',
+      selectable: false,
+      focusable: false,
+      className: highlightedEdge ? 'workspace-edge-highlighted' : 'workspace-edge',
+      ariaLabel: `${parentFlowNode.data.node.title} 到 ${child.title}`,
+    }]
+  })
 }
 
 export function buildFlowModel(
@@ -46,7 +110,6 @@ export function buildFlowModel(
   const highlighted = deriveHighlightedPath(snapshot)
   const projectNodes = snapshot.nodes ?? []
   const projectId = snapshot.project?.id ?? ''
-  const byId = new Map(projectNodes.map((node) => [node.id, node]))
   const latestRunByNode = new Map<string, { status: string; startedAt: string }>()
   for (const run of snapshot.runs ?? []) {
     const previous = latestRunByNode.get(run.nodeId)
@@ -70,8 +133,10 @@ export function buildFlowModel(
       runningLocked: locked.has(node.id),
       pathHighlighted: highlighted.has(node.id),
       hasUnmappedChildren: projectNodes.some((child) => child.parent === node.id
-        && !candidateFixtures[node.id]?.[child.parentCandidate ?? 0]),
+        && !candidateAt(candidateFixtures[node.id], child.parentCandidate)),
       candidates: candidateFixtures[node.id] ?? [],
+      candidateError: topicCallbacks.candidateErrors?.[node.id],
+      candidateLoading: topicCallbacks.candidateLoading?.[node.id] ?? false,
       mutationsDisabled,
       projectId,
       runStatus: latestRunByNode.get(node.id)?.status,
@@ -80,33 +145,12 @@ export function buildFlowModel(
       runSubmitting: topicCallbacks.runSubmittingNodeId === node.id,
       onUpdateTopicParams: topicCallbacks.onUpdateTopicParams,
       onStartTopicRun: topicCallbacks.onStartTopicRun,
+      onNodeHandlesMeasured: topicCallbacks.onNodeHandlesMeasured,
       onAddChild,
     },
   }))
 
-  const edges: Edge[] = projectNodes.flatMap((child) => {
-    if (!child.parent || !byId.has(child.parent)) return []
-    const parent = byId.get(child.parent)
-    if (!parent) return []
-    const sourceHandle = parent.type === 'topic'
-      ? candidateFixtures[parent.id]?.[child.parentCandidate ?? 0]
-        ? `candidate-${child.parentCandidate ?? 0}`
-        : 'topic-connection-anchor'
-      : 'prompt-output'
-    const highlightedEdge = highlighted.has(parent.id) && highlighted.has(child.id)
-    return [{
-      id: `edge-${parent.id}-${child.id}`,
-      source: parent.id,
-      sourceHandle,
-      target: child.id,
-      targetHandle: 'prompt-input',
-      type: 'smoothstep',
-      selectable: false,
-      focusable: false,
-      className: highlightedEdge ? 'workspace-edge-highlighted' : 'workspace-edge',
-      ariaLabel: `${parent.title} 到 ${child.title}`,
-    }]
-  })
+  const edges = buildFlowEdges(nodes)
 
   return { nodes, edges }
 }

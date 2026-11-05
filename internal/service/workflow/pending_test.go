@@ -114,7 +114,7 @@ func TestCreatePendingPreservesInvalidOutputAndRequestIdentity(t *testing.T) {
 	if invalid.Status != valueobject.PendingInvalid || invalid.Error == "" {
 		t.Fatalf("invalid output was not retained as invalid: %+v", invalid)
 	}
-	detail, err := h.service.GetPending(context.Background(), invalid.ID)
+	detail, err := h.service.GetPending(context.Background(), invalid.ID, h.session.project.ID)
 	if err != nil || !bytes.Equal(detail.RawPayload, invalidPayload) {
 		t.Fatalf("raw payload changed: %q err=%v", detail.RawPayload, err)
 	}
@@ -173,14 +173,14 @@ func TestCreatePendingEnforcesPayloadAndTreeLimits(t *testing.T) {
 	if _, err := h.service.CreatePending(context.Background(), tooMany); !errors.Is(err, ErrPendingLimit) {
 		t.Fatalf("51st pending error = %v, want PENDING_LIMIT_REACHED", err)
 	}
-	pendingList, err := h.service.ListPending(context.Background())
+	pendingList, err := h.service.ListPending(context.Background(), h.session.project.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(pendingList) != valueobject.MaxPendingPerTree {
 		t.Fatalf("pending count = %d", len(pendingList))
 	}
-	if _, err := h.service.DiscardPending(context.Background(), pendingList[0].ID); err != nil {
+	if _, err := h.service.DiscardPending(context.Background(), pendingList[0].ID, h.session.project.ID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := h.service.CreatePending(context.Background(), tooMany); err != nil {
@@ -208,17 +208,17 @@ func TestApplyPendingConflictsForceLockingAndStalePropagation(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.hasher.hashes.ParamsHash = "params-v2"
-	if _, err := h.service.ApplyPending(context.Background(), pending.ID, false); !errors.Is(err, ErrParamsChanged) {
+	if _, err := h.service.ApplyPending(context.Background(), pending.ID, false, h.session.project.ID); !errors.Is(err, ErrParamsChanged) {
 		t.Fatalf("params mismatch error = %v, want PARAMS_CHANGED", err)
 	}
 	if h.session.project.Revision != 2 || h.node(t, "n_a").Locked {
 		t.Fatal("conflicting apply changed project state")
 	}
 	h.hasher.hashes = valueobject.ContextHashes{ContextHash: "new-context", AncestorHash: "ancestor-v2", ParamsHash: "params-v1"}
-	if _, err := h.service.ApplyPending(context.Background(), pending.ID, false); !errors.Is(err, ErrContextChanged) {
+	if _, err := h.service.ApplyPending(context.Background(), pending.ID, false, h.session.project.ID); !errors.Is(err, ErrContextChanged) {
 		t.Fatalf("ancestor mismatch error = %v, want CONTEXT_CHANGED", err)
 	}
-	applied, err := h.service.ApplyPending(context.Background(), pending.ID, true)
+	applied, err := h.service.ApplyPending(context.Background(), pending.ID, true, h.session.project.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -235,10 +235,10 @@ func TestApplyPendingConflictsForceLockingAndStalePropagation(t *testing.T) {
 	if _, _, err := h.artifacts.Get(context.Background(), stored.ArtifactID); err != nil {
 		t.Fatalf("applied artifact missing: %v", err)
 	}
-	if _, err := h.service.ApplyPending(context.Background(), pending.ID, true); !errors.Is(err, ErrPendingAlreadyApplied) {
+	if _, err := h.service.ApplyPending(context.Background(), pending.ID, true, h.session.project.ID); !errors.Is(err, ErrPendingAlreadyApplied) {
 		t.Fatalf("duplicate apply error = %v", err)
 	}
-	if _, err := h.service.DiscardPending(context.Background(), pending.ID); !errors.Is(err, ErrPendingAlreadyApplied) {
+	if _, err := h.service.DiscardPending(context.Background(), pending.ID, h.session.project.ID); !errors.Is(err, ErrPendingAlreadyApplied) {
 		t.Fatalf("discard applied error = %v", err)
 	}
 }
@@ -251,7 +251,7 @@ func TestForceCannotBypassInvalidOutputOrRunLock(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := h.service.ApplyPending(context.Background(), pending.ID, true); !errors.Is(err, ErrPendingInvalid) {
+		if _, err := h.service.ApplyPending(context.Background(), pending.ID, true, h.session.project.ID); !errors.Is(err, ErrPendingInvalid) {
 			t.Fatalf("force invalid apply error = %v, want PENDING_INVALID", err)
 		}
 	})
@@ -265,7 +265,7 @@ func TestForceCannotBypassInvalidOutputOrRunLock(t *testing.T) {
 		if err := h.service.AcquireRunLock(context.Background(), "r_active", "n_topic", "n_a", []string{"n_topic", "n_a"}); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := h.service.ApplyPending(context.Background(), pending.ID, true); !errors.Is(err, ErrRunningChainLocked) {
+		if _, err := h.service.ApplyPending(context.Background(), pending.ID, true, h.session.project.ID); !errors.Is(err, ErrRunningChainLocked) {
 			t.Fatalf("force on run-locked path error = %v, want RUNNING_CHAIN_LOCKED", err)
 		}
 	})
@@ -278,7 +278,7 @@ func TestDiscardPendingIsIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	discarded, err := h.service.DiscardPending(context.Background(), pending.ID)
+	discarded, err := h.service.DiscardPending(context.Background(), pending.ID, h.session.project.ID)
 	if err != nil || discarded.Revision != 3 {
 		t.Fatalf("discard project=%+v err=%v", discarded, err)
 	}
@@ -287,11 +287,11 @@ func TestDiscardPendingIsIdempotent(t *testing.T) {
 		t.Fatalf("discarded pending=%+v err=%v", stored, err)
 	}
 	changes := len(*h.changes)
-	discarded, err = h.service.DiscardPending(context.Background(), pending.ID)
+	discarded, err = h.service.DiscardPending(context.Background(), pending.ID, h.session.project.ID)
 	if err != nil || discarded.Revision != 3 || len(*h.changes) != changes {
 		t.Fatalf("repeated discard project=%+v err=%v changes=%d", discarded, err, len(*h.changes))
 	}
-	if _, err := h.service.ApplyPending(context.Background(), pending.ID, true); !errors.Is(err, ErrPendingNotApplicable) {
+	if _, err := h.service.ApplyPending(context.Background(), pending.ID, true, h.session.project.ID); !errors.Is(err, ErrPendingNotApplicable) {
 		t.Fatalf("apply discarded pending error = %v", err)
 	}
 }
@@ -322,7 +322,7 @@ func TestApplyTopicUsesRoundKindWhenArtifactMetadataWasFirstWrittenForAnotherKin
 	if err != nil {
 		t.Fatal(err)
 	}
-	applied, err := h.service.ApplyPending(context.Background(), pending.ID, false)
+	applied, err := h.service.ApplyPending(context.Background(), pending.ID, false, h.session.project.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

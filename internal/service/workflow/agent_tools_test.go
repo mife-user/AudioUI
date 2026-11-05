@@ -160,7 +160,7 @@ func TestCreateRunPendingBindsScopeAndSerializesConcurrentReplies(t *testing.T) 
 	if pending.Status != valueobject.PendingInvalid {
 		t.Fatalf("pending status = %s, want invalid", pending.Status)
 	}
-	detail, err := h.service.GetPending(context.Background(), pending.ID)
+	detail, err := h.service.GetPending(context.Background(), pending.ID, h.session.project.ID)
 	if err != nil || !bytes.Equal(detail.RawPayload, invalid) {
 		t.Fatalf("stored payload = %s err=%v", detail.RawPayload, err)
 	}

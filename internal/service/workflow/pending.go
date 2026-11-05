@@ -172,7 +172,7 @@ func (s *Service) CreatePending(ctx context.Context, input CreatePendingInput) (
 	return result, nil
 }
 
-func (s *Service) ListPending(ctx context.Context) ([]entity.Pending, error) {
+func (s *Service) ListPending(ctx context.Context, expectedProjectID string) ([]entity.Pending, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := ctx.Err(); err != nil {
@@ -184,6 +184,9 @@ func (s *Service) ListPending(ctx context.Context) ([]entity.Pending, error) {
 		if err != nil {
 			return err
 		}
+		if project.ID != expectedProjectID {
+			return fmt.Errorf("%w: expected %s, active %s", ErrProjectChanged, expectedProjectID, project.ID)
+		}
 		store, err := s.pendingStore(ctx, project.ID)
 		if err != nil {
 			return err
@@ -194,7 +197,7 @@ func (s *Service) ListPending(ctx context.Context) ([]entity.Pending, error) {
 	return result, err
 }
 
-func (s *Service) GetPending(ctx context.Context, id string) (entity.PendingDetail, error) {
+func (s *Service) GetPending(ctx context.Context, id, expectedProjectID string) (entity.PendingDetail, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := ctx.Err(); err != nil {
@@ -208,6 +211,9 @@ func (s *Service) GetPending(ctx context.Context, id string) (entity.PendingDeta
 		project, err := access.Current(ctx)
 		if err != nil {
 			return err
+		}
+		if project.ID != expectedProjectID {
+			return fmt.Errorf("%w: expected %s, active %s", ErrProjectChanged, expectedProjectID, project.ID)
 		}
 		store, err := s.pendingStore(ctx, project.ID)
 		if err != nil {
@@ -227,7 +233,7 @@ func (s *Service) GetPending(ctx context.Context, id string) (entity.PendingDeta
 	return result, err
 }
 
-func (s *Service) ApplyPending(ctx context.Context, id string, force bool) (entity.Project, error) {
+func (s *Service) ApplyPending(ctx context.Context, id string, force bool, expectedProjectID string) (entity.Project, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := ctx.Err(); err != nil {
@@ -238,6 +244,9 @@ func (s *Service) ApplyPending(ctx context.Context, id string, force bool) (enti
 		project, graph, err := loadProjectGraph(ctx, access)
 		if err != nil {
 			return err
+		}
+		if project.ID != expectedProjectID {
+			return fmt.Errorf("%w: expected %s, active %s", ErrProjectChanged, expectedProjectID, project.ID)
 		}
 		store, err := s.pendingStore(ctx, project.ID)
 		if err != nil {
@@ -341,7 +350,7 @@ func (s *Service) ApplyPending(ctx context.Context, id string, force bool) (enti
 	return result, nil
 }
 
-func (s *Service) DiscardPending(ctx context.Context, id string) (entity.Project, error) {
+func (s *Service) DiscardPending(ctx context.Context, id, expectedProjectID string) (entity.Project, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := ctx.Err(); err != nil {
@@ -352,6 +361,9 @@ func (s *Service) DiscardPending(ctx context.Context, id string) (entity.Project
 		project, err := access.Current(ctx)
 		if err != nil {
 			return err
+		}
+		if project.ID != expectedProjectID {
+			return fmt.Errorf("%w: expected %s, active %s", ErrProjectChanged, expectedProjectID, project.ID)
 		}
 		store, err := s.pendingStore(ctx, project.ID)
 		if err != nil {

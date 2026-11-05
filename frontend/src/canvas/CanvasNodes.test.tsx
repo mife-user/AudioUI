@@ -17,6 +17,9 @@ vi.mock('@xyflow/react', async () => {
       'aria-hidden': props['aria-hidden'],
     }),
     Position: { Right: 'right', Top: 'top', Bottom: 'bottom' },
+    useReactFlow: () => ({ getInternalNode: vi.fn() }),
+    useStoreApi: () => ({ subscribe: () => () => undefined }),
+    useUpdateNodeInternals: () => vi.fn(),
   }
 })
 
