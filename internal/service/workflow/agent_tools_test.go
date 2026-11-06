@@ -16,9 +16,17 @@ import (
 func scopedRun() port.RunScope {
 	return port.RunScope{
 		RunID: "r_mcp", ProjectID: "p_test", TreeID: "n_topic", NodeID: "n_b",
-		ChainID: "c_n_b", ChainPath: []string{"n_topic", "n_a", "n_b"},
+		ChainID: "c_n_b", ChainPath: []string{"n_topic", "n_candidate", "n_a", "n_b"},
 		ContextHash: "context-v1", AncestorHash: "ancestor-v1", ParamsHash: "params-v1",
 	}
+}
+
+func scopedPromptRun() port.RunScope {
+	scope := scopedRun()
+	scope.NodeID = "n_a"
+	scope.ChainID = "c_n_a"
+	scope.ChainPath = []string{"n_topic", "n_candidate", "n_a"}
+	return scope
 }
 
 func putRunArtifact(t *testing.T, h *pendingHarness, kind valueobject.OutputKind, nodeID string, payload []byte) entity.Artifact {
@@ -41,9 +49,17 @@ func setNodeRounds(project *entity.Project, nodeID string, rounds ...entity.Roun
 	}
 }
 
+func setCandidateArtifact(project *entity.Project, artifactID string) {
+	for i := range project.Nodes {
+		if project.Nodes[i].Type == valueobject.NodeTypeCandidate && project.Nodes[i].Parent == "n_topic" {
+			project.Nodes[i].CandidateSource.ArtifactID = artifactID
+		}
+	}
+}
+
 func TestRunGraphAndNodeExposeOnlyPath(t *testing.T) {
 	h := newPendingHarness(t, baseProject())
-	h.session.project.Nodes[1].Rounds = []entity.Round{{N: 1, Kind: valueobject.OutputKindScript, ArtifactID: "sha256:abc", PendingID: "p_old", RunID: "r_old"}}
+	setNodeRounds(&h.session.project, "n_a", entity.Round{N: 1, Kind: valueobject.OutputKindScript, ArtifactID: "sha256:abc", PendingID: "p_old", RunID: "r_old"})
 	scope := scopedRun()
 
 	graph, err := h.service.ReadRunGraph(context.Background(), scope)
@@ -86,6 +102,7 @@ func TestReadRunArtifactFiltersTopicCandidateAndUsesRoundKind(t *testing.T) {
 	h := newPendingHarness(t, baseProject())
 	topics := []byte(`{"topics":[{"title":"甲","angle":"角度甲","hook":"开头甲"},{"title":"乙","angle":"角度乙","hook":"开头乙"},{"title":"丙","angle":"角度丙","hook":"开头丙"}]}`)
 	topicArtifact := putRunArtifact(t, h, valueobject.OutputKindTopics, "n_topic", topics)
+	setCandidateArtifact(&h.session.project, topicArtifact.ID)
 	setNodeRounds(&h.session.project, "n_topic", entity.Round{N: 1, Kind: valueobject.OutputKindTopics, ArtifactID: topicArtifact.ID})
 
 	script := validScriptPayload()
@@ -122,17 +139,19 @@ func TestReadRunArtifactFailsClosedForInvalidCandidateAndConflictingReferences(t
 	h := newPendingHarness(t, baseProject())
 	topics := []byte(`{"topics":[{"title":"甲","angle":"角度甲","hook":"开头甲"},{"title":"乙","angle":"角度乙","hook":"开头乙"},{"title":"丙","angle":"角度丙","hook":"开头丙"}]}`)
 	artifact := putRunArtifact(t, h, valueobject.OutputKindTopics, "n_topic", topics)
+	setCandidateArtifact(&h.session.project, artifact.ID)
 	setNodeRounds(&h.session.project, "n_topic", entity.Round{N: 1, Kind: valueobject.OutputKindTopics, ArtifactID: artifact.ID})
 	scope := scopedRun()
 
-	*h.session.project.Nodes[1].ParentCandidate = 5
+	h.session.project.Nodes[1].CandidateSource.Index = 5
 	if _, err := h.service.ReadRunArtifact(context.Background(), scope, artifact.ID); !errors.Is(err, ErrCandidateInvalid) {
 		t.Fatalf("invalid candidate error = %v, want CANDIDATE_INVALID", err)
 	}
-	*h.session.project.Nodes[1].ParentCandidate = 0
+	h.session.project.Nodes[1].CandidateSource.Index = 0
 
 	combined := []byte(`{"topics":[{"title":"甲","angle":"角度甲","hook":"开头甲"},{"title":"乙","angle":"角度乙","hook":"开头乙"},{"title":"丙","angle":"角度丙","hook":"开头丙"}],"title":"脚本","scenes":[{"narration":"旁白","duration":0}]}`)
 	shared := putRunArtifact(t, h, valueobject.OutputKindTopics, "n_topic", combined)
+	setCandidateArtifact(&h.session.project, shared.ID)
 	setNodeRounds(&h.session.project, "n_topic", entity.Round{N: 1, Kind: valueobject.OutputKindTopics, ArtifactID: shared.ID})
 	setNodeRounds(&h.session.project, "n_a", entity.Round{N: 1, Kind: valueobject.OutputKindScript, ArtifactID: shared.ID})
 	if _, err := h.service.ReadRunArtifact(context.Background(), scope, shared.ID); !errors.Is(err, port.ErrChainScopeDenied) {
@@ -142,7 +161,7 @@ func TestReadRunArtifactFailsClosedForInvalidCandidateAndConflictingReferences(t
 
 func TestCreateRunPendingBindsScopeAndSerializesConcurrentReplies(t *testing.T) {
 	h := newPendingHarness(t, baseProject())
-	scope := scopedRun()
+	scope := scopedPromptRun()
 	badScope := scope
 	badScope.ProjectID = "p_other"
 	if _, err := h.service.CreateRunPending(context.Background(), badScope, valueobject.OutputKindScript, validScriptPayload(), "req_bad"); !errors.Is(err, port.ErrChainScopeDenied) {

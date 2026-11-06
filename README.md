@@ -2,10 +2,10 @@
 
 本地运行的、以节点图编排的内容生产工作台。用户在一张无限画布上完成选题、提示词、Agent 生成、渲染、配音和导出，再把素材交给剪映成片。
 
-> **状态**：M1 已完成（v0.2.0）· M2 图与提示词进行中（M2-00..09、M2-10A/B 已验收；M2-10C 已验收）。
+> **状态**：M1 已完成（v0.2.0）· M2-00～10 旧模型已验收；M2-11A 设计已验收；M2-11B 工程格式与图领域模型已验收（2026-11-06）；M2-11C～13 未开始，完整本地脚本闭环尚未实现。
 > **平台**：Windows 11 · 绿色版单 exe · 当前本地应用数据落在 exe 目录（Agent 自身凭据为例外，模型请求由 Agent 发出）。
 >
-> **新目标草案，未实现**：本地工作台支持本地/云端 Agent；提示词与 Agent 节点拆分，支持受限 `reply` 自动生成输出节点。云端运行会发送任务上下文，所选素材需上传；目标不改变当前版本的实际能力。详见 [PRD 1.1](docs/prd.md#11-新目标需求草案未实现) 与 [路线图](docs/dev/roadmap.md)。
+> **新目标范围已选定，设计已验收**：M2-11～13 仅纳入 RM-018 本地脚本子范围（候选节点、提示词/Agent 分离、受限 `reply` 输出与发送时上下文）。M2-11B 工程 v2 与图领域模型已验收；Agent 发送快照、受限输出事务和新工作台尚未接入。云端 Agent（RM-019）与视频输出/渲染（RM-020）仍待评估。详见 [PRD 1.1](docs/prd.md#11-新目标需求m2-本地脚本子范围已选定设计已验收功能未实现)、[路线图](docs/dev/roadmap.md) 与 [M2 目标闭环计划](docs/dev/m2-target-closure-plan.md)。
 
 ---
 
@@ -22,9 +22,11 @@
 | [M1 会话页](docs/design/m1-session-shell.html) | M1 临时会话/控制台原型（M2 已删除） |
 | [M2 工作台](docs/design/m2-workspace.html) | M2 画布、草稿节点、运行分组原型 |
 | [M2 选题闭环演示](docs/design/m2-topic-closure-demo.html) | 工作台至选题分支的本地交互演示 |
+| [M2-11A 本地脚本流程演示](docs/design/m2-11-13-local-flow-demo.html) | 候选→提示词→Agent→script 输出的模拟交互；设计已验收，原型不连接 Agent |
 | [开发流程](docs/dev/process.md) | 阶段、工作分解、门禁、变更控制 |
 | [路线图](docs/dev/roadmap.md) | 需求优先级、里程碑批次、暂存需求池 |
 | [M2 逐任务执行手册](docs/dev/m2-workplan.md) | M2 开工协议、任务卡、DoR/DoD 与状态 |
+| [M2 目标闭环计划](docs/dev/m2-target-closure-plan.md) | M2-11～13 本地脚本闭环设计、任务与阶段门禁 |
 | [M2 选题闭环计划](docs/dev/m2-topic-closure-plan.md) | 工作台、画布、选题与待应用的逐项实现和验收计划 |
 | [Agent 协议](docs/agent-protocol.md) | MCP 工具、能力位、权限、会话、分叉与删除 |
 | [验收标准](docs/acceptance.md) | Given-When-Then、测试矩阵、发布门禁 |

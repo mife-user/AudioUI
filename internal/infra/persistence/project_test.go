@@ -72,13 +72,18 @@ func TestProjectStorePersistedSchemaHasNoDerivedEdgesOrChains(t *testing.T) {
 	layout := testLayout(t.TempDir())
 	store := NewProjectStore(layout)
 	project := sampleProject("p_test")
-	zero := 0
-	project.Nodes = append(project.Nodes, entity.Node{
-		ID: "n_child", Type: valueobject.NodeTypePrompt, Title: "提示词",
-		Parent: "n_root", ParentCandidate: &zero,
-		Params: entity.NodeParams{Instruction: "写脚本", OutputKind: valueobject.OutputKindScript},
-		Rounds: []entity.Round{}, Locked: true,
-	})
+	project.Nodes[0].Rounds = []entity.Round{{N: 1, Kind: valueobject.OutputKindTopics, ArtifactID: "sha256:x"}}
+	project.Nodes = append(project.Nodes,
+		entity.Node{
+			ID: "n_candidate", Type: valueobject.NodeTypeCandidate, Title: "候选",
+			Parent: "n_root", CandidateSource: &entity.CandidateSource{TopicNodeID: "n_root", ArtifactID: "sha256:x", Index: 0},
+			Rounds: []entity.Round{},
+		},
+		entity.Node{
+			ID: "n_child", Type: valueobject.NodeTypePrompt, Title: "提示词",
+			Parent: "n_candidate", Params: entity.NodeParams{Instruction: "写脚本"}, Rounds: []entity.Round{},
+		},
+	)
 	if err := store.Create(context.Background(), project); err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +95,7 @@ func TestProjectStorePersistedSchemaHasNoDerivedEdgesOrChains(t *testing.T) {
 	if err := json.Unmarshal(data, &raw); err != nil {
 		t.Fatal(err)
 	}
-	for _, forbidden := range []string{"chains", "edges"} {
+	for _, forbidden := range []string{"chains", "edges", "parentCandidate"} {
 		if _, ok := raw[forbidden]; ok {
 			t.Fatalf("project.json contains derived field %q", forbidden)
 		}
@@ -99,9 +104,9 @@ func TestProjectStorePersistedSchemaHasNoDerivedEdgesOrChains(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	child := loaded.Nodes[1]
-	if child.ParentCandidate == nil || *child.ParentCandidate != 0 {
-		t.Fatalf("parentCandidate = %v, want pointer to 0", child.ParentCandidate)
+	child := loaded.Nodes[2]
+	if child.Parent != "n_candidate" || child.ParentCandidate != nil {
+		t.Fatalf("child = %+v", child)
 	}
 }
 
@@ -148,6 +153,38 @@ func TestProjectStoreUnsupportedVersion(t *testing.T) {
 	writeJSONFileForTest(t, filepath.Join(layout.ProjectsDir, "p_test", "project.json"), project)
 	if _, err := NewProjectStore(layout).Load(context.Background(), "p_test"); !errors.Is(err, ErrUnsupportedVersion) {
 		t.Fatalf("error = %v, want ErrUnsupportedVersion", err)
+	}
+}
+
+func TestProjectStoreListsUnsupportedProjectsWithoutBlockingValidOnes(t *testing.T) {
+	layout := testLayout(t.TempDir())
+	store := NewProjectStore(layout)
+	if err := store.Create(context.Background(), sampleProject("p_valid")); err != nil {
+		t.Fatal(err)
+	}
+	old := sampleProject("p_old")
+	old.Version = 1
+	writeJSONFileForTest(t, filepath.Join(layout.ProjectsDir, "p_old", "project.json"), old)
+
+	summaries, err := store.List(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(summaries) != 2 {
+		t.Fatalf("summaries = %+v", summaries)
+	}
+	byID := make(map[string]entity.ProjectSummary, len(summaries))
+	for _, summary := range summaries {
+		byID[summary.ID] = summary
+	}
+	if summary := byID["p_old"]; summary.Version != 1 || summary.ErrorCode != ErrUnsupportedVersion.Error() {
+		t.Fatalf("unsupported summary = %+v", summary)
+	}
+	if summary := byID["p_valid"]; summary.Version != valueobject.ProjectFileVersion || summary.ErrorCode != "" {
+		t.Fatalf("valid summary = %+v", summary)
+	}
+	if _, err := store.Load(context.Background(), "p_old"); !errors.Is(err, ErrUnsupportedVersion) {
+		t.Fatalf("Load old project error = %v, want UNSUPPORTED_VERSION", err)
 	}
 }
 

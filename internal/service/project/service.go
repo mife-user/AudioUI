@@ -96,7 +96,11 @@ func (s *Service) Start(ctx context.Context) error {
 	if config.LastProjectID != "" {
 		project, err := s.opts.Projects.Load(ctx, config.LastProjectID)
 		if err != nil {
-			loadErr = fmt.Errorf("加载上次工程 %s 失败: %w", config.LastProjectID, err)
+			if errors.Is(err, port.ErrUnsupportedVersion) {
+				s.opts.Logf("last project %s uses an unsupported format: %v", config.LastProjectID, err)
+			} else {
+				loadErr = fmt.Errorf("加载上次工程 %s 失败: %w", config.LastProjectID, err)
+			}
 		} else {
 			s.mu.Lock()
 			s.active = &project

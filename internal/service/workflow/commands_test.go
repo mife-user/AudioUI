@@ -19,7 +19,7 @@ func TestAddNodeTopicAndDraft(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if project.Revision != 2 || len(project.Nodes) != 6 {
+	if project.Revision != 2 || len(project.Nodes) != 9 {
 		t.Fatalf("project = %+v", project)
 	}
 	added := project.Nodes[len(project.Nodes)-1]
@@ -56,9 +56,9 @@ func TestAddNodeValidation(t *testing.T) {
 		{"topic with parent", AddNodeInput{Type: valueobject.NodeTypeTopic, Parent: "n_topic"}, ErrTopicRootParent},
 		{"missing parent", AddNodeInput{Type: valueobject.NodeTypePrompt, Parent: "n_missing"}, ErrNodeNotFound},
 		{"draft parent", AddNodeInput{Type: valueobject.NodeTypePrompt, Parent: "n_draft"}, ErrNotInChain},
-		{"missing candidate", AddNodeInput{Type: valueobject.NodeTypePrompt, Parent: "n_topic"}, ErrCandidateInvalid},
-		{"candidate out of range", AddNodeInput{Type: valueobject.NodeTypePrompt, Parent: "n_topic", ParentCandidate: intPtr(3)}, ErrCandidateInvalid},
-		{"negative candidate", AddNodeInput{Type: valueobject.NodeTypePrompt, Parent: "n_topic", ParentCandidate: intPtr(-1)}, ErrCandidateInvalid},
+		{"topic connection invalid", AddNodeInput{Type: valueobject.NodeTypePrompt, Parent: "n_topic"}, ErrNodeConnectionInvalid},
+		{"parentCandidate unsupported", AddNodeInput{Type: valueobject.NodeTypePrompt, Parent: "n_topic", ParentCandidate: intPtr(3)}, ErrNodeConnectionInvalid},
+		{"candidate must be generated", AddNodeInput{Type: valueobject.NodeTypeCandidate}, ErrNodeConnectionInvalid},
 		{"invalid position", AddNodeInput{Type: valueobject.NodeTypePrompt, Position: entity.Position{X: math.NaN()}}, ErrInvalidPosition},
 		{"invalid output kind", AddNodeInput{Type: valueobject.NodeTypePrompt, Params: entity.NodeParams{OutputKind: "bad"}}, ErrInvalidInput},
 		{"negative candidate count", AddNodeInput{Type: valueobject.NodeTypeTopic, Params: entity.NodeParams{CandidateCount: -1}}, ErrInvalidInput},
@@ -102,43 +102,66 @@ func TestGraphCommandsRejectStaleProjectScope(t *testing.T) {
 	}
 }
 
-func TestAddNodeTopicCandidateAndPromptParent(t *testing.T) {
+func TestAddNodeConnectionMatrix(t *testing.T) {
 	h := newHarness(t, baseProject())
 	project, err := h.service.AddNode(context.Background(), AddNodeInput{
-		Type: valueobject.NodeTypePrompt, Parent: "n_topic", ParentCandidate: intPtr(1),
+		Type: valueobject.NodeTypeAgent, Parent: "n_a",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	child := project.Nodes[len(project.Nodes)-1]
-	if child.Parent != "n_topic" || child.ParentCandidate == nil || *child.ParentCandidate != 1 {
-		t.Fatalf("child = %+v", child)
+	agent := project.Nodes[len(project.Nodes)-1]
+	if agent.Type != valueobject.NodeTypeAgent || agent.Parent != "n_a" {
+		t.Fatalf("agent = %+v", agent)
 	}
 
 	project, err = h.service.AddNode(context.Background(), AddNodeInput{
-		Type: valueobject.NodeTypePrompt, Parent: "n_a", ParentCandidate: intPtr(2),
+		Type: valueobject.NodeTypeScript, Parent: agent.ID,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	child = project.Nodes[len(project.Nodes)-1]
-	if child.Parent != "n_a" || child.ParentCandidate != nil {
-		t.Fatalf("prompt-parent candidate should be cleared: %+v", child)
+	if added := project.Nodes[len(project.Nodes)-1]; added.Type != valueobject.NodeTypeScript || added.Parent != agent.ID {
+		t.Fatalf("script = %+v", added)
+	}
+
+	if _, err := h.service.AddNode(context.Background(), AddNodeInput{
+		Type: valueobject.NodeTypePrompt, Parent: "n_a",
+	}); !errors.Is(err, ErrNodeConnectionInvalid) {
+		t.Fatalf("prompt-to-prompt error = %v, want NODE_CONNECTION_INVALID", err)
+	}
+}
+
+func TestAddNodeEnforcesSingleScriptOutput(t *testing.T) {
+	h := newHarness(t, baseProject())
+	if _, err := h.service.AddNode(context.Background(), AddNodeInput{
+		Type: valueobject.NodeTypeScript, Parent: "n_b",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	saves := h.session.saveCount
+	if _, err := h.service.AddNode(context.Background(), AddNodeInput{
+		Type: valueobject.NodeTypeScript, Parent: "n_b",
+	}); !errors.Is(err, ErrOutputBindingConflict) {
+		t.Fatalf("error = %v, want OUTPUT_BINDING_CONFLICT", err)
+	}
+	if h.session.saveCount != saves {
+		t.Fatal("conflicting output binding was saved")
 	}
 }
 
 func TestAddNodeRejectsRunLockedParent(t *testing.T) {
 	h := newHarness(t, baseProject())
-	if err := h.service.AcquireRunLock(context.Background(), "r_run", "n_topic", "n_a", []string{"n_topic", "n_a"}); err != nil {
+	if err := h.service.AcquireRunLock(context.Background(), "r_run", "n_topic", "n_a", []string{"n_topic", "n_candidate", "n_a"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := h.service.AddNode(context.Background(), AddNodeInput{
-		Type: valueobject.NodeTypePrompt, Parent: "n_a",
+		Type: valueobject.NodeTypeAgent, Parent: "n_a",
 	}); !errors.Is(err, ErrRunningChainLocked) {
 		t.Fatalf("error = %v, want RUNNING_CHAIN_LOCKED", err)
 	}
 	if _, err := h.service.AddNode(context.Background(), AddNodeInput{
-		Type: valueobject.NodeTypePrompt, Parent: "n_c",
+		Type: valueobject.NodeTypeAgent, Parent: "n_c",
 	}); err != nil {
 		t.Fatalf("sibling branch edit failed: %v", err)
 	}
@@ -154,7 +177,7 @@ func TestAddNodeRejectsRunLockedParent(t *testing.T) {
 
 func TestConnectRequiresConfirmAndMovesSubtreeStale(t *testing.T) {
 	h := newHarness(t, baseProject())
-	_, err := h.service.Connect(context.Background(), "n_c", "n_a", nil, false)
+	_, err := h.service.Connect(context.Background(), "n_candidate2", "n_a", nil, false)
 	if !errors.Is(err, ErrReparentConfirmRequired) {
 		t.Fatalf("error = %v, want REPARENT_CONFIRM_REQUIRED", err)
 	}
@@ -162,7 +185,7 @@ func TestConnectRequiresConfirmAndMovesSubtreeStale(t *testing.T) {
 		t.Fatal("confirm-required command persisted a change")
 	}
 
-	project, err := h.service.Connect(context.Background(), "n_c", "n_a", nil, true)
+	project, err := h.service.Connect(context.Background(), "n_candidate2", "n_a", nil, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,7 +193,7 @@ func TestConnectRequiresConfirmAndMovesSubtreeStale(t *testing.T) {
 		t.Fatalf("revision = %d", project.Revision)
 	}
 	child := h.node(t, "n_a")
-	if child.Parent != "n_c" || child.ParentCandidate != nil {
+	if child.Parent != "n_candidate2" || child.ParentCandidate != nil {
 		t.Fatalf("child = %+v", child)
 	}
 	if !child.Stale || !h.node(t, "n_b").Stale {
@@ -187,7 +210,7 @@ func TestConnectRequiresConfirmAndMovesSubtreeStale(t *testing.T) {
 	}
 
 	before := h.session.saveCount
-	project, err = h.service.Connect(context.Background(), "n_c", "n_a", nil, false)
+	project, err = h.service.Connect(context.Background(), "n_candidate2", "n_a", nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -196,27 +219,14 @@ func TestConnectRequiresConfirmAndMovesSubtreeStale(t *testing.T) {
 	}
 }
 
-func TestConnectSameParentCandidateSwitch(t *testing.T) {
+func TestConnectRejectsCandidateReparent(t *testing.T) {
 	h := newHarness(t, baseProject())
-	_, err := h.service.Connect(context.Background(), "n_topic", "n_c", intPtr(1), false)
-	if !errors.Is(err, ErrReparentConfirmRequired) {
-		t.Fatalf("error = %v, want REPARENT_CONFIRM_REQUIRED", err)
+	_, err := h.service.Connect(context.Background(), "n_candidate2", "n_candidate", nil, true)
+	if !errors.Is(err, ErrNodeConnectionInvalid) {
+		t.Fatalf("error = %v, want NODE_CONNECTION_INVALID", err)
 	}
-	project, err := h.service.Connect(context.Background(), "n_topic", "n_c", intPtr(1), true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	child := h.node(t, "n_c")
-	if child.ParentCandidate == nil || *child.ParentCandidate != 1 || !child.Stale {
-		t.Fatalf("child = %+v", child)
-	}
-	if len(h.mover.calls) != 0 || project.Revision != 2 {
-		t.Fatalf("same-tree candidate switch moved steps or missed revision: %+v", h.mover.calls)
-	}
-	before := h.session.saveCount
-	_, err = h.service.Connect(context.Background(), "n_topic", "n_c", intPtr(1), false)
-	if err != nil || h.session.saveCount != before {
-		t.Fatalf("idempotent candidate switch error = %v saves=%d", err, h.session.saveCount)
+	if h.session.saveCount != 0 || h.node(t, "n_candidate").Parent != "n_topic" {
+		t.Fatal("candidate source changed")
 	}
 }
 
@@ -234,7 +244,7 @@ func TestConnectValidation(t *testing.T) {
 		{"draft parent", "n_draft", "n_c", nil, ErrNotInChain},
 		{"missing parent", "n_missing", "n_c", nil, ErrNodeNotFound},
 		{"missing child", "n_a", "n_missing", nil, ErrNodeNotFound},
-		{"invalid candidate", "n_topic", "n_c", intPtr(9), ErrCandidateInvalid},
+		{"invalid candidate parameter", "n_topic", "n_c", intPtr(9), ErrNodeConnectionInvalid},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -250,15 +260,15 @@ func TestConnectValidation(t *testing.T) {
 	}
 }
 
-func TestConnectDraftToPromptClearsCandidate(t *testing.T) {
+func TestConnectDraftAgentToPrompt(t *testing.T) {
 	h := newHarness(t, baseProject())
-	project, err := h.service.Connect(context.Background(), "n_a", "n_draft", intPtr(2), false)
+	project, err := h.service.Connect(context.Background(), "n_c", "n_agent_draft", nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	child := h.node(t, "n_draft")
-	if child.Parent != "n_a" || child.ParentCandidate != nil || !child.Stale {
-		t.Fatalf("draft = %+v", child)
+	agent := h.node(t, "n_agent_draft")
+	if agent.Parent != "n_c" || agent.ParentCandidate != nil || !agent.Stale {
+		t.Fatalf("agent = %+v", agent)
 	}
 	if project.Revision != 2 {
 		t.Fatalf("revision = %d", project.Revision)
@@ -294,7 +304,7 @@ func TestConnectCrossTreeFailures(t *testing.T) {
 		if !errors.Is(err, ErrWorkspaceMoveFailed) {
 			t.Fatalf("error = %v, want WORKSPACE_MOVE_FAILED", err)
 		}
-		if h.session.saveCount != 0 || h.node(t, "n_a").Parent != "n_topic" {
+		if h.session.saveCount != 0 || h.node(t, "n_a").Parent != "n_candidate" {
 			t.Fatal("graph changed after move failure")
 		}
 	})
@@ -308,7 +318,7 @@ func TestConnectCrossTreeFailures(t *testing.T) {
 		if h.mover.rollbacks != 1 {
 			t.Fatalf("rollbacks = %d", h.mover.rollbacks)
 		}
-		if h.node(t, "n_a").Parent != "n_topic" {
+		if h.node(t, "n_a").Parent != "n_candidate" {
 			t.Fatal("graph changed after save failure")
 		}
 	})
@@ -327,7 +337,7 @@ func TestConnectCrossTreeFailures(t *testing.T) {
 	})
 	t.Run("locked subtree", func(t *testing.T) {
 		h := newHarness(t, projectWithSecondTree())
-		if err := h.service.AcquireRunLock(context.Background(), "r_a", "n_topic", "n_a", []string{"n_topic", "n_a"}); err != nil {
+		if err := h.service.AcquireRunLock(context.Background(), "r_a", "n_topic", "n_a", []string{"n_topic", "n_candidate", "n_a"}); err != nil {
 			t.Fatal(err)
 		}
 		_, err := h.service.Connect(context.Background(), "n_x", "n_a", nil, true)
@@ -357,7 +367,7 @@ func TestMoveNode(t *testing.T) {
 	if _, err := h.service.MoveNode(context.Background(), "n_missing", 1, 1); !errors.Is(err, ErrNodeNotFound) {
 		t.Fatalf("error = %v, want NODE_NOT_FOUND", err)
 	}
-	if err := h.service.AcquireRunLock(context.Background(), "r_run", "n_topic", "n_a", []string{"n_topic", "n_a"}); err != nil {
+	if err := h.service.AcquireRunLock(context.Background(), "r_run", "n_topic", "n_a", []string{"n_topic", "n_candidate", "n_a"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := h.service.MoveNode(context.Background(), "n_a", 13, 14); err != nil {
@@ -388,7 +398,7 @@ func TestUpdateNodeParams(t *testing.T) {
 	if _, err := h.service.UpdateNodeParams(context.Background(), "n_topic", "", entity.NodeParams{}); !errors.Is(err, ErrNodeLocked) {
 		t.Fatalf("error = %v, want NODE_LOCKED", err)
 	}
-	if err := h.service.AcquireRunLock(context.Background(), "r_run", "n_topic", "n_a", []string{"n_topic", "n_a"}); err != nil {
+	if err := h.service.AcquireRunLock(context.Background(), "r_run", "n_topic", "n_a", []string{"n_topic", "n_candidate", "n_a"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := h.service.UpdateNodeParams(context.Background(), "n_a", "", params); !errors.Is(err, ErrRunningChainLocked) {
@@ -424,7 +434,7 @@ func TestSelectNodeDoesNotIncrementRevisionOrBroadcast(t *testing.T) {
 	if _, err := h.service.SelectNode(context.Background(), "n_missing"); !errors.Is(err, ErrNodeNotFound) {
 		t.Fatalf("error = %v, want NODE_NOT_FOUND", err)
 	}
-	if err := h.service.AcquireRunLock(context.Background(), "r_run", "n_topic", "n_a", []string{"n_topic", "n_a"}); err != nil {
+	if err := h.service.AcquireRunLock(context.Background(), "r_run", "n_topic", "n_a", []string{"n_topic", "n_candidate", "n_a"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := h.service.SelectNode(context.Background(), "n_b"); err != nil {
@@ -434,19 +444,19 @@ func TestSelectNodeDoesNotIncrementRevisionOrBroadcast(t *testing.T) {
 
 func TestEnsureExecutable(t *testing.T) {
 	h := newHarness(t, baseProject())
-	if err := h.service.EnsureExecutable(context.Background(), "n_a"); err != nil {
-		t.Fatalf("unlocked prompt should be executable: %v", err)
-	}
 	if err := h.service.EnsureExecutable(context.Background(), "n_topic"); !errors.Is(err, ErrNodeLocked) {
-		t.Fatalf("locked node error = %v, want NODE_LOCKED", err)
+		t.Fatalf("locked topic error = %v, want NODE_LOCKED", err)
 	}
-	if err := h.service.EnsureExecutable(context.Background(), "n_draft"); !errors.Is(err, ErrNotInChain) {
-		t.Fatalf("draft error = %v, want NOT_IN_CHAIN", err)
+	if err := h.service.EnsureExecutable(context.Background(), "n_a"); !errors.Is(err, ErrRunEntryUnavailable) {
+		t.Fatalf("prompt error = %v, want RUN_ENTRY_UNAVAILABLE", err)
+	}
+	if err := h.service.EnsureExecutable(context.Background(), "n_draft"); !errors.Is(err, ErrRunEntryUnavailable) {
+		t.Fatalf("draft error = %v, want RUN_ENTRY_UNAVAILABLE", err)
 	}
 	if err := h.service.EnsureExecutable(context.Background(), "n_missing"); !errors.Is(err, ErrNodeNotFound) {
 		t.Fatalf("missing error = %v, want NODE_NOT_FOUND", err)
 	}
-	if err := h.service.AcquireRunLock(context.Background(), "r_run", "n_topic", "n_a", []string{"n_topic", "n_a"}); err != nil {
+	if err := h.service.AcquireRunLock(context.Background(), "r_run", "n_topic", "n_a", []string{"n_topic", "n_candidate", "n_a"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := h.service.EnsureExecutable(context.Background(), "n_a"); !errors.Is(err, ErrRunningChainLocked) {
@@ -454,27 +464,39 @@ func TestEnsureExecutable(t *testing.T) {
 	}
 }
 
+func TestBeginRunRejectsUnwiredPromptAndAgentEntries(t *testing.T) {
+	h := newHarness(t, baseProject())
+	for _, nodeID := range []string{"n_a", "n_b"} {
+		if _, _, err := h.service.BeginRun(context.Background(), "r_unavailable", nodeID); !errors.Is(err, ErrRunEntryUnavailable) {
+			t.Fatalf("BeginRun(%s) error = %v, want RUN_ENTRY_UNAVAILABLE", nodeID, err)
+		}
+	}
+	if len(h.service.locks) != 0 || len(*h.changes) != 0 {
+		t.Fatal("unavailable run entry acquired a lock")
+	}
+}
+
 func TestLockedNodeTopologyCanChange(t *testing.T) {
 	h := newHarness(t, baseProject())
 	h.node(t, "n_c").Locked = true
-	if _, err := h.service.Connect(context.Background(), "n_a", "n_c", nil, true); err != nil {
+	if _, err := h.service.Connect(context.Background(), "n_candidate", "n_c", nil, true); err != nil {
 		t.Fatalf("reparenting a content-locked node should be allowed: %v", err)
 	}
-	if h.node(t, "n_c").Parent != "n_a" || !h.node(t, "n_c").Stale {
+	if h.node(t, "n_c").Parent != "n_candidate" || !h.node(t, "n_c").Stale {
 		t.Fatalf("child = %+v", h.node(t, "n_c"))
 	}
 }
 
 func TestRunLockLifecycle(t *testing.T) {
 	h := newHarness(t, projectWithSecondTree())
-	if err := h.service.AcquireRunLock(context.Background(), "r_one", "n_topic", "n_a", []string{"n_topic", "n_a"}); err != nil {
+	if err := h.service.AcquireRunLock(context.Background(), "r_one", "n_topic", "n_a", []string{"n_topic", "n_candidate", "n_a"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := h.service.AcquireRunLock(context.Background(), "r_two", "n_topic2", "n_x", []string{"n_topic2", "n_x"}); err != nil {
 		t.Fatal(err)
 	}
 	locked := h.service.LockedNodeIDs()
-	if len(locked) != 4 || locked[0] != "n_a" || locked[1] != "n_topic" || locked[2] != "n_topic2" || locked[3] != "n_x" {
+	if len(locked) != 5 || locked[0] != "n_a" || locked[1] != "n_candidate" || locked[2] != "n_topic" || locked[3] != "n_topic2" || locked[4] != "n_x" {
 		t.Fatalf("locked = %+v", locked)
 	}
 	if err := h.service.ReleaseRunLock(context.Background(), "r_one"); err != nil {
@@ -493,7 +515,7 @@ func TestRunLockLifecycle(t *testing.T) {
 	if err := h.service.AcquireRunLock(context.Background(), "r_bad", "n_topic", "n_b", []string{"n_topic", "n_b"}); !errors.Is(err, ErrNotInChain) {
 		t.Fatalf("error = %v, want NOT_IN_CHAIN", err)
 	}
-	if err := h.service.AcquireRunLock(context.Background(), "bad/id", "n_topic", "n_a", []string{"n_topic", "n_a"}); !errors.Is(err, ErrInvalidInput) {
+	if err := h.service.AcquireRunLock(context.Background(), "bad/id", "n_topic", "n_a", []string{"n_topic", "n_candidate", "n_a"}); !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("error = %v, want INVALID_INPUT", err)
 	}
 	if err := h.service.AcquireRunLock(context.Background(), "r_bad", "n_topic", "n_missing", []string{"n_topic", "n_missing"}); !errors.Is(err, ErrNodeNotFound) {
@@ -517,7 +539,7 @@ func TestBeginRunRejectsStaleProjectBeforeLocking(t *testing.T) {
 
 func TestRunLockReleaseEventCarriesProjectAndLatestGraphRevision(t *testing.T) {
 	h := newHarness(t, baseProject())
-	if err := h.service.AcquireRunLock(context.Background(), "r_one", "n_topic", "n_a", []string{"n_topic", "n_a"}); err != nil {
+	if err := h.service.AcquireRunLock(context.Background(), "r_one", "n_topic", "n_a", []string{"n_topic", "n_candidate", "n_a"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := h.service.UpdateNodeParams(context.Background(), "n_c", "C", entity.NodeParams{Instruction: "updated sibling"}); err != nil {

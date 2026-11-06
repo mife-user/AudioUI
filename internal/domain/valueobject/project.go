@@ -4,13 +4,16 @@ package valueobject
 type NodeType string
 
 const (
-	NodeTypeTopic  NodeType = "topic"
-	NodeTypePrompt NodeType = "prompt"
+	NodeTypeTopic     NodeType = "topic"
+	NodeTypeCandidate NodeType = "candidate"
+	NodeTypePrompt    NodeType = "prompt"
+	NodeTypeAgent     NodeType = "agent"
+	NodeTypeScript    NodeType = "script"
 )
 
 func (t NodeType) Valid() bool {
 	switch t {
-	case NodeTypeTopic, NodeTypePrompt:
+	case NodeTypeTopic, NodeTypeCandidate, NodeTypePrompt, NodeTypeAgent, NodeTypeScript:
 		return true
 	default:
 		return false
@@ -76,7 +79,7 @@ func (s PendingStatus) Valid() bool {
 }
 
 const (
-	ProjectFileVersion            = 1
+	ProjectFileVersion            = 2
 	RunsFileVersion               = 1
 	PendingFileVersion            = 1
 	PendingTransactionFileVersion = 1

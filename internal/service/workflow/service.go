@@ -24,7 +24,6 @@ const (
 
 type Options struct {
 	Project         port.ProjectSession
-	Candidates      CandidateCounter
 	CandidateReader TopicCandidateReader
 	Workspace       port.WorkspaceMover
 	Pending         port.PendingStoreProvider
@@ -83,12 +82,17 @@ func (s *Service) AddNode(ctx context.Context, input AddNodeInput) (entity.Proje
 		Params:   input.Params,
 		Rounds:   []entity.Round{},
 	}
+	if input.ParentCandidate != nil {
+		return entity.Project{}, fmt.Errorf("%w: parentCandidate is not supported", ErrNodeConnectionInvalid)
+	}
 	switch input.Type {
 	case valueobject.NodeTypeTopic:
 		if input.Parent != "" {
 			return entity.Project{}, fmt.Errorf("%w: topic must be a root", ErrTopicRootParent)
 		}
-	case valueobject.NodeTypePrompt:
+	case valueobject.NodeTypeCandidate:
+		return entity.Project{}, fmt.Errorf("%w: candidate nodes are application-generated", ErrNodeConnectionInvalid)
+	case valueobject.NodeTypePrompt, valueobject.NodeTypeAgent, valueobject.NodeTypeScript:
 		if input.Parent != "" {
 			parent, err := requireNode(graph, input.Parent, "parent")
 			if err != nil {
@@ -100,12 +104,10 @@ func (s *Service) AddNode(ctx context.Context, input AddNodeInput) (entity.Proje
 			if _, err := chainRoot(graph, parent.ID); err != nil {
 				return entity.Project{}, err
 			}
-			candidate, err := s.resolveCandidate(ctx, project.ID, parent, input.ParentCandidate)
-			if err != nil {
+			if err := entity.ValidateNodeConnection(*parent, node); err != nil {
 				return entity.Project{}, err
 			}
 			node.Parent = parent.ID
-			node.ParentCandidate = candidate
 		}
 	}
 	id, err := valueobject.NewID(valueobject.NodeIDPrefix)
@@ -140,8 +142,11 @@ func (s *Service) Connect(ctx context.Context, parentID, childID string, parentC
 	if err != nil {
 		return entity.Project{}, err
 	}
-	if child.Type != valueobject.NodeTypePrompt {
+	if child.Type == valueobject.NodeTypeTopic {
 		return entity.Project{}, fmt.Errorf("%w: topic %s cannot be a child", ErrTopicRootParent, childID)
+	}
+	if child.Type == valueobject.NodeTypeCandidate {
+		return entity.Project{}, fmt.Errorf("%w: candidate source is immutable", ErrNodeConnectionInvalid)
 	}
 	parent, err := requireNode(graph, parentID, "parent")
 	if err != nil {
@@ -156,11 +161,13 @@ func (s *Service) Connect(ctx context.Context, parentID, childID string, parentC
 	if _, err := chainRoot(graph, parentID); err != nil {
 		return entity.Project{}, err
 	}
-	candidate, err := s.resolveCandidate(ctx, project.ID, parent, parentCandidate)
-	if err != nil {
+	if parentCandidate != nil {
+		return entity.Project{}, fmt.Errorf("%w: parentCandidate is not supported", ErrNodeConnectionInvalid)
+	}
+	if err := entity.ValidateNodeConnection(*parent, *child); err != nil {
 		return entity.Project{}, err
 	}
-	if child.Parent == parentID && sameCandidate(child.ParentCandidate, candidate) {
+	if child.Parent == parentID {
 		return project, nil
 	}
 
@@ -191,7 +198,7 @@ func (s *Service) Connect(ctx context.Context, parentID, childID string, parentC
 	}
 
 	child.Parent = parentID
-	child.ParentCandidate = candidate
+	child.ParentCandidate = nil
 	markSubtreeStale(&project, subtree)
 	project.Revision++
 
@@ -269,6 +276,9 @@ func (s *Service) UpdateNodeParams(ctx context.Context, id, title string, params
 	if err != nil {
 		return entity.Project{}, err
 	}
+	if node.Type == valueobject.NodeTypeCandidate {
+		return entity.Project{}, fmt.Errorf("%w: candidate content is artifact-bound", ErrNodeLocked)
+	}
 	if s.isNodeLocked(id) {
 		return entity.Project{}, fmt.Errorf("%w: %s", ErrRunningChainLocked, id)
 	}
@@ -317,6 +327,9 @@ func (s *Service) EnsureExecutable(ctx context.Context, nodeID string) error {
 	}
 	if node.Locked {
 		return fmt.Errorf("%w: %s", ErrNodeLocked, nodeID)
+	}
+	if err := validateRunEntry(node); err != nil {
+		return err
 	}
 	if _, err := chainRoot(graph, nodeID); err != nil {
 		return err

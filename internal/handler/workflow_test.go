@@ -14,12 +14,6 @@ import (
 	"audio-ui/internal/service/workflow"
 )
 
-type handlerCandidates struct{}
-
-func (handlerCandidates) Count(ctx context.Context, projectID string, node entity.Node) (int, error) {
-	return 3, nil
-}
-
 type handlerContextHasher struct{}
 
 func (handlerContextHasher) InputHashes(context.Context, entity.Project, string) (valueobject.ContextHashes, error) {
@@ -58,7 +52,7 @@ func newWorkflowHandler(t *testing.T) *WorkflowService {
 	}
 	artifactStores := persistence.NewArtifactStoreProvider(layout)
 	workflowService := workflow.New(workflow.Options{
-		Project: projectService, Candidates: handlerCandidates{},
+		Project:         projectService,
 		CandidateReader: workflow.NewArtifactCandidateCounter(artifactStores),
 		Pending:         persistence.NewPendingStoreProvider(layout), Artifacts: artifactStores,
 		ContextHasher: handlerContextHasher{},
@@ -148,60 +142,45 @@ func TestWorkflowHandlerAddMoveUpdateSelect(t *testing.T) {
 	}
 
 	candidate := 0
-	connected, err := h.Connect(topicReceipt.NodeID, promptID, &candidate, false, topicReceipt.ProjectID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if connected.NodeID != promptID || connected.ProjectID != topicReceipt.ProjectID {
-		t.Fatalf("connect receipt = %+v", connected)
+	if _, err := h.Connect(topicReceipt.NodeID, promptID, &candidate, false, topicReceipt.ProjectID); !errors.Is(err, workflow.ErrNodeConnectionInvalid) {
+		t.Fatalf("legacy candidate connection error = %v, want NODE_CONNECTION_INVALID", err)
 	}
 }
 
 func TestWorkflowHandlerPendingQueriesApplyAndDiscard(t *testing.T) {
 	h := newWorkflowHandler(t)
 	projectID := activeProjectID(t, h)
-	topicReceipt, err := h.AddNode(AddNodeRequest{ProjectID: projectID, Type: "topic", Title: "选题"})
+	firstReceipt, err := h.AddNode(AddNodeRequest{ProjectID: projectID, Type: "topic", Title: "选题 A"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	topicID := topicReceipt.NodeID
-	candidates, err := h.GetTopicCandidates(topicID, projectID)
+	secondReceipt, err := h.AddNode(AddNodeRequest{ProjectID: projectID, Type: "topic", Title: "选题 B"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstTopicID, secondTopicID := firstReceipt.NodeID, secondReceipt.NodeID
+	candidates, err := h.GetTopicCandidates(firstTopicID, projectID)
 	if err != nil || len(candidates) != 0 {
 		t.Fatalf("unapplied candidates = %+v err=%v", candidates, err)
 	}
-	if _, err := h.GetTopicCandidates(topicID, "p_other"); !errors.Is(err, workflow.ErrProjectChanged) {
+	if _, err := h.GetTopicCandidates(firstTopicID, "p_other"); !errors.Is(err, workflow.ErrProjectChanged) {
 		t.Fatalf("candidate project scope error = %v", err)
 	}
-	candidate := 0
-	firstReceipt, err := h.AddNode(AddNodeRequest{
-		ProjectID: projectID, Type: "prompt", Title: "脚本 A", Parent: topicID, ParentCandidate: &candidate,
-		Params: entity.NodeParams{OutputKind: valueobject.OutputKindScript},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	firstNodeID := firstReceipt.NodeID
-	secondReceipt, err := h.AddNode(AddNodeRequest{
-		ProjectID: projectID, Type: "prompt", Title: "脚本 B", Parent: topicID, ParentCandidate: &candidate,
-		Params: entity.NodeParams{OutputKind: valueobject.OutputKindScript},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	secondNodeID := secondReceipt.NodeID
-	payload := []byte(`{"title":"脚本","scenes":[{"narration":"旁白","duration":0}]}`)
+
+	payload := []byte(`{"topics":[{"title":"甲","angle":"角度甲","hook":"开头甲"},{"title":"乙","angle":"角度乙","hook":"开头乙"},{"title":"丙","angle":"角度丙","hook":"开头丙"}]}`)
 	first, err := h.service.CreatePending(context.Background(), workflow.CreatePendingInput{
-		RunID: "r_first", ChainID: "c_" + firstNodeID, ChainPath: []string{topicID, firstNodeID},
-		NodeID: firstNodeID, Kind: valueobject.OutputKindScript,
+		RunID: "r_first", TreeID: firstTopicID, ChainID: "c_" + firstTopicID, ChainPath: []string{firstTopicID},
+		NodeID: firstTopicID, Kind: valueobject.OutputKindTopics,
 		ContextHash: "ctx", AncestorHash: "ancestor", ParamsHash: "params", Payload: payload,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
+	invalidPayload := []byte(`{"topics":[{"title":"未达标","angle":"角度","hook":"开头"}]}`)
 	second, err := h.service.CreatePending(context.Background(), workflow.CreatePendingInput{
-		RunID: "r_second", ChainID: "c_" + secondNodeID, ChainPath: []string{topicID, secondNodeID},
-		NodeID: secondNodeID, Kind: valueobject.OutputKindScript,
-		ContextHash: "ctx", AncestorHash: "ancestor", ParamsHash: "params", Payload: payload,
+		RunID: "r_second", TreeID: secondTopicID, ChainID: "c_" + secondTopicID, ChainPath: []string{secondTopicID},
+		NodeID: secondTopicID, Kind: valueobject.OutputKindTopics,
+		ContextHash: "ctx", AncestorHash: "ancestor", ParamsHash: "params", Payload: invalidPayload,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -211,15 +190,28 @@ func TestWorkflowHandlerPendingQueriesApplyAndDiscard(t *testing.T) {
 		t.Fatalf("pending list = %+v err=%v", list, err)
 	}
 	detail, err := h.GetPending(second.ID, activeProjectID(t, h))
-	if err != nil || string(detail.RawPayload) != string(payload) {
+	if err != nil || string(detail.RawPayload) != string(invalidPayload) {
 		t.Fatalf("pending detail=%+v err=%v", detail, err)
 	}
 	if _, err := h.ApplyPending(first.ID, false, "p_other"); !errors.Is(err, workflow.ErrProjectChanged) {
 		t.Fatalf("pending apply project scope error = %v", err)
 	}
 	applied, err := h.ApplyPending(first.ID, false, activeProjectID(t, h))
-	if err != nil || !applied.Nodes[1].Locked {
-		t.Fatalf("apply result=%+v err=%v", applied, err)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var appliedTopic *entity.Node
+	for i := range applied.Nodes {
+		if applied.Nodes[i].ID == firstTopicID {
+			appliedTopic = &applied.Nodes[i]
+		}
+	}
+	if appliedTopic == nil || !appliedTopic.Locked || len(appliedTopic.Rounds) != 1 {
+		t.Fatalf("apply result=%+v", applied)
+	}
+	candidates, err = h.GetTopicCandidates(firstTopicID, activeProjectID(t, h))
+	if err != nil || len(candidates) != 3 {
+		t.Fatalf("applied candidates = %+v err=%v", candidates, err)
 	}
 	if _, err := h.DiscardPending(second.ID, activeProjectID(t, h)); err != nil {
 		t.Fatal(err)

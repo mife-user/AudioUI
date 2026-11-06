@@ -13,7 +13,7 @@ var (
 	ErrInvalidProject             = errors.New("PROJECT_INVALID")
 	ErrProjectNotFound            = errors.New("PROJECT_NOT_FOUND")
 	ErrProjectExists              = errors.New("PROJECT_EXISTS")
-	ErrUnsupportedVersion         = errors.New("UNSUPPORTED_VERSION")
+	ErrUnsupportedVersion         = port.ErrUnsupportedVersion
 	ErrCorruptRuns                = errors.New("RUNS_CORRUPT")
 	ErrInvalidRun                 = errors.New("RUN_INVALID")
 	ErrRunNotFound                = errors.New("RUN_NOT_FOUND")

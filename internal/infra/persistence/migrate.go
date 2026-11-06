@@ -2,6 +2,7 @@ package persistence
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -82,6 +83,9 @@ func (m *M1Migrator) Migrate(ctx context.Context) (port.MigrationResult, error) 
 		}
 		project, loadErr := NewProjectStore(m.layout).Load(ctx, migratedProjectID)
 		if loadErr != nil {
+			if errors.Is(loadErr, ErrUnsupportedVersion) {
+				return port.MigrationResult{}, nil
+			}
 			return port.MigrationResult{}, migrationError(loadErr)
 		}
 		return port.MigrationResult{Project: project}, nil
@@ -89,6 +93,9 @@ func (m *M1Migrator) Migrate(ctx context.Context) (port.MigrationResult, error) 
 	if projectExists {
 		project, loadErr := NewProjectStore(m.layout).Load(ctx, migratedProjectID)
 		if loadErr != nil {
+			if errors.Is(loadErr, ErrUnsupportedVersion) {
+				return port.MigrationResult{}, nil
+			}
 			return port.MigrationResult{}, migrationError(loadErr)
 		}
 		if err := m.writeMarker(); err != nil {

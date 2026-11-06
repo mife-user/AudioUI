@@ -3,11 +3,15 @@ package workflow
 import (
 	"errors"
 
+	"audio-ui/internal/domain/entity"
 	"audio-ui/internal/domain/port"
 )
 
 var (
 	ErrNodeNotFound             = errors.New("NODE_NOT_FOUND")
+	ErrNodeConnectionInvalid    = entity.ErrNodeConnectionInvalid
+	ErrOutputBindingConflict    = entity.ErrOutputBindingConflict
+	ErrRunEntryUnavailable      = errors.New("RUN_ENTRY_UNAVAILABLE")
 	ErrNodeLocked               = errors.New("NODE_LOCKED")
 	ErrRunningChainLocked       = errors.New("RUNNING_CHAIN_LOCKED")
 	ErrReparentConfirmRequired  = errors.New("REPARENT_CONFIRM_REQUIRED")

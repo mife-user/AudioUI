@@ -8,12 +8,14 @@ import (
 )
 
 var (
-	ErrGraphInvalid      = errors.New("GRAPH_INVALID")
-	ErrGraphNodeNotFound = errors.New("GRAPH_NODE_NOT_FOUND")
+	ErrGraphInvalid          = errors.New("GRAPH_INVALID")
+	ErrGraphNodeNotFound     = errors.New("GRAPH_NODE_NOT_FOUND")
+	ErrNodeConnectionInvalid = errors.New("NODE_CONNECTION_INVALID")
+	ErrOutputBindingConflict = errors.New("OUTPUT_BINDING_CONFLICT")
 )
 
 // Graph is a read-only view over a project's nodes. Edges are derived from
-// Parent and ParentCandidate; the graph never persists an edge list.
+// Parent; the graph never persists an edge list.
 type Graph struct {
 	project  *Project
 	nodes    map[string]*Node
@@ -138,8 +140,69 @@ func (g *Graph) IsAncestor(ancestor, node string) bool {
 	return false
 }
 
-// Validate checks the single-parent forest invariants used by M2.
+// Validate checks the version 2 node connection and provenance rules.
 func (g *Graph) Validate() error {
+	if err := g.ValidateForest(); err != nil {
+		return err
+	}
+	outputs := make(map[string]int)
+	for _, node := range g.project.Nodes {
+		if node.ParentCandidate != nil {
+			return fmt.Errorf("%w: parentCandidate is not supported", ErrGraphInvalid)
+		}
+		if node.Type == valueobject.NodeTypeCandidate {
+			if node.CandidateSource == nil || node.Parent == "" ||
+				node.CandidateSource.TopicNodeID != node.Parent ||
+				node.CandidateSource.ArtifactID == "" || node.CandidateSource.Index < 0 {
+				return fmt.Errorf("%w: candidate %s has invalid source", ErrGraphInvalid, node.ID)
+			}
+			if err := valueobject.ValidateID(node.CandidateSource.TopicNodeID); err != nil {
+				return fmt.Errorf("%w: candidate %s source topic: %v", ErrGraphInvalid, node.ID, err)
+			}
+			topic, _ := g.Node(node.Parent)
+			latest := Round{}
+			for _, round := range topic.Rounds {
+				if round.N > latest.N {
+					latest = round
+				}
+			}
+			if latest.Kind != valueobject.OutputKindTopics || latest.ArtifactID != node.CandidateSource.ArtifactID {
+				return fmt.Errorf("%w: candidate %s artifact is not the latest topic result", ErrGraphInvalid, node.ID)
+			}
+		} else if node.CandidateSource != nil {
+			return fmt.Errorf("%w: non-candidate node %s has a candidate source", ErrGraphInvalid, node.ID)
+		}
+		if node.Type != valueobject.NodeTypeScript && len(node.ScriptVersions) != 0 {
+			return fmt.Errorf("%w: non-script node %s has script versions", ErrGraphInvalid, node.ID)
+		}
+		for i, version := range node.ScriptVersions {
+			if version.N != i+1 || version.ArtifactID == "" || version.RunID == "" {
+				return fmt.Errorf("%w: script node %s has invalid version %d", ErrGraphInvalid, node.ID, i+1)
+			}
+		}
+		if node.Parent == "" {
+			if node.Type == valueobject.NodeTypeCandidate {
+				return fmt.Errorf("%w: candidate %s must have a topic parent", ErrGraphInvalid, node.ID)
+			}
+			continue
+		}
+		parent, _ := g.Node(node.Parent)
+		if err := ValidateNodeConnection(*parent, node); err != nil {
+			return err
+		}
+		if node.Type == valueobject.NodeTypeScript {
+			outputs[parent.ID]++
+			if outputs[parent.ID] > 1 {
+				return fmt.Errorf("%w: agent %s has multiple script outputs", ErrOutputBindingConflict, parent.ID)
+			}
+		}
+	}
+	return nil
+}
+
+// ValidateForest checks that nodes form a single-parent forest rooted at topics
+// or unconnected drafts.
+func (g *Graph) ValidateForest() error {
 	for _, node := range g.project.Nodes {
 		if node.ID == "" {
 			return fmt.Errorf("%w: empty node id", ErrGraphInvalid)
@@ -155,18 +218,9 @@ func (g *Graph) Validate() error {
 			if node.Type == valueobject.NodeTypeTopic {
 				return fmt.Errorf("%w: topic %s must not have a parent", ErrGraphInvalid, node.ID)
 			}
-			if parent.Type == valueobject.NodeTypeTopic {
-				if node.ParentCandidate == nil {
-					return fmt.Errorf("%w: node %s must select a topic candidate", ErrGraphInvalid, node.ID)
-				}
-				if *node.ParentCandidate < 0 {
-					return fmt.Errorf("%w: node %s has negative candidate", ErrGraphInvalid, node.ID)
-				}
-			} else if node.ParentCandidate != nil {
-				return fmt.Errorf("%w: node %s has a candidate but parent %s is not a topic", ErrGraphInvalid, node.ID, parent.ID)
+			if parent.Type == valueobject.NodeTypeTopic && node.ParentCandidate != nil && *node.ParentCandidate < 0 {
+				return fmt.Errorf("%w: node %s has negative candidate", ErrGraphInvalid, node.ID)
 			}
-		} else if node.ParentCandidate != nil {
-			return fmt.Errorf("%w: node %s has a candidate without a parent", ErrGraphInvalid, node.ID)
 		}
 	}
 	for _, node := range g.project.Nodes {
@@ -181,6 +235,30 @@ func (g *Graph) Validate() error {
 		if node.Parent != "" && root.Type != valueobject.NodeTypeTopic {
 			return fmt.Errorf("%w: node %s is not rooted at a topic", ErrGraphInvalid, node.ID)
 		}
+	}
+	return nil
+}
+
+func ValidateNodeConnection(parent, child Node) error {
+	valid := false
+	switch {
+	case parent.Type == valueobject.NodeTypeTopic && child.Type == valueobject.NodeTypeCandidate:
+		valid = true
+	case parent.Type == valueobject.NodeTypeCandidate && child.Type == valueobject.NodeTypePrompt:
+		valid = true
+	case parent.Type == valueobject.NodeTypePrompt && child.Type == valueobject.NodeTypeAgent:
+		valid = true
+	case parent.Type == valueobject.NodeTypeAgent && child.Type == valueobject.NodeTypeScript:
+		valid = true
+	case parent.Type == valueobject.NodeTypeScript && child.Type == valueobject.NodeTypePrompt:
+		valid = true
+	}
+	if !valid {
+		return fmt.Errorf("%w: %s cannot be parent of %s", ErrNodeConnectionInvalid, parent.Type, child.Type)
+	}
+	if child.Type == valueobject.NodeTypeCandidate &&
+		(child.CandidateSource == nil || child.CandidateSource.TopicNodeID != parent.ID) {
+		return fmt.Errorf("%w: candidate source does not match topic %s", ErrNodeConnectionInvalid, parent.ID)
 	}
 	return nil
 }

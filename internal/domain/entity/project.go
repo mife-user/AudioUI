@@ -36,14 +36,27 @@ type Round struct {
 	RunID      string                 `json:"runId"`
 }
 
-// Node is one persisted graph node. Edges are derived from Parent and
-// ParentCandidate and are never stored separately.
+type CandidateSource struct {
+	TopicNodeID string `json:"topicNodeId"`
+	ArtifactID  string `json:"artifactId"`
+	Index       int    `json:"index"`
+}
+
+type ScriptVersion struct {
+	N          int    `json:"n"`
+	ArtifactID string `json:"artifactId"`
+	RunID      string `json:"runId"`
+}
+
+// Node is one persisted graph node. Edges are derived from Parent.
 type Node struct {
 	ID              string               `json:"id"`
 	Type            valueobject.NodeType `json:"type"`
 	Title           string               `json:"title"`
 	Parent          string               `json:"parent,omitempty"`
 	ParentCandidate *int                 `json:"parentCandidate,omitempty"`
+	CandidateSource *CandidateSource     `json:"candidateSource,omitempty"`
+	ScriptVersions  []ScriptVersion      `json:"scriptVersions,omitempty"`
 	Position        Position             `json:"position"`
 	Params          NodeParams           `json:"params"`
 	Rounds          []Round              `json:"rounds"`
@@ -64,9 +77,11 @@ type Project struct {
 
 // ProjectSummary is the lightweight project list entry.
 type ProjectSummary struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	Revision int64  `json:"revision"`
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Revision  int64  `json:"revision"`
+	Version   int    `json:"version,omitempty"`
+	ErrorCode string `json:"errorCode,omitempty"`
 }
 
 // Clone returns a deep copy safe to hand to callers outside the service lock.
@@ -86,6 +101,11 @@ func (n Node) Clone() Node {
 		value := *n.ParentCandidate
 		clone.ParentCandidate = &value
 	}
+	if n.CandidateSource != nil {
+		source := *n.CandidateSource
+		clone.CandidateSource = &source
+	}
+	clone.ScriptVersions = append([]ScriptVersion(nil), n.ScriptVersions...)
 	if n.Params.Constraints != nil {
 		constraints := *n.Params.Constraints
 		clone.Params.Constraints = &constraints

@@ -232,7 +232,7 @@ func (b *Builder) resolve(ctx context.Context, input Input, includeWorkspace boo
 	if err != nil {
 		return resolvedInput{}, err
 	}
-	if err := graph.Validate(); err != nil {
+	if err := graph.ValidateForest(); err != nil {
 		return resolvedInput{}, err
 	}
 	target, ok := graph.Node(input.NodeID)

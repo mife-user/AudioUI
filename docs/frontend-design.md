@@ -2,9 +2,9 @@
 
 | 项 | 内容 |
 |---|---|
-| 版本 | 0.2.4 |
-| 状态 | 待评审（M2-09、M2-10A/B 已验收；M2-10C 页面验收已由用户确认；本文档修订待评审） |
-| 更新 | 2026-11-05 |
+| 版本 | 0.2.6 |
+| 状态 | 待评审（M2-11A 本地脚本工作流设计稿；M2-00～10 旧模型保持已验收事实） |
+| 更新 | 2026-11-06 |
 | 作者 | 待填 |
 | 评审 | 待填 |
 | 设计依据 | [`design/style-directions.html`](design/style-directions.html) |
@@ -13,6 +13,7 @@
 | M2 原型 | [`design/m2-workspace.html`](design/m2-workspace.html) |
 | M2-09 演示 | [`design/m2-09-canvas-demo.html`](design/m2-09-canvas-demo.html) |
 | M2-10A 演示 | [`design/m2-10a-topic-run-demo.html`](design/m2-10a-topic-run-demo.html) |
+| M2-11A 演示 | [`design/m2-11-13-local-flow-demo.html`](design/m2-11-13-local-flow-demo.html) |
 | 适用 | 前端、设计、QA |
 | 关联 | [产品总览](product.md) · [PRD](prd.md) · [架构](architecture.md) · [验收标准](acceptance.md) |
 
@@ -27,12 +28,13 @@
 | 0.2.3 | 2026-11-04 | M2-09 修复：以工程作用域 receipt 等待快照确认；区分命令提交与画布同步、仅重试读取；补充确定性布局、节点避让、键盘持久化和 React Flow DOM 回归 |
 | 0.2.4 | 2026-11-05 | M2-10A：选题参数编辑、防抖保存与保存前启动；启动/终态/结构化错误状态和待处理摘要；更新 HTML 交互演示 |
 | 0.2.5 | 2026-11-05 | M2-10B：待处理产物按需读取与预览、应用/丢弃和哈希冲突确认；应用后的 topic 候选由已应用轮次驱动端口 |
+| 0.2.6 | 2026-11-06 | M2-11A 评审稿：本地候选节点→提示词→Agent→script 输出；无输出自动创建、已有版本确认追加；云端/视频不在本阶段 |
 
 ---
 
 ## 1. Overview
 
-> **新目标交互（草案，未实现）**：候选节点、仅构建提示词的节点、独立 Agent 节点、指定输出/自动生成输出节点及本地/云端执行，见 [4.8](#48-新目标工作流交互草案未实现) 和[交互演示](design/target-agent-flow-demo.html)。下文 4.7 等 M2 规格仍描述当前基线与原计划，不表示目标交互已经交付。
+> **M2-11～13 目标交互（设计已验收，未实现）**：本地候选节点、只构建任务的提示词、独立 Agent 节点与 `script` 输出版本，见 [4.8](#48-m2-11-13-本地脚本工作流设计已验收) 和[单文件演示](design/m2-11-13-local-flow-demo.html)。云端与视频仍待评估。4.7 及之前说明 M2-00～10 旧模型和已验收行为，不代表新目标已交付。
 
 AudioUI 是一个桌面端节点图工作台。前端承担三件事：
 
@@ -440,26 +442,31 @@ M1 没有画布/提示词节点，先做一条链路的会话页；M2 画布落�
 - 锁定节点内容与执行均禁用；锁定后只提供「新增提示词」与分支入口。
 - 原型顶栏的「模拟运行」仅用于演示运行锁与 BUSY，不属于产品界面；产品执行入口只来自节点与待处理卡。
 
-### 4.8 新目标工作流交互（草案，未实现）
+### 4.8 M2-11～13 本地脚本工作流（设计已验收）
 
-[单文件交互演示](design/target-agent-flow-demo.html) 使用模拟数据，仅用于讨论，不连接 Agent 或修改真实工程。已用本地 Edge 浏览器在 1440×900 视口验证指定/自动输出、非法 `reply`、改挂前后快照、云端素材和空输入，在 1024×700 检查页面级横向溢出；[截图](dev/evidence/target-agent-flow-demo.png)仅记录原型，不代表 Wails 或业务功能已实现、已验收。
+[单文件交互演示](design/m2-11-13-local-flow-demo.html)使用固定模拟数据，不连接 Agent、不访问或修改工程文件、不联网。此设计稿已于 2026-11-06 由用户验收；演示不是产品实现或产品功能验收证据。M2-00～10 既有界面和验收仍是旧模型基线。
 
 ```text
-选题 → 候选 A ─→ 提示词 ─→ Agent ─→ 视频输出（已指定）
-    └→ 候选 B                  └─ 无指定输出时：合法 reply → 应用自动生成输出节点
+Topic ──应用校验 topics──> Candidate A ──> Prompt ──> Agent ──> Script（零/一个直接输出）
+                    └──> Candidate B ──> Prompt                 │
+                                                     Script ──> 后续 Prompt 分支
 ```
 
 | 交互 | 目标表现 |
 |---|---|
-| 选题 | 运行返回合法候选后，显示由应用生成的候选节点；不同候选可继续连线。 |
-| 提示词 | 编辑任务与内容限制；本身不提供独立运行，连接 Agent 后从 Agent 节点发起执行。 |
-| Agent | 显示本地/云端执行模式、实际能力及运行状态；提交时使用当前路径快照，改挂后下次运行展示新路径。 |
-| 已指定输出 | 显示由后继节点决定的输出契约；Agent 不可更改类型，错误结果不写图。 |
-| 未指定输出 | 显示允许的类型范围；合法 `reply` 由应用自动生成输出节点，不要求人工确认才能创建。 |
-| 云端素材 | 说明任务上下文会发送到云端；本地文件由用户选择上传，并展示上传/失败等状态；未选文件不可见。 |
-| 结果与冲突 | 显示运行、来源及节点生成结果；迟到/过期或无效结果显示错误，不静默写入其他路径。已有输出节点覆盖/确认和后续自动执行尚待评审。 |
+| Topic | 本地运行后，合法 `topics` 结果由应用生成候选节点；显示生成完成、候选数及锁定状态。非法结果显示错误，不生成候选节点。 |
+| Candidate | 显示来源选题与候选内容；可建立多个 Prompt 分支。候选来源不可编辑或被其他 artifact 替换。 |
+| Prompt | 只编辑任务与约束；不提供运行按钮。连接 Agent 后从 Agent 节点启动；运行快照冻结完整任务。 |
+| Agent | 显示本地 Agent 状态与「运行」入口；运行中禁止修改该路径和绑定输出；每个 Agent 仅可直接绑定一个 Script 输出。 |
+| 未指定输出 | 显示「自动创建 Script」契约；合法结果由应用创建一个 Script 节点并关联，不弹建节点确认。 |
+| 指定空输出 | 显示 Script Schema v1；合法结果自动写入首个不可变版本，不弹确认。 |
+| 已有输出 | 显示当前版本及来源；新结果进入「待确认」状态，明确展示追加版本的目标。确认后追加，取消保持原版本和 artifact 不变。 |
+| 版本冲突 | 若待确认期间目标版本已变化，拒绝确认并呈现冲突，不提供 `force` 覆盖。 |
+| 后续分支 | Candidate/Script 可建立多个 Prompt 分支；新建或追加 Script 结果后不自动运行下游。 |
+| 改挂与快照 | 改挂确认展示上游变化；下一次运行显示新路径，既有运行/结果仍展示发送时来源。 |
+| 错误与键盘 | 非法连接、`SCHEMA_INVALID`、绑定/版本冲突有文本说明；全部操作可聚焦、可键盘触发，状态用文字而非只靠颜色表达。 |
 
-运行期间与改挂、输出绑定相关的锁定/冲突状态须清晰可见；多个指定输出节点如何选择、上传与数据留存文案、视频代码/DSL 的展示方式尚待决定。以上不替代 4.7 的现行 M2 规格与已有证据。
+本阶段不显示云端选择、素材上传、视频节点、前端代码或 DSL 预览；RM-019 与 RM-020 未纳入当前 M2 设计。正式实现时业务合法性仍由 Go 快照与命令层决定，前端不得自行复制连接矩阵或输出契约规则。
 
 ---
 
@@ -480,9 +487,14 @@ M1 没有画布/提示词节点，先做一条链路的会话页；M2 画布落�
 | `RunList` | 按运行分组的记录 | empty/running/complete/interrupted | `--panel-2` `--muted` |
 | `ConsoleTabs` | 对话/待处理分页 | conversation/pending | `--accent-soft` `--border` |
 | `ProjectSwitcher` | 工程列表/新建/打开 | closed/open/loading/error | `--bg-elev` `--accent` |
-| `TopicNode` | 选题参数、运行状态、候选端口 | starting/running/succeeded/failed/interrupted/pending/applied/locked/error | `--panel` `--accent` |
-| `TopicParameters` | 选题标题/想法/方向/候选数、保存态、运行入口 | saved/dirty/saving/save-error/sync-pending/invalid/starting/run-error/disabled | `--panel-2` `--accent` `--danger` |
-| `PromptNode` | 提示词参数、执行、锁定 | draft/running/pending/applied/locked/error | `--panel` `--accent` |
+| `TopicNode` | M2-00～10 旧选题参数、候选端口与运行状态 | starting/running/pending/applied/locked/error | `--panel` `--accent` |
+| `TopicParameters` | 选题标题/想法/方向/候选数、保存态、旧流程运行入口 | saved/dirty/saving/save-error/sync-pending/invalid/starting/run-error/disabled | `--panel-2` `--accent` `--danger` |
+| `CandidateNode` | 展示由有效 topics 结果生成的候选与固定来源 | default/selected/locked/stale/error | `--panel` `--accent` `--warn` |
+| `PromptNode` | 保存任务与约束，不提供运行入口 | draft/saved/dirty/saving/save-error/locked/error | `--panel` `--accent` `--danger` |
+| `AgentNode` | 本地运行入口、输出绑定与运行状态 | idle/starting/running/succeeded/failed/interrupted/busy/error | `--panel` `--accent` `--ok` `--danger` |
+| `ScriptNode` | 展示脚本当前版本、来源及待确认结果 | empty/ready/pending/conflict/invalid/error | `--panel` `--warn` `--danger` |
+| `ScriptVersionList` | 展示不可变脚本版本与来源运行 | empty/ready/selected | `--panel-2` `--muted` |
+| `ScriptResultConfirmation` | 确认追加版本或取消，不覆盖旧版本 | pending/confirming/confirmed/cancelled/conflict | `--warn` `--ok` `--danger` |
 | `DraftNode` | 未连接提示词节点 | default/hover/invalid-target | `--border-strong` `--muted` |
 | `PendingArtifactCard` | 待应用预览/应用/丢弃 | pending/invalid/applied/discarded | `--warn` `--ok` `--danger` |
 | `SystemDrawer` | 环境/日志/关于 | closed/open | `--bg-elev` `--border-strong` |

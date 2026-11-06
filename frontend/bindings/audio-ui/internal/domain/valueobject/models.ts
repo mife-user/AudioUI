@@ -36,7 +36,10 @@ export enum NodeType {
     $zero = "",
 
     NodeTypeTopic = "topic",
+    NodeTypeCandidate = "candidate",
     NodeTypePrompt = "prompt",
+    NodeTypeAgent = "agent",
+    NodeTypeScript = "script",
 };
 
 /**

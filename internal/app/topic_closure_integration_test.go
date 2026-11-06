@@ -29,7 +29,7 @@ import (
 const validTopicsFixture = `{"topics":[{"title":"凌晨面包房","angle":"从夜班烘焙师看城市","hook":"凌晨四点，第一炉面包如何改变一条街？"},{"title":"旧唱片店","angle":"一张唱片的流转","hook":"这张唱片为什么被收藏了三十年？"},{"title":"雨夜末班车","angle":"末班车上的城市切片","hook":"最后一班车驶出后，城市还剩下什么？"}]}`
 const invalidTopicsFixture = `{"topics":[{"title":"未达标候选","angle":"测试","hook":"测试"}]}`
 
-func TestTopicClosureWithControlledAgentDriver(t *testing.T) {
+func TestTopicRunAndCandidateProjectionWithControlledAgentDriver(t *testing.T) {
 	layout := topicClosureTestLayout(t)
 	projects := newProjectSetup(layout, zap.NewNop())
 	workflowSetup := newWorkflowSetup(layout, projects.service)
@@ -148,38 +148,19 @@ func TestTopicClosureWithControlledAgentDriver(t *testing.T) {
 		}
 	}
 
-	candidateZero, candidateOne := 0, 1
-	firstBranch, err := workflowSetup.handler.AddNode(handler.AddNodeRequest{
-		ProjectID: project.ID, Type: string(valueobject.NodeTypePrompt), Title: "候选一分支",
-		Parent: topicReceipt.NodeID, ParentCandidate: &candidateZero,
+	candidateIndex := 0
+	if _, err := workflowSetup.handler.AddNode(handler.AddNodeRequest{
+		ProjectID: project.ID, Type: string(valueobject.NodeTypeCandidate), Title: "手工候选",
+		Parent: topicReceipt.NodeID, Position: entity.Position{X: 120, Y: 360},
+	}); !errors.Is(err, workflow.ErrNodeConnectionInvalid) {
+		t.Fatalf("manual candidate creation error = %v, want NODE_CONNECTION_INVALID", err)
+	}
+	if _, err := workflowSetup.handler.AddNode(handler.AddNodeRequest{
+		ProjectID: project.ID, Type: string(valueobject.NodeTypePrompt), Title: "旧模型分支",
+		Parent: topicReceipt.NodeID, ParentCandidate: &candidateIndex,
 		Position: entity.Position{X: 120, Y: 360},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	secondBranch, err := workflowSetup.handler.AddNode(handler.AddNodeRequest{
-		ProjectID: project.ID, Type: string(valueobject.NodeTypePrompt), Title: "候选一的另一分支",
-		Parent: topicReceipt.NodeID, ParentCandidate: &candidateZero,
-		Position: entity.Position{X: 480, Y: 360},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := workflowSetup.handler.Connect(topicReceipt.NodeID, secondBranch.NodeID, &candidateOne, false, project.ID); !errors.Is(err, workflow.ErrReparentConfirmRequired) {
-		t.Fatalf("same-parent candidate change error = %v, want REPARENT_CONFIRM_REQUIRED", err)
-	}
-	if _, err := workflowSetup.handler.Connect(topicReceipt.NodeID, secondBranch.NodeID, &candidateOne, true, project.ID); err != nil {
-		t.Fatal(err)
-	}
-	branchedProject, err := projects.service.Current(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := topicClosureNode(t, branchedProject, firstBranch.NodeID).ParentCandidate; got == nil || *got != candidateZero {
-		t.Fatalf("first branch candidate = %v, want %d", got, candidateZero)
-	}
-	if got := topicClosureNode(t, branchedProject, secondBranch.NodeID).ParentCandidate; got == nil || *got != candidateOne {
-		t.Fatalf("reparented branch candidate = %v, want %d", got, candidateOne)
+	}); !errors.Is(err, workflow.ErrNodeConnectionInvalid) {
+		t.Fatalf("legacy topic port connection error = %v, want NODE_CONNECTION_INVALID", err)
 	}
 
 	invalidRun := handler.NewRunService(manager).Start(invalidTopicReceipt.NodeID, project.ID)

@@ -1,6 +1,6 @@
 # 文档索引
 
-> 现行 M2 基线和新目标设计并存：产品目标见 [PRD 1.1](prd.md#11-新目标需求草案未实现)，设计见 ADR-027/028，是否排入当前批次以[路线图](dev/roadmap.md)和用户决定为准。旧原型及验收证据不代表新目标已实现。
+> M2-11～13 已选择 RM-018 的本地脚本子范围；M2-11A 设计与 M2-11B 工程格式/图领域模型已验收，完整产品闭环尚未实现。M2-00～10 旧模型验收事实保留；RM-019 云端与 RM-020 视频仍待评估。
 
 | 文档 | 读者 | 状态 | 说明 |
 |---|---|---|---|
@@ -15,12 +15,14 @@
 | [design/m2-09-canvas-demo.html](design/m2-09-canvas-demo.html) | 设计 / 前端 | 演示 | M2-09 节点画布、端口、草稿、改挂确认与视图控制本地演示 |
 | [design/m2-10a-topic-run-demo.html](design/m2-10a-topic-run-demo.html) | 设计 / 前端 | 演示 | M2-10A 选题参数保存、一次性运行状态与结构化错误本地演示 |
 | [design/m2-topic-closure-demo.html](design/m2-topic-closure-demo.html) | 设计 / 前端 | 演示 | 选题运行、待应用、候选分支及改挂的本地交互示例 |
-| [design/target-agent-flow-demo.html](design/target-agent-flow-demo.html) | 产品 / 设计 / 开发 | 目标演示 | 候选节点、提示词、Agent、指定/自动生成输出及改挂上下文；模拟数据，未实现 |
+| [design/target-agent-flow-demo.html](design/target-agent-flow-demo.html) | 产品 / 设计 / 开发 | 历史目标演示 | 较早的目标方向草案，含云端/视频示意；不代表当前 M2-11～13 范围 |
+| [design/m2-11-13-local-flow-demo.html](design/m2-11-13-local-flow-demo.html) | 产品 / 设计 / 开发 | M2-11A 设计验收演示 | 本地候选→提示词→Agent→`script` 输出模拟交互；设计已验收，不是产品实现 |
 | [design/canvas-edge-008-diagnosis.html](design/canvas-edge-008-diagnosis.html) | 开发 / 测试 | 诊断示意 | React Flow 动态候选端口、测量缓存与错误 008 的时序说明 |
 | [design/canvas-drag-measurement-diagnosis.html](design/canvas-drag-measurement-diagnosis.html) | 开发 / 测试 | 诊断示意 | 拖动时节点测量状态丢失及修复思路的独立交互示意 |
 | [dev/process.md](dev/process.md) | 开发 / 产品 | 草案 | 阶段、工作分解、门禁、变更控制 |
 | [dev/roadmap.md](dev/roadmap.md) | 产品 / 开发 | 草案 | 需求优先级、批次、暂存需求池 |
 | [dev/m2-workplan.md](dev/m2-workplan.md) | 开发 | 草案 | M2 逐任务执行手册、开工协议、任务卡与状态 |
+| [dev/m2-target-closure-plan.md](dev/m2-target-closure-plan.md) | 开发 / 测试 | 草案 | M2-11～13 新节点模型与本地脚本闭环计划 |
 | [dev/m2-topic-closure-plan.md](dev/m2-topic-closure-plan.md) | 开发 / 测试 | 计划 | M2 工作台至选题闭环的分项实现、测试与验收计划 |
 | [dev/canvas-drag-rendering-fix-plan.md](dev/canvas-drag-rendering-fix-plan.md) | 开发 / 测试 | 草案 | 提示词节点拖动渲染错误的复现证据与修复计划 |
 | [dev/m2-backend-closure-plan.md](dev/m2-backend-closure-plan.md) | 开发 | 草案 | M2-05～07 后端闭环实现计划与已确认决策 |

@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AudioUI · M2-11A 本地脚本流程评审演示</title>
+  <style>
+    :root{color-scheme:dark;--bg:#0a0e11;--bg-elev:#0c1216;--panel:#101a1f;--panel-2:#0b1216;--border:#1e2a30;--border-strong:#2a3f48;--text:#dfe7ea;--text-dim:#9fb2b9;--muted:#6f828a;--accent:#5ad1e6;--accent-soft:rgba(90,209,230,.09);--ok:#6fd3a4;--ok-soft:rgba(111,211,164,.1);--warn:#d8b27a;--warn-soft:rgba(216,178,122,.1);--danger:#d98a8a;--danger-soft:rgba(217,138,138,.1);--grid:#16232a;--edge:#3d6b78;--radius-sm:5px;--radius:9px;--s1:4px;--s2:8px;--s3:12px;--s4:16px}
+    *{box-sizing:border-box}
+    body{margin:0;background:var(--bg);color:var(--text);font:14px/1.55 Inter,"Noto Sans SC","Microsoft YaHei",sans-serif}
+    button,select,textarea{font:inherit;color:inherit}
+    button,select,textarea{background:var(--panel-2);border:1px solid var(--border-strong);border-radius:var(--radius-sm)}
+    button{min-height:36px;padding:7px 11px;cursor:pointer}
+    button:hover:not(:disabled),select:hover{border-color:var(--accent)}
+    button:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+    button:disabled{opacity:.55;cursor:not-allowed}
+    header{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:14px 22px;border-bottom:1px solid var(--border);background:var(--bg-elev)}
+    .brand{font-weight:700;letter-spacing:.12em}.brand span{color:var(--accent)}
+    .top-meta{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.badge{display:inline-flex;align-items:center;border:1px solid var(--border-strong);border-radius:999px;padding:3px 9px;color:var(--text-dim);font-size:12px}.badge.local{color:var(--ok);border-color:rgba(111,211,164,.45)}
+    main{max-width:1540px;margin:0 auto;padding:22px}
+    h1,h2,h3,p{margin-top:0}h1{margin-bottom:5px;font-size:24px;line-height:1.3}h2{margin-bottom:7px;font-size:15px}h3{margin-bottom:5px;font-size:14px}
+    .intro{display:flex;justify-content:space-between;gap:20px;align-items:flex-start;margin-bottom:16px}.intro-copy{max-width:850px}.intro p{margin:0;color:var(--text-dim)}
+    .notice{margin:0 0 16px;padding:11px 14px;border:1px solid rgba(216,178,122,.35);border-left:3px solid var(--warn);border-radius:var(--radius-sm);background:var(--warn-soft);color:var(--text)}
+    .layout{display:grid;grid-template-columns:minmax(0,1fr) 330px;gap:16px;align-items:start}
+    .panel{min-width:0;border:1px solid var(--border);border-radius:var(--radius);background:var(--panel)}
+    .panel-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;padding:15px 16px;border-bottom:1px solid var(--border)}
+    .panel-head p{margin:0;color:var(--text-dim);font-size:12px}
+    .flow-scroll{overflow-x:auto;padding:16px;background-image:radial-gradient(var(--grid) 1px,transparent 1px);background-size:22px 22px;border-radius:0 0 var(--radius) var(--radius)}
+    .flow{display:grid;grid-template-columns:132px 204px 185px 172px 205px;gap:13px;align-items:center;min-width:945px}
+    .flow>*:not(:last-child)::after{content:"→";position:absolute;right:-15px;top:50%;z-index:2;transform:translateY(-50%);color:var(--edge);font-size:19px;pointer-events:none}
+    .node{position:relative;min-height:175px;padding:13px;border:1px solid var(--border-strong);border-radius:var(--radius);background:var(--panel);box-shadow:0 8px 20px rgba(0,0,0,.12)}
+    .node.selected{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent-soft)}
+    .node.output-unbound{border-style:dashed;color:var(--text-dim)}
+    .node-type{display:block;margin-bottom:7px;color:var(--accent);font:600 10px/1.4 "JetBrains Mono",Consolas,monospace;letter-spacing:.1em}
+    .node p{margin:0;color:var(--text-dim);font-size:12px}.node small{display:block;margin-top:10px;color:var(--muted);font-size:11px}
+    .arrow{color:var(--edge);font-size:22px;text-align:center;user-select:none}
+    .candidate-stack{position:relative;display:grid;gap:8px}.candidate{width:100%;min-height:62px;text-align:left;padding:9px 10px;background:var(--panel-2)}.candidate[aria-pressed="true"]{border-color:var(--accent);background:var(--accent-soft)}.candidate strong{display:block;font-size:12px;font-weight:600}.candidate span{display:block;margin-top:3px;color:var(--text-dim);font-size:11px}
+    .prompt-field{display:block;width:100%;min-height:77px;margin-top:10px;padding:8px;resize:vertical;font-size:12px;line-height:1.45}
+    .agent-actions{display:grid;gap:8px;margin-top:12px}.agent-actions button{width:100%}.primary{border-color:#438c9c;background:#173d45;font-weight:650}.secondary{background:transparent}
+    .node-state{display:inline-flex;align-items:center;gap:6px;margin-top:9px;color:var(--text-dim);font-size:11px}.dot{width:7px;height:7px;border-radius:50%;background:var(--muted)}.dot.ok{background:var(--ok)}.dot.warn{background:var(--warn)}.dot.bad{background:var(--danger)}
+    .node-preview{margin-top:9px;padding:7px;border-radius:var(--radius-sm);background:var(--panel-2);color:var(--text-dim);font:11px/1.45 Consolas,monospace;white-space:pre-wrap;overflow-wrap:anywhere;max-height:66px;overflow:auto}
+    .branch-area{margin:0 16px 16px;padding:11px 13px;border:1px dashed var(--border-strong);border-radius:var(--radius-sm);background:rgba(11,18,22,.65)}.branch-area p{margin:0;color:var(--text-dim);font-size:12px}.branch-area .branch-card{margin-top:9px;padding:10px;border-left:2px solid var(--edge);background:var(--panel-2)}
+    .control-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px;padding:14px 16px;border-top:1px solid var(--border)}
+    label{display:block;margin-bottom:5px;color:var(--text-dim);font-size:12px}select{width:100%;min-height:36px;padding:6px 9px}.field-help{margin:5px 0 0;color:var(--muted);font-size:11px}
+    .action-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.wide{grid-column:1/-1}
+    .side{display:grid;gap:12px}.side .panel{padding:14px}.side .panel h2{margin-bottom:9px}.side p{margin:0;color:var(--text-dim);font-size:12px}
+    .snapshot{margin-top:9px;padding:10px;border-radius:var(--radius-sm);background:var(--panel-2);color:var(--text);font:11px/1.55 Consolas,"Microsoft YaHei",monospace;white-space:pre-wrap;overflow-wrap:anywhere;min-height:76px}
+    .status{margin-top:8px;padding:9px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--panel-2);color:var(--text-dim);font-size:12px}.status.good{border-color:rgba(111,211,164,.45);background:var(--ok-soft);color:var(--ok)}.status.warn{border-color:rgba(216,178,122,.45);background:var(--warn-soft);color:var(--warn)}.status.bad{border-color:rgba(217,138,138,.45);background:var(--danger-soft);color:var(--danger)}
+    .pending-card{margin-top:9px;padding:10px;border:1px solid rgba(216,178,122,.45);border-radius:var(--radius-sm);background:var(--warn-soft)}.pending-card pre{margin:8px 0;color:var(--text);font:11px/1.5 Consolas,monospace;white-space:pre-wrap;overflow-wrap:anywhere}.pending-actions{display:flex;gap:7px;flex-wrap:wrap}.pending-actions button{font-size:11px}.version-list,.history-list{display:grid;gap:7px;margin:9px 0 0;padding:0;list-style:none}.version-item,.history-item{padding:8px 9px;border-radius:var(--radius-sm);background:var(--panel-2);color:var(--text-dim);font-size:11px}.version-item strong,.history-item strong{display:block;margin-bottom:2px;color:var(--text);font-weight:600}.empty{color:var(--muted)!important}
+    footer{margin-top:16px;color:var(--muted);font-size:11px}
+    @media(max-width:1120px){main{padding:16px}.layout{grid-template-columns:minmax(0,1fr)}.side{grid-template-columns:repeat(2,minmax(0,1fr))}.side .panel:last-child{grid-column:1/-1}}
+    @media(max-width:700px){header{align-items:flex-start;flex-direction:column;padding:12px 14px}main{padding:12px}.intro{flex-direction:column}.intro h1{font-size:21px}.control-grid{grid-template-columns:1fr}.wide{grid-column:auto}.side{grid-template-columns:1fr}.side .panel:last-child{grid-column:auto}.flow-scroll{padding:12px}.panel-head{padding:12px}}
+    @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;transition:none!important;animation:none!important}}
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand"><span>AUDIO</span>UI <span class="badge">设计讨论</span></div>
+    <div class="top-meta"><span class="badge local">本地 Agent · 模拟数据</span><span class="badge">M2-11A 评审稿 · 未实现</span></div>
+  </header>
+  <main>
+    <section class="intro">
+      <div class="intro-copy"><h1>从候选到脚本结果</h1><p>选题生成候选节点，提示词只构建任务，由 Agent 节点启动本地运行；脚本结果自动创建、接收或确认追加。</p></div>
+      <span class="badge">不连接 Agent / 不访问工程 / 不联网</span>
+    </section>
+    <div class="notice">本演示仅覆盖 M2-11～13 选定的本地 `script` 子范围。云端执行、素材上传、视频节点与渲染导出均不在本阶段。</div>
+    <div class="layout">
+      <section class="panel" aria-labelledby="flow-heading">
+        <div class="panel-head"><div><h2 id="flow-heading">工作流节点</h2><p>候选与脚本结果可建立多个后续提示词分支；节点/连线均为固定示例。</p></div><span class="badge">Topic → Candidate → Prompt → Agent → Script</span></div>
+        <div class="flow-scroll">
+          <div class="flow" aria-label="本地脚本工作流示意">
+            <article class="node" aria-label="选题节点"><span class="node-type">TOPIC</span><h3>选题：城市夜行</h3><p>有效 `topics` 结果由应用生成候选节点。</p><span class="node-state"><i class="dot ok"></i>候选已生成 · 内容/执行锁定</span><small>topics artifact：sha256:8f2a…</small></article>
+            <div class="candidate-stack" aria-label="候选节点">
+              <button class="candidate" id="candidate-a" type="button" aria-pressed="true"><strong>候选 A · 节奏解析</strong><span>来源索引 0 · 可继续分支</span></button>
+              <button class="candidate" id="candidate-b" type="button" aria-pressed="false"><strong>候选 B · 谱面演示</strong><span>来源索引 1 · 可继续分支</span></button>
+            </div>
+            <article class="node selected"><span class="node-type">PROMPT</span><h3>提示词任务</h3><p>仅保存任务与约束，不提供运行入口。</p><label for="prompt" class="field-help">任务内容</label><textarea id="prompt" class="prompt-field">根据当前候选写一段约 90 秒的中文脚本，保留关键节奏变化。</textarea></article>
+            <article class="node"><span class="node-type">AGENT</span><h3>本地 Agent</h3><p>按发送时路径构建一次性运行快照。</p><span class="node-state"><i class="dot" id="agent-dot"></i><span id="agent-state">空闲</span></span><div class="agent-actions"><button class="primary" id="run-valid" type="button">模拟合法 script reply</button><button class="secondary" id="run-invalid" type="button">模拟非法 reply</button></div></article>
+            <article class="node output-unbound" id="script-node"><span class="node-type">SCRIPT OUTPUT</span><h3 id="script-title">脚本输出节点</h3><p id="script-description">尚未指定输出；合法结果将自动创建节点。</p><span class="node-state"><i class="dot" id="script-dot"></i><span id="script-state">未绑定</span></span><pre class="node-preview" id="script-preview">等待合法回复</pre></article>
+          </div>
+        </div>
+        <div class="control-grid">
+          <div><label for="output-mode">Agent 的直接脚本输出</label><select id="output-mode"><option value="none">未指定（合法结果自动建节点）</option><option value="empty">指定空脚本节点（自动接收）</option><option value="existing">指定已有脚本节点（确认后追加）</option></select><p class="field-help" id="output-help">每个 Agent 最多一个直接脚本输出；契约为现有 `script` Schema v1。</p></div>
+          <div><label>模拟运行快照</label><div class="field-help">每次发送冻结候选来源、提示词、输出目标与契约版本。改挂只影响下一次运行。</div></div>
+          <div class="wide action-row"><button class="secondary" id="show-branch" type="button">新增后续 Prompt 分支</button><button class="secondary" id="reset" type="button">重置演示</button><span class="field-help">创建或追加脚本结果后不会自动运行下游。</span></div>
+        </div>
+        <div class="branch-area" id="branch-area" hidden><p>Script → Prompt：新分支已建立，但尚未运行。</p><div class="branch-card"><span class="node-type">PROMPT · 后续分支</span><p>任务：继续完善脚本内容。运行仍需用户从下游 Agent 节点发起。</p></div></div>
+      </section>
+      <aside class="side" aria-label="模拟运行与输出状态">
+        <section class="panel"><h2>当前路径</h2><p id="current-path">Topic → Candidate A（节奏解析）→ Prompt → Agent</p><p class="field-help" id="target-summary">输出：未指定，等待合法 reply</p><div class="snapshot" id="snapshot" aria-label="最近一次发送快照">尚未发送</div></section>
+        <section class="panel"><h2>reply 处理</h2><p>校验复用现有 Schema；本页只模拟应用侧的结果状态。</p><div class="status" id="result" role="status" aria-live="polite">尚未运行</div><div class="pending-card" id="pending-card" hidden><strong>待确认：追加一个 Script 版本</strong><pre id="pending-preview"></pre><div class="pending-actions"><button class="primary" id="confirm" type="button">确认追加</button><button class="secondary" id="cancel" type="button">取消</button><button class="secondary" id="simulate-conflict" type="button">模拟版本冲突</button></div></div></section>
+        <section class="panel"><h2>不可变脚本版本</h2><p>确认只追加；旧版本和 artifact 保留。</p><ul class="version-list" id="versions"><li class="version-item empty">暂无版本</li></ul><p class="field-help" id="version-count">0 个已保存版本</p></section>
+        <section class="panel"><h2>最近运行</h2><p>快照按运行保留；改挂不会改写旧来源。</p><ol class="history-list" id="history"><li class="history-item empty">暂无模拟运行</li></ol></section>
+      </aside>
+    </div>
+    <footer>固定本地模拟数据；不调用 Claude CLI、不产生费用、不读取真实文件。界面与规则均为 M2-11A 评审稿，不代表 Wails 功能已实现或验收。</footer>
+  </main>
+  <script>
+    (() => {
+      const byId = (id) => document.getElementById(id);
+      const candidateNames = { A: '节奏解析', B: '谱面演示' };
+      const sampleScript = (title) => ({ title, scenes: [{ narration: '从鼓点切分看节奏变化。', duration: 12 }] });
+      const state = { candidate: 'A', outputMode: 'none', versions: [], pending: null, runs: [], branch: false };
+      const prompt = byId('prompt');
+      const mode = byId('output-mode');
+      const result = byId('result');
+      function latestVersion() { return state.versions.length ? state.versions[state.versions.length - 1].number : 0; }
+      function addVersion(payload, runId, source) {
+        state.versions.push({ number: latestVersion() + 1, payload, runId, source });
+      }
+      function describeOutput() {
+        if (state.outputMode === 'none') return '未指定，合法结果自动创建 Script 节点';
+        if (state.outputMode === 'empty' && latestVersion() === 0) return '指定空 Script 节点，合法结果自动接收';
+        return `指定 Script 节点，当前 v${latestVersion()}；新结果需确认追加`;
+      }
+      function renderVersions() {
+        const list = byId('versions');
+        list.replaceChildren();
+        if (!state.versions.length) {
+          const item = document.createElement('li');
+          item.className = 'version-item empty';
+          item.textContent = '暂无版本';
+          list.append(item);
+        } else {
+          for (const version of [...state.versions].reverse()) {
+            const item = document.createElement('li');
+            item.className = 'version-item';
+            const title = document.createElement('strong');
+            title.textContent = `v${version.number} · ${version.payload.title}`;
+            const source = document.createElement('span');
+            source.textContent = `${version.source} · ${version.runId} · immutable artifact`;
+            item.append(title, source);
+            list.append(item);
+          }
+        }
+        byId('version-count').textContent = `${state.versions.length} 个已保存版本`;
+      }
+      function renderHistory() {
+        const list = byId('history');
+        list.replaceChildren();
+        if (!state.runs.length) {
+          const item = document.createElement('li');
+          item.className = 'history-item empty';
+          item.textContent = '暂无模拟运行';
+          list.append(item);
+          return;
+        }
+        for (const run of state.runs.slice(-4).reverse()) {
+          const item = document.createElement('li');
+          item.className = 'history-item';
+          const title = document.createElement('strong');
+          title.textContent = `${run.id} · 候选 ${run.candidate}`;
+          const details = document.createElement('span');
+          details.textContent = `${run.outcome} · ${run.target}`;
+          item.append(title, details);
+          list.append(item);
+        }
+      }
+      function render() {
+        for (const key of ['A', 'B']) byId(`candidate-${key.toLowerCase()}`).setAttribute('aria-pressed', String(state.candidate === key));
+        byId('current-path').textContent = `Topic → Candidate ${state.candidate}（${candidateNames[state.candidate]}）→ Prompt → Agent`;
+        byId('target-summary').textContent = `输出：${describeOutput()}`;
+        byId('output-help').textContent = state.outputMode === 'existing' && latestVersion() > 0
+          ? `当前版本 v${latestVersion()}；新回复将待确认，确认后追加，不覆盖。`
+          : '每个 Agent 最多一个直接脚本输出；契约为现有 script Schema v1。';
+        byId('script-node').classList.toggle('output-unbound', state.outputMode === 'none' && latestVersion() === 0);
+        byId('script-title').textContent = state.outputMode === 'none' && latestVersion() === 0 ? '自动生成 Script 节点' : 'Script 输出节点';
+        byId('script-description').textContent = describeOutput();
+        byId('script-state').textContent = state.pending ? '待确认' : latestVersion() ? `已有 v${latestVersion()}` : state.outputMode === 'none' ? '未绑定' : '空节点';
+        byId('script-dot').className = `dot ${state.pending ? 'warn' : latestVersion() ? 'ok' : ''}`;
+        const current = state.versions[state.versions.length - 1];
+        byId('script-preview').textContent = current ? JSON.stringify(current.payload) : '等待合法回复';
+        byId('branch-area').hidden = !state.branch;
+        byId('agent-state').textContent = state.runs.length ? '空闲 · 可再次运行' : '空闲';
+        byId('agent-dot').className = `dot ${state.runs.length ? 'ok' : ''}`;
+        byId('pending-card').hidden = !state.pending;
+        if (state.pending) byId('pending-preview').textContent = JSON.stringify(state.pending.payload, null, 2);
+        renderVersions();
+        renderHistory();
+      }
+      function setStatus(text, kind = '') {
+        result.className = `status${kind ? ` ${kind}` : ''}`;
+        result.textContent = text;
+      }
+      function snapshotFor(runId) {
+        const text = `运行：${runId}\n路径：Topic → Candidate ${state.candidate}（${candidateNames[state.candidate]}）→ Prompt → Agent\n候选来源：sha256:8f2a… / index ${state.candidate === 'A' ? 0 : 1}\n提示词：${prompt.value.trim()}\n输出绑定：${describeOutput()}\n契约：script@1`;
+        byId('snapshot').textContent = text;
+        return text;
+      }
+      function run(valid) {
+        const instruction = prompt.value.trim();
+        if (!instruction) {
+          setStatus('任务为空：未创建结果；请填写提示词后再模拟发送。', 'bad');
+          return;
+        }
+        const runId = `r_demo_${state.runs.length + 1}`;
+        const target = describeOutput();
+        snapshotFor(runId);
+        state.runs.push({ id: runId, candidate: state.candidate, target, outcome: valid ? '合法 reply' : 'SCHEMA_INVALID' });
+        byId('agent-state').textContent = '已完成 · 空闲';
+        byId('agent-dot').className = 'dot ok';
+        if (!valid) {
+          setStatus('SCHEMA_INVALID：script payload 缺少有效 scenes；图、脚本版本与 artifact 关联均未改变。', 'bad');
+          render();
+          return;
+        }
+        const payload = sampleScript(`候选${state.candidate}脚本 v${latestVersion() + 1}`);
+        if (state.outputMode === 'existing' && latestVersion() > 0) {
+          state.pending = { payload, runId, candidate: state.candidate, baseVersion: latestVersion() };
+          setStatus(`合法 script 已校验；结果绑定 ${runId} 与 v${state.pending.baseVersion}，等待确认追加。`, 'warn');
+        } else {
+          addVersion(payload, runId, state.candidate);
+          setStatus(state.outputMode === 'none'
+            ? `合法 script 已由应用模拟自动创建并连接 Script 节点（${runId}）；无需建节点确认。`
+            : `合法 script 已自动写入指定空节点首个版本（${runId}）；无需确认。`, 'good');
+          state.outputMode = 'existing';
+          mode.value = 'existing';
+        }
+        render();
+      }
+      byId('candidate-a').addEventListener('click', () => { state.candidate = 'A'; render(); });
+      byId('candidate-b').addEventListener('click', () => { state.candidate = 'B'; render(); });
+      mode.addEventListener('change', () => {
+        state.outputMode = mode.value;
+        state.versions = mode.value === 'existing' ? [{ number: 1, payload: sampleScript('已有脚本 v1'), runId: 'r_demo_existing', source: '既有来源' }] : [];
+        state.pending = null;
+        setStatus('已切换模拟输出场景；此前运行记录仍保留。');
+        render();
+      });
+      byId('run-valid').addEventListener('click', () => run(true));
+      byId('run-invalid').addEventListener('click', () => run(false));
+      byId('confirm').addEventListener('click', () => {
+        if (!state.pending) return;
+        if (state.pending.baseVersion !== latestVersion()) {
+          setStatus(`OUTPUT_VERSION_CONFLICT：待确认结果基于 v${state.pending.baseVersion}，当前已是 v${latestVersion()}；未覆盖或追加。`, 'bad');
+          state.pending = null;
+          render();
+          return;
+        }
+        addVersion(state.pending.payload, state.pending.runId, state.pending.candidate);
+        setStatus(`已追加 v${latestVersion()}；旧版本与 artifact 保留。`, 'good');
+        state.pending = null;
+        render();
+      });
+      byId('cancel').addEventListener('click', () => {
+        state.pending = null;
+        setStatus('已取消；已有脚本版本与 artifact 未改变。');
+        render();
+      });
+      byId('simulate-conflict').addEventListener('click', () => {
+        if (!state.pending) return;
+        addVersion(sampleScript('另一来源追加的版本'), 'r_demo_external', '并发来源');
+        setStatus('模拟目标版本在待确认期间变化；再次确认会被 OUTPUT_VERSION_CONFLICT 拒绝。', 'warn');
+        render();
+      });
+      byId('show-branch').addEventListener('click', () => {
+        state.branch = !state.branch;
+        byId('show-branch').textContent = state.branch ? '隐藏后续 Prompt 分支' : '新增后续 Prompt 分支';
+        render();
+      });
+      byId('reset').addEventListener('click', () => {
+        state.candidate = 'A';
+        state.outputMode = 'none';
+        state.versions = [];
+        state.pending = null;
+        state.runs = [];
+        state.branch = false;
+        prompt.value = '根据当前候选写一段约 90 秒的中文脚本，保留关键节奏变化。';
+        mode.value = 'none';
+        byId('snapshot').textContent = '尚未发送';
+        byId('show-branch').textContent = '新增后续 Prompt 分支';
+        setStatus('尚未运行');
+        render();
+      });
+      render();
+    })();
+  </script>
+</body>
+</html>

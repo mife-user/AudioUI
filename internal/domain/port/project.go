@@ -11,6 +11,9 @@ import (
 // ErrMigrationFailed is the public code for a failed M1 migration.
 var ErrMigrationFailed = errors.New("MIGRATION_FAILED")
 
+// ErrUnsupportedVersion reports a persisted project format this build cannot load.
+var ErrUnsupportedVersion = errors.New("UNSUPPORTED_VERSION")
+
 // ErrPendingNotFound is returned when a pending id is absent from the project index.
 var ErrPendingNotFound = errors.New("PENDING_NOT_FOUND")
 

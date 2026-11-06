@@ -2,6 +2,7 @@ package project
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -61,6 +62,61 @@ func TestServiceStartWithoutProjects(t *testing.T) {
 	}
 	if config.ContextTokenBudget != valueobject.DefaultContextTokenBudget || config.LastProjectID != "" {
 		t.Fatalf("config = %+v", config)
+	}
+}
+
+func TestServiceUnsupportedLastProjectDoesNotBlockNewOrOpen(t *testing.T) {
+	layout := testLayout(t.TempDir())
+	store := persistence.NewProjectStore(layout)
+	valid := entity.Project{
+		Version: valueobject.ProjectFileVersion, ID: "p_valid", Name: "有效工程", Revision: 1, Nodes: []entity.Node{},
+	}
+	if err := store.Create(context.Background(), valid); err != nil {
+		t.Fatal(err)
+	}
+	old := entity.Project{
+		Version: 1, ID: "p_old", Name: "旧工程", Revision: 1, Nodes: []entity.Node{},
+	}
+	oldDir := filepath.Join(layout.ProjectsDir, old.ID)
+	if err := os.MkdirAll(oldDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	data, err := json.Marshal(old)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(oldDir, "project.json"), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := persistence.NewConfigStore(layout.ConfigFile).Save(context.Background(), valueobject.AppConfig{
+		LastProjectID: old.ID, ContextTokenBudget: 321,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	service := newTestService(layout)
+	if err := service.Start(context.Background()); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	if _, err := service.Current(context.Background()); !errors.Is(err, ErrNoActiveProject) {
+		t.Fatalf("Current() error = %v, want NO_ACTIVE_PROJECT", err)
+	}
+	list, err := service.List(context.Background())
+	if err != nil || len(list) != 2 {
+		t.Fatalf("List() = %+v, err = %v", list, err)
+	}
+	if _, err := service.Open(context.Background(), old.ID); !errors.Is(err, persistence.ErrUnsupportedVersion) {
+		t.Fatalf("Open(old) error = %v, want UNSUPPORTED_VERSION", err)
+	}
+	created, err := service.New(context.Background(), "新工程")
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if created.Name != "新工程" {
+		t.Fatalf("created = %+v", created)
+	}
+	if _, err := service.Open(context.Background(), valid.ID); err != nil {
+		t.Fatalf("Open(valid) error = %v", err)
 	}
 }
 

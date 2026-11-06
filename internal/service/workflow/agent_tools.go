@@ -77,10 +77,10 @@ func (s *Service) ReadRunArtifact(ctx context.Context, scope port.RunScope, arti
 			ref := artifactRef{kind: round.Kind, candidate: -1}
 			if round.Kind == valueobject.OutputKindTopics {
 				child, ok := graph.Node(scope.ChainPath[i+1])
-				if !ok || child.Parent != node.ID || child.ParentCandidate == nil || *child.ParentCandidate < 0 {
+				if !ok || child.Type != valueobject.NodeTypeCandidate || child.Parent != node.ID || child.CandidateSource == nil || child.CandidateSource.TopicNodeID != node.ID || child.CandidateSource.ArtifactID != round.ArtifactID || child.CandidateSource.Index < 0 {
 					return port.RunArtifact{}, ErrCandidateInvalid
 				}
-				ref.candidate = *child.ParentCandidate
+				ref.candidate = child.CandidateSource.Index
 			}
 			refs = append(refs, ref)
 		}

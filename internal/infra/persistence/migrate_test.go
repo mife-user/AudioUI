@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"audio-ui/internal/domain/entity"
 	"audio-ui/internal/domain/port"
 	"audio-ui/internal/domain/valueobject"
 )
@@ -77,7 +78,7 @@ func TestM1MigratorImportsActiveChainAndWorkspace(t *testing.T) {
 	if !result.Migrated {
 		t.Fatal("Migrated = false")
 	}
-	if result.Project.ID != migratedProjectID || result.Project.Name != migratedName {
+	if result.Project.ID != migratedProjectID || result.Project.Name != migratedName || result.Project.Version != valueobject.ProjectFileVersion {
 		t.Fatalf("project = %+v", result.Project)
 	}
 	if len(result.Project.Nodes) != 1 || result.Project.Nodes[0].ID != migratedRootID ||
@@ -250,6 +251,30 @@ func TestM1MigratorDoesNotOverwriteExistingProject(t *testing.T) {
 	}
 	if exists, err := fileExists(filepath.Join(layout.BackupDir, "migration.json")); err != nil || !exists {
 		t.Fatalf("migration marker not written: exists=%v err=%v", exists, err)
+	}
+}
+
+func TestM1MigratorSkipsUnsupportedExistingDestination(t *testing.T) {
+	layout := testLayout(t.TempDir())
+	writeM1Sessions(t, layout)
+	old := migratedProject()
+	old.Version = 1
+	writeJSONFileForTest(t, filepath.Join(layout.ProjectsDir, migratedProjectID, "project.json"), old)
+
+	result, err := NewM1MigratorWithNow(layout, fixedNow).Migrate(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Migrated || result.Project.ID != "" {
+		t.Fatalf("result = %+v, want skipped unsupported destination", result)
+	}
+	var persisted entity.Project
+	found, err := readJSONFile(filepath.Join(layout.ProjectsDir, migratedProjectID, "project.json"), &persisted)
+	if err != nil || !found || persisted.Version != 1 {
+		t.Fatalf("old project changed: found=%v project=%+v err=%v", found, persisted, err)
+	}
+	if _, err := os.Stat(layout.SessionsFile); err != nil {
+		t.Fatalf("M1 source was removed: %v", err)
 	}
 }
 

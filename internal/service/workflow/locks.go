@@ -96,6 +96,9 @@ func (s *Service) BeginRun(ctx context.Context, runID, nodeID string, expectedPr
 	if node.Locked {
 		return entity.Project{}, nil, fmt.Errorf("%w: %s", ErrNodeLocked, nodeID)
 	}
+	if err := validateRunEntry(node); err != nil {
+		return entity.Project{}, nil, err
+	}
 	root, err := chainRoot(graph, nodeID)
 	if err != nil {
 		return entity.Project{}, nil, err

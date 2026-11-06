@@ -80,7 +80,7 @@ func pendingInput(runID, nodeID string, path []string, kind valueobject.OutputKi
 
 func TestCreatePendingPreservesInvalidOutputAndRequestIdentity(t *testing.T) {
 	h := newPendingHarness(t, baseProject())
-	input := pendingInput("r_first", "n_a", []string{"n_topic", "n_a"}, valueobject.OutputKindScript, validScriptPayload())
+	input := pendingInput("r_first", "n_a", []string{"n_topic", "n_candidate", "n_a"}, valueobject.OutputKindScript, validScriptPayload())
 	input.RequestID = "req_first"
 	first, err := h.service.CreatePending(context.Background(), input)
 	if err != nil {
@@ -106,7 +106,7 @@ func TestCreatePendingPreservesInvalidOutputAndRequestIdentity(t *testing.T) {
 	}
 
 	invalidPayload := []byte(`{"title":"不完整","scenes":[{"narration":"旁白","duration":"未知"}]}`)
-	invalidInput := pendingInput("r_invalid", "n_a", []string{"n_topic", "n_a"}, valueobject.OutputKindScript, invalidPayload)
+	invalidInput := pendingInput("r_invalid", "n_a", []string{"n_topic", "n_candidate", "n_a"}, valueobject.OutputKindScript, invalidPayload)
 	invalid, err := h.service.CreatePending(context.Background(), invalidInput)
 	if err != nil {
 		t.Fatal(err)
@@ -125,7 +125,7 @@ func TestCreatePendingPreservesInvalidOutputAndRequestIdentity(t *testing.T) {
 
 func TestWorkspaceViewContainsDerivedChainsPendingAndProjectRunLocks(t *testing.T) {
 	h := newPendingHarness(t, baseProject())
-	input := pendingInput("r_workspace", "n_a", []string{"n_topic", "n_a"}, valueobject.OutputKindScript, validScriptPayload())
+	input := pendingInput("r_workspace", "n_a", []string{"n_topic", "n_candidate", "n_a"}, valueobject.OutputKindScript, validScriptPayload())
 	pending, err := h.service.CreatePending(context.Background(), input)
 	if err != nil {
 		t.Fatal(err)
@@ -143,17 +143,17 @@ func TestWorkspaceViewContainsDerivedChainsPendingAndProjectRunLocks(t *testing.
 	if len(view.Pending) != 1 || view.Pending[0].ID != pending.ID {
 		t.Fatalf("pending summaries = %+v", view.Pending)
 	}
-	if err := h.service.AcquireRunLock(context.Background(), "r_workspace_lock", "n_topic", "n_a", []string{"n_topic", "n_a"}); err != nil {
+	if err := h.service.AcquireRunLock(context.Background(), "r_workspace_lock", "n_topic", "n_a", []string{"n_topic", "n_candidate", "n_a"}); err != nil {
 		t.Fatal(err)
 	}
 	view, err = h.service.WorkspaceView(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(view.LockedNodeIDs) != 2 || view.LockedNodeIDs[0] != "n_a" || view.LockedNodeIDs[1] != "n_topic" {
+	if len(view.LockedNodeIDs) != 3 || view.LockedNodeIDs[0] != "n_a" || view.LockedNodeIDs[1] != "n_candidate" || view.LockedNodeIDs[2] != "n_topic" {
 		t.Fatalf("project locked nodes = %+v", view.LockedNodeIDs)
 	}
-	if len(view.RunLocks) != 1 || view.RunLocks[0].RunID != "r_workspace_lock" || len(view.RunLocks[0].ChainPath) != 2 {
+	if len(view.RunLocks) != 1 || view.RunLocks[0].RunID != "r_workspace_lock" || len(view.RunLocks[0].ChainPath) != 3 {
 		t.Fatalf("workspace run locks = %+v", view.RunLocks)
 	}
 	if got := (*h.changes)[len(*h.changes)-1]; got.projectID != h.session.project.ID || got.reason != ChangeReasonRunLock {
@@ -164,12 +164,12 @@ func TestWorkspaceViewContainsDerivedChainsPendingAndProjectRunLocks(t *testing.
 func TestCreatePendingEnforcesPayloadAndTreeLimits(t *testing.T) {
 	h := newPendingHarness(t, projectWithSecondTree())
 	for i := 0; i < valueobject.MaxPendingPerTree; i++ {
-		input := pendingInput(fmt.Sprintf("r_%d", i), "n_a", []string{"n_topic", "n_a"}, valueobject.OutputKindScript, validScriptPayload())
+		input := pendingInput(fmt.Sprintf("r_%d", i), "n_a", []string{"n_topic", "n_candidate", "n_a"}, valueobject.OutputKindScript, validScriptPayload())
 		if _, err := h.service.CreatePending(context.Background(), input); err != nil {
 			t.Fatalf("create pending %d: %v", i, err)
 		}
 	}
-	tooMany := pendingInput("r_over", "n_a", []string{"n_topic", "n_a"}, valueobject.OutputKindScript, validScriptPayload())
+	tooMany := pendingInput("r_over", "n_a", []string{"n_topic", "n_candidate", "n_a"}, valueobject.OutputKindScript, validScriptPayload())
 	if _, err := h.service.CreatePending(context.Background(), tooMany); !errors.Is(err, ErrPendingLimit) {
 		t.Fatalf("51st pending error = %v, want PENDING_LIMIT_REACHED", err)
 	}
@@ -186,11 +186,11 @@ func TestCreatePendingEnforcesPayloadAndTreeLimits(t *testing.T) {
 	if _, err := h.service.CreatePending(context.Background(), tooMany); err != nil {
 		t.Fatalf("released pending slot was not reusable: %v", err)
 	}
-	secondTree := pendingInput("r_second_tree", "n_x", []string{"n_topic2", "n_x"}, valueobject.OutputKindScript, validScriptPayload())
+	secondTree := pendingInput("r_second_tree", "n_y", []string{"n_topic2", "n_x", "n_y"}, valueobject.OutputKindScript, validScriptPayload())
 	if _, err := h.service.CreatePending(context.Background(), secondTree); err != nil {
 		t.Fatalf("pending limit leaked across topic trees: %v", err)
 	}
-	oversized := pendingInput("r_large", "n_a", []string{"n_topic", "n_a"}, valueobject.OutputKindScript, bytes.Repeat([]byte("x"), valueobject.MaxPendingPayloadSize+1))
+	oversized := pendingInput("r_large", "n_a", []string{"n_topic", "n_candidate", "n_a"}, valueobject.OutputKindScript, bytes.Repeat([]byte("x"), valueobject.MaxPendingPayloadSize+1))
 	before := h.session.project.Revision
 	if _, err := h.service.CreatePending(context.Background(), oversized); !errors.Is(err, ErrPendingPayloadTooLarge) {
 		t.Fatalf("oversized payload error = %v", err)
@@ -202,7 +202,7 @@ func TestCreatePendingEnforcesPayloadAndTreeLimits(t *testing.T) {
 
 func TestApplyPendingConflictsForceLockingAndStalePropagation(t *testing.T) {
 	h := newPendingHarness(t, baseProject())
-	input := pendingInput("r_apply", "n_a", []string{"n_topic", "n_a"}, valueobject.OutputKindScript, validScriptPayload())
+	input := pendingInput("r_apply", "n_a", []string{"n_topic", "n_candidate", "n_a"}, valueobject.OutputKindScript, validScriptPayload())
 	pending, err := h.service.CreatePending(context.Background(), input)
 	if err != nil {
 		t.Fatal(err)
@@ -246,7 +246,7 @@ func TestApplyPendingConflictsForceLockingAndStalePropagation(t *testing.T) {
 func TestForceCannotBypassInvalidOutputOrRunLock(t *testing.T) {
 	t.Run("invalid schema", func(t *testing.T) {
 		h := newPendingHarness(t, baseProject())
-		input := pendingInput("r_invalid", "n_a", []string{"n_topic", "n_a"}, valueobject.OutputKindScript, []byte(`{"title":"bad","scenes":[]}`))
+		input := pendingInput("r_invalid", "n_a", []string{"n_topic", "n_candidate", "n_a"}, valueobject.OutputKindScript, []byte(`{"title":"bad","scenes":[]}`))
 		pending, err := h.service.CreatePending(context.Background(), input)
 		if err != nil {
 			t.Fatal(err)
@@ -257,12 +257,12 @@ func TestForceCannotBypassInvalidOutputOrRunLock(t *testing.T) {
 	})
 	t.Run("run lock", func(t *testing.T) {
 		h := newPendingHarness(t, baseProject())
-		input := pendingInput("r_locked", "n_a", []string{"n_topic", "n_a"}, valueobject.OutputKindScript, validScriptPayload())
+		input := pendingInput("r_locked", "n_a", []string{"n_topic", "n_candidate", "n_a"}, valueobject.OutputKindScript, validScriptPayload())
 		pending, err := h.service.CreatePending(context.Background(), input)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := h.service.AcquireRunLock(context.Background(), "r_active", "n_topic", "n_a", []string{"n_topic", "n_a"}); err != nil {
+		if err := h.service.AcquireRunLock(context.Background(), "r_active", "n_topic", "n_a", []string{"n_topic", "n_candidate", "n_a"}); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := h.service.ApplyPending(context.Background(), pending.ID, true, h.session.project.ID); !errors.Is(err, ErrRunningChainLocked) {
@@ -273,7 +273,7 @@ func TestForceCannotBypassInvalidOutputOrRunLock(t *testing.T) {
 
 func TestDiscardPendingIsIdempotent(t *testing.T) {
 	h := newPendingHarness(t, baseProject())
-	input := pendingInput("r_discard", "n_a", []string{"n_topic", "n_a"}, valueobject.OutputKindScript, []byte("{"))
+	input := pendingInput("r_discard", "n_a", []string{"n_topic", "n_candidate", "n_a"}, valueobject.OutputKindScript, []byte("{"))
 	pending, err := h.service.CreatePending(context.Background(), input)
 	if err != nil {
 		t.Fatal(err)
@@ -297,12 +297,10 @@ func TestDiscardPendingIsIdempotent(t *testing.T) {
 }
 
 func TestApplyTopicUsesRoundKindWhenArtifactMetadataWasFirstWrittenForAnotherKind(t *testing.T) {
-	zero := 0
 	project := entity.Project{
 		Version: valueobject.ProjectFileVersion, ID: "p_topic", Name: "选题工程", Revision: 1,
 		ActiveNodeID: "n_topic", Nodes: []entity.Node{
 			{ID: "n_topic", Type: valueobject.NodeTypeTopic, Title: "新选题", Params: entity.NodeParams{CandidateCount: 3}, Rounds: []entity.Round{}},
-			{ID: "n_child", Type: valueobject.NodeTypePrompt, Title: "脚本", Parent: "n_topic", ParentCandidate: &zero, Params: entity.NodeParams{OutputKind: valueobject.OutputKindScript}, Rounds: []entity.Round{}},
 		},
 	}
 	h := newPendingHarness(t, project)

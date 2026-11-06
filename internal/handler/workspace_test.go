@@ -91,33 +91,46 @@ func TestGetWorkspaceSnapshotReturnsSummariesDerivedChainsAndLocks(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	root, err := workflowService.AddNode(context.Background(), workflow.AddNodeInput{
+	rootProject, err := workflowService.AddNode(context.Background(), workflow.AddNodeInput{
 		Type: valueobject.NodeTypeTopic, Title: "主题", Position: entity.Position{X: 1, Y: 2},
 		Params: entity.NodeParams{Idea: "ideas", CandidateCount: 3},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	rootID := root.Nodes[0].ID
-	first, err := workflowService.AddNode(context.Background(), workflow.AddNodeInput{
-		Type: valueobject.NodeTypePrompt, Title: "分支甲", Parent: rootID, ParentCandidate: intPointer(0),
-		Position: entity.Position{X: 3, Y: 4}, Params: entity.NodeParams{Instruction: "draft"},
-	})
+	rootID := rootProject.Nodes[0].ID
+	seededProject, err := service.Current(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	firstID := first.Nodes[1].ID
-	second, err := workflowService.AddNode(context.Background(), workflow.AddNodeInput{
-		Type: valueobject.NodeTypePrompt, Title: "分支乙", Parent: rootID, ParentCandidate: intPointer(1),
-		Position: entity.Position{X: 5, Y: 6}, Params: entity.NodeParams{Instruction: "draft"},
-	})
-	if err != nil {
+	firstID, secondID := "n_prompt_a", "n_prompt_b"
+	candidateA, candidateB := "n_candidate_a", "n_candidate_b"
+	seededProject.Nodes[0].Rounds = []entity.Round{{N: 1, Kind: valueobject.OutputKindTopics, ArtifactID: "sha256:topics-a"}}
+	seededProject.Nodes = append(seededProject.Nodes,
+		entity.Node{
+			ID: candidateA, Type: valueobject.NodeTypeCandidate, Title: "候选甲", Parent: rootID,
+			CandidateSource: &entity.CandidateSource{TopicNodeID: rootID, ArtifactID: "sha256:topics-a", Index: 0}, Rounds: []entity.Round{},
+		},
+		entity.Node{
+			ID: firstID, Type: valueobject.NodeTypePrompt, Title: "分支甲", Parent: candidateA,
+			Position: entity.Position{X: 3, Y: 4}, Params: entity.NodeParams{Instruction: "draft"}, Rounds: []entity.Round{},
+		},
+		entity.Node{
+			ID: candidateB, Type: valueobject.NodeTypeCandidate, Title: "候选乙", Parent: rootID,
+			CandidateSource: &entity.CandidateSource{TopicNodeID: rootID, ArtifactID: "sha256:topics-a", Index: 1}, Rounds: []entity.Round{},
+		},
+		entity.Node{
+			ID: secondID, Type: valueobject.NodeTypePrompt, Title: "分支乙", Parent: candidateB,
+			Position: entity.Position{X: 5, Y: 6}, Params: entity.NodeParams{Instruction: "draft"}, Rounds: []entity.Round{},
+		},
+	)
+	seededProject.Revision++
+	if _, err := service.Save(context.Background(), seededProject); err != nil {
 		t.Fatal(err)
 	}
-	secondID := second.Nodes[2].ID
 	pending, err := workflowService.CreatePending(context.Background(), workflow.CreatePendingInput{
 		RunID: "r_workspace", ProjectID: projectValue.ID, TreeID: rootID, ChainID: "c_" + firstID,
-		ChainPath: []string{rootID, firstID}, NodeID: firstID, Kind: valueobject.OutputKindScript,
+		ChainPath: []string{rootID, candidateA, firstID}, NodeID: firstID, Kind: valueobject.OutputKindScript,
 		ContextHash: "context", AncestorHash: "ancestor", ParamsHash: "params",
 		Payload: []byte(`{"title":"公开摘要","scenes":[{"narration":"private payload","duration":0}]}`),
 	})
@@ -130,7 +143,7 @@ func TestGetWorkspaceSnapshotReturnsSummariesDerivedChainsAndLocks(t *testing.T)
 	}
 	if err := store.Save(context.Background(), entity.RunRecord{RunSummary: entity.RunSummary{
 		ID: "r_history", TreeID: rootID, NodeID: firstID, ChainID: "c_" + firstID,
-		ChainPath: []string{rootID, firstID}, Status: valueobject.RunSucceeded,
+		ChainPath: []string{rootID, candidateA, firstID}, Status: valueobject.RunSucceeded,
 		ContextHash: "context", EstimatedTokens: 42, StartedAt: "2026-11-03T00:00:00Z", UsageReported: false,
 	}, Transcript: []valueobject.TranscriptItem{{ID: "t1", Text: "transcript must stay out"}}}); err != nil {
 		t.Fatal(err)
@@ -144,17 +157,17 @@ func TestGetWorkspaceSnapshotReturnsSummariesDerivedChainsAndLocks(t *testing.T)
 	if len(pendingResult.Snapshot.Chains) != 2 || pendingResult.Snapshot.Chains[0].Status != "pending" || pendingResult.Snapshot.Chains[1].Status != "idle" {
 		t.Fatalf("pending chain status = %+v", pendingResult.Snapshot.Chains)
 	}
-	if err := workflowService.AcquireRunLock(context.Background(), "r_lock", rootID, firstID, []string{rootID, firstID}); err != nil {
+	if err := workflowService.AcquireRunLock(context.Background(), "r_lock", rootID, firstID, []string{rootID, candidateA, firstID}); err != nil {
 		t.Fatal(err)
 	}
 	result, err := handler.GetWorkspaceSnapshot()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Snapshot.Project == nil || result.Snapshot.Project.ID != projectValue.ID || result.Snapshot.Project.Revision != second.Revision+1 {
+	if result.Snapshot.Project == nil || result.Snapshot.Project.ID != projectValue.ID || result.Snapshot.Project.Revision != seededProject.Revision+1 {
 		t.Fatalf("snapshot project = %+v, revision=%d", result.Snapshot.Project, result.Revision)
 	}
-	if len(result.Snapshot.Nodes) != 3 || len(result.Snapshot.Chains) != 2 {
+	if len(result.Snapshot.Nodes) != 5 || len(result.Snapshot.Chains) != 2 {
 		t.Fatalf("nodes/chains = %d/%+v", len(result.Snapshot.Nodes), result.Snapshot.Chains)
 	}
 	if result.Snapshot.Chains[0].ID != "c_"+firstID || result.Snapshot.Chains[0].Status != "running" || result.Snapshot.Chains[1].ID != "c_"+secondID {
@@ -173,7 +186,7 @@ func TestGetWorkspaceSnapshotReturnsSummariesDerivedChainsAndLocks(t *testing.T)
 	for _, id := range result.Snapshot.LockedNodeIDs {
 		locked[id] = true
 	}
-	if len(result.Snapshot.LockedNodeIDs) != 2 || !locked[firstID] || !locked[rootID] {
+	if len(result.Snapshot.LockedNodeIDs) != 3 || !locked[firstID] || !locked[candidateA] || !locked[rootID] {
 		t.Fatalf("locked nodes = %+v", result.Snapshot.LockedNodeIDs)
 	}
 	encoded, err := json.Marshal(result.Snapshot)
@@ -235,15 +248,13 @@ func newWorkspaceFixture(t *testing.T, active bool) (*project.Service, *workflow
 		}
 	}
 	workflowService := workflow.New(workflow.Options{
-		Project: service, Candidates: handlerCandidates{},
+		Project:   service,
 		Pending:   persistence.NewPendingStoreProvider(layout),
 		Artifacts: persistence.NewArtifactStoreProvider(layout),
 		OnChange:  revision.workflowChanged,
 	})
 	return service, workflowService, revision, layout
 }
-
-func intPointer(value int) *int { return &value }
 
 func containsAny(value string, candidates ...string) bool {
 	for _, candidate := range candidates {

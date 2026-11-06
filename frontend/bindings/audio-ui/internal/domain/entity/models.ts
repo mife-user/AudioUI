@@ -5,6 +5,12 @@
 // @ts-ignore: Unused imports
 import * as valueobject$0 from "../valueobject/models.js";
 
+export interface CandidateSource {
+    "topicNodeId": string;
+    "artifactId": string;
+    "index": number;
+}
+
 /**
  * GraphMutationReceipt identifies the authoritative project revision produced
  * by a graph command. NodeID is the created node for AddNode, otherwise the
@@ -17,8 +23,7 @@ export interface GraphMutationReceipt {
 }
 
 /**
- * Node is one persisted graph node. Edges are derived from Parent and
- * ParentCandidate and are never stored separately.
+ * Node is one persisted graph node. Edges are derived from Parent.
  */
 export interface Node {
     "id": string;
@@ -26,6 +31,8 @@ export interface Node {
     "title": string;
     "parent"?: string;
     "parentCandidate"?: number | null;
+    "candidateSource"?: CandidateSource | null;
+    "scriptVersions"?: ScriptVersion[] | null;
     "position": Position;
     "params": NodeParams;
     "rounds": Round[] | null;
@@ -126,6 +133,8 @@ export interface ProjectSummary {
     "id": string;
     "name": string;
     "revision": number;
+    "version"?: number;
+    "errorCode"?: string;
 }
 
 /**
@@ -224,6 +233,12 @@ export interface RunSummary {
     "pendingId"?: string;
     "startedAt"?: string;
     "finishedAt"?: string;
+}
+
+export interface ScriptVersion {
+    "n": number;
+    "artifactId": string;
+    "runId": string;
 }
 
 /**

@@ -42,21 +42,6 @@ func (s *fakeSession) WithExclusive(ctx context.Context, fn func(port.ProjectAcc
 	return fn(s)
 }
 
-type fakeCandidates struct {
-	counts map[string]int
-	err    error
-}
-
-func (c *fakeCandidates) Count(ctx context.Context, projectID string, node entity.Node) (int, error) {
-	if err := ctx.Err(); err != nil {
-		return 0, err
-	}
-	if c.err != nil {
-		return 0, c.err
-	}
-	return c.counts[node.ID], nil
-}
-
 type moveCall struct {
 	projectID    string
 	sourceRootID string
@@ -108,7 +93,7 @@ func intPtr(value int) *int {
 }
 
 func baseProject() entity.Project {
-	zero := 0
+	artifactID := "sha256:" + strings.Repeat("0", 64)
 	return entity.Project{
 		Version:      valueobject.ProjectFileVersion,
 		ID:           "p_test",
@@ -119,49 +104,58 @@ func baseProject() entity.Project {
 			{
 				ID: "n_topic", Type: valueobject.NodeTypeTopic, Title: "选题",
 				Position: entity.Position{X: 0, Y: 0}, Params: entity.NodeParams{Idea: "想法", CandidateCount: 3},
-				Rounds: []entity.Round{{N: 1, Kind: valueobject.OutputKindTopics, ArtifactID: "sha256:" + strings.Repeat("0", 64)}},
+				Rounds: []entity.Round{{N: 1, Kind: valueobject.OutputKindTopics, ArtifactID: artifactID}},
 				Locked: true,
 			},
 			{
-				ID: "n_a", Type: valueobject.NodeTypePrompt, Title: "A",
-				Parent: "n_topic", ParentCandidate: &zero,
-				Position: entity.Position{X: 10, Y: 10}, Params: entity.NodeParams{Instruction: "A"},
+				ID: "n_candidate", Type: valueobject.NodeTypeCandidate, Title: "候选一",
+				Parent: "n_topic", CandidateSource: &entity.CandidateSource{TopicNodeID: "n_topic", ArtifactID: artifactID, Index: 0},
 				Rounds: []entity.Round{},
 			},
 			{
-				ID: "n_b", Type: valueobject.NodeTypePrompt, Title: "B",
+				ID: "n_a", Type: valueobject.NodeTypePrompt, Title: "A",
+				Parent: "n_candidate", Position: entity.Position{X: 10, Y: 10},
+				Params: entity.NodeParams{Instruction: "A"}, Rounds: []entity.Round{},
+			},
+			{
+				ID: "n_b", Type: valueobject.NodeTypeAgent, Title: "B",
 				Parent: "n_a", Position: entity.Position{X: 20, Y: 20},
-				Params: entity.NodeParams{Instruction: "B"}, Rounds: []entity.Round{},
+				Rounds: []entity.Round{},
+			},
+			{
+				ID: "n_candidate2", Type: valueobject.NodeTypeCandidate, Title: "候选二",
+				Parent: "n_topic", CandidateSource: &entity.CandidateSource{TopicNodeID: "n_topic", ArtifactID: artifactID, Index: 1},
+				Rounds: []entity.Round{},
 			},
 			{
 				ID: "n_c", Type: valueobject.NodeTypePrompt, Title: "C",
-				Parent: "n_topic", ParentCandidate: intPtr(0),
-				Position: entity.Position{X: 30, Y: 10}, Params: entity.NodeParams{Instruction: "C"},
-				Rounds: []entity.Round{},
+				Parent: "n_candidate2", Position: entity.Position{X: 30, Y: 10},
+				Params: entity.NodeParams{Instruction: "C"}, Rounds: []entity.Round{},
 			},
 			{
 				ID: "n_draft", Type: valueobject.NodeTypePrompt, Title: "草稿",
 				Position: entity.Position{X: 40, Y: 40}, Params: entity.NodeParams{Instruction: "D"},
 				Rounds: []entity.Round{},
 			},
+			{ID: "n_agent_draft", Type: valueobject.NodeTypeAgent, Title: "Agent 草稿", Rounds: []entity.Round{}},
 		},
 	}
 }
 
 func projectWithSecondTree() entity.Project {
 	project := baseProject()
-	zero := 0
+	artifactID := "sha256:" + strings.Repeat("1", 64)
 	project.Nodes = append(project.Nodes,
 		entity.Node{
 			ID: "n_topic2", Type: valueobject.NodeTypeTopic, Title: "选题 2",
 			Params: entity.NodeParams{Idea: "想法 2", CandidateCount: 3},
-			Rounds: []entity.Round{{N: 1, Kind: valueobject.OutputKindTopics, ArtifactID: "sha256:" + strings.Repeat("1", 64)}},
+			Rounds: []entity.Round{{N: 1, Kind: valueobject.OutputKindTopics, ArtifactID: artifactID}},
 			Locked: true,
 		},
 		entity.Node{
-			ID: "n_x", Type: valueobject.NodeTypePrompt, Title: "X",
-			Parent: "n_topic2", ParentCandidate: &zero,
-			Params: entity.NodeParams{Instruction: "X"}, Rounds: []entity.Round{},
+			ID: "n_x", Type: valueobject.NodeTypeCandidate, Title: "候选 X",
+			Parent: "n_topic2", CandidateSource: &entity.CandidateSource{TopicNodeID: "n_topic2", ArtifactID: artifactID, Index: 0},
+			Rounds: []entity.Round{},
 		},
 		entity.Node{
 			ID: "n_y", Type: valueobject.NodeTypePrompt, Title: "Y",
@@ -184,10 +178,7 @@ func newHarness(t *testing.T, project entity.Project) *harness {
 	mover := &fakeMover{}
 	changes := &[]changeCall{}
 	service := New(Options{
-		Project: session,
-		Candidates: &fakeCandidates{counts: map[string]int{
-			"n_topic": 3, "n_topic2": 3,
-		}},
+		Project:   session,
 		Workspace: mover,
 		OnChange: func(projectID string, revision int64, reason string) {
 			*changes = append(*changes, changeCall{projectID: projectID, revision: revision, reason: reason})

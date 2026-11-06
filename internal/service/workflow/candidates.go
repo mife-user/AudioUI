@@ -10,11 +10,6 @@ import (
 	"audio-ui/internal/domain/valueobject"
 )
 
-// CandidateCounter returns how many candidate ports an applied topic exposes.
-type CandidateCounter interface {
-	Count(ctx context.Context, projectID string, node entity.Node) (int, error)
-}
-
 type TopicCandidateReader interface {
 	Read(ctx context.Context, projectID string, node entity.Node) ([]entity.TopicCandidate, error)
 }
@@ -114,7 +109,7 @@ func (s *Service) GetTopicCandidates(ctx context.Context, nodeID, expectedProjec
 		if err != nil {
 			return fmt.Errorf("图状态无效: %w", err)
 		}
-		if err := graph.Validate(); err != nil {
+		if err := graph.ValidateForest(); err != nil {
 			return fmt.Errorf("图状态无效: %w", err)
 		}
 		node, err := requireNode(graph, nodeID, "node")

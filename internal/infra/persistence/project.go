@@ -2,6 +2,7 @@ package persistence
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -44,12 +45,20 @@ func (s *ProjectStore) List(ctx context.Context) ([]entity.ProjectSummary, error
 			continue
 		}
 		project, err := s.loadLocked(entry.Name())
-		if err != nil {
+		summary := entity.ProjectSummary{}
+		if errors.Is(err, ErrUnsupportedVersion) {
+			summary, err = s.unsupportedSummaryLocked(entry.Name())
+			if err != nil {
+				return nil, err
+			}
+		} else if err != nil {
 			return nil, err
+		} else {
+			summary = entity.ProjectSummary{
+				ID: project.ID, Name: project.Name, Revision: project.Revision, Version: project.Version,
+			}
 		}
-		summaries = append(summaries, entity.ProjectSummary{
-			ID: project.ID, Name: project.Name, Revision: project.Revision,
-		})
+		summaries = append(summaries, summary)
 	}
 	sort.SliceStable(summaries, func(i, j int) bool {
 		if summaries[i].Name != summaries[j].Name {
@@ -58,6 +67,28 @@ func (s *ProjectStore) List(ctx context.Context) ([]entity.ProjectSummary, error
 		return summaries[i].ID < summaries[j].ID
 	})
 	return summaries, nil
+}
+
+func (s *ProjectStore) unsupportedSummaryLocked(id string) (entity.ProjectSummary, error) {
+	projectPaths, err := paths.ResolveProject(s.layout, id)
+	if err != nil {
+		return entity.ProjectSummary{}, err
+	}
+	var project entity.Project
+	found, err := readJSONFile(projectPaths.ProjectFile, &project)
+	if err != nil {
+		return entity.ProjectSummary{}, fmt.Errorf("%w: %s: %v", ErrCorruptProject, projectPaths.ProjectFile, err)
+	}
+	if !found {
+		return entity.ProjectSummary{}, fmt.Errorf("%w: %s", ErrProjectNotFound, id)
+	}
+	if project.ID != id {
+		return entity.ProjectSummary{}, fmt.Errorf("%w: id %q does not match directory %q", ErrCorruptProject, project.ID, id)
+	}
+	return entity.ProjectSummary{
+		ID: project.ID, Name: project.Name, Revision: project.Revision,
+		Version: project.Version, ErrorCode: ErrUnsupportedVersion.Error(),
+	}, nil
 }
 
 func (s *ProjectStore) Create(ctx context.Context, project entity.Project) error {
@@ -299,6 +330,13 @@ func validateProject(project entity.Project) error {
 		if _, ok := seen[project.ActiveNodeID]; !ok {
 			return fmt.Errorf("%w: activeNodeId %q not found", ErrInvalidProject, project.ActiveNodeID)
 		}
+	}
+	graph, err := entity.NewGraph(&project)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrInvalidProject, err)
+	}
+	if err := graph.Validate(); err != nil {
+		return fmt.Errorf("%w: %v", ErrInvalidProject, err)
 	}
 	return nil
 }

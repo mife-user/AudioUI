@@ -28,7 +28,6 @@ func newWorkflowSetup(layout valueobject.Layout, projectService *project.Service
 	}
 	service := workflow.New(workflow.Options{
 		Project:         projectService,
-		Candidates:      candidates,
 		CandidateReader: candidates,
 		Workspace:       workspace.NewMover(layout),
 		Pending:         persistence.NewPendingStoreProvider(layout),

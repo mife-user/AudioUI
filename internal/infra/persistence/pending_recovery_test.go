@@ -64,12 +64,17 @@ func TestProjectLoadCompletesCommittedPendingTransaction(t *testing.T) {
 	layout := testLayout(t.TempDir())
 	projects := NewProjectStore(layout)
 	project := sampleProject("p_test")
-	zero := 0
-	project.ActiveNodeID = "n_prompt"
-	project.Nodes = append(project.Nodes, entity.Node{
-		ID: "n_prompt", Type: valueobject.NodeTypePrompt, Title: "脚本",
-		Parent: "n_root", ParentCandidate: &zero, Rounds: []entity.Round{},
-	})
+	project.Nodes[0].Rounds = []entity.Round{{N: 1, Kind: valueobject.OutputKindTopics, ArtifactID: "sha256:topic"}}
+	project.ActiveNodeID = "n_script"
+	project.Nodes = append(project.Nodes,
+		entity.Node{
+			ID: "n_candidate", Type: valueobject.NodeTypeCandidate, Title: "候选",
+			Parent: "n_root", CandidateSource: &entity.CandidateSource{TopicNodeID: "n_root", ArtifactID: "sha256:topic", Index: 0}, Rounds: []entity.Round{},
+		},
+		entity.Node{ID: "n_prompt", Type: valueobject.NodeTypePrompt, Title: "提示词", Parent: "n_candidate", Rounds: []entity.Round{}},
+		entity.Node{ID: "n_agent", Type: valueobject.NodeTypeAgent, Title: "Agent", Parent: "n_prompt", Rounds: []entity.Round{}},
+		entity.Node{ID: "n_script", Type: valueobject.NodeTypeScript, Title: "脚本", Parent: "n_agent", Rounds: []entity.Round{}},
+	)
 	if err := projects.Create(ctx, project); err != nil {
 		t.Fatal(err)
 	}
@@ -82,8 +87,8 @@ func TestProjectLoadCompletesCommittedPendingTransaction(t *testing.T) {
 	rawPayload := []byte(` { "title" : "脚本", "scenes" : [{"narration":"旁白","duration":0}] } `)
 	artifactPayload := []byte(`{"scenes":[{"duration":0,"narration":"旁白"}],"title":"脚本"}`)
 	pending := entity.Pending{
-		ID: "pa_test", RunID: "r_test", ChainID: "c_n_prompt", ChainPath: []string{"n_root", "n_prompt"},
-		NodeID: "n_prompt", Kind: valueobject.OutputKindScript, Status: valueobject.PendingApplied,
+		ID: "pa_test", RunID: "r_test", ChainID: "c_n_script", ChainPath: []string{"n_root", "n_candidate", "n_prompt", "n_agent", "n_script"},
+		NodeID: "n_script", Kind: valueobject.OutputKindScript, Status: valueobject.PendingApplied,
 		ContextHash: "context", AncestorHash: "ancestor", ParamsHash: "params",
 		ArtifactID: "sha256:" + hashPayload(artifactPayload), CreatedAt: "2026-11-01T10:00:00Z",
 	}
@@ -99,10 +104,8 @@ func TestProjectLoadCompletesCommittedPendingTransaction(t *testing.T) {
 		t.Fatal(err)
 	}
 	project.Revision = 2
-	project.Nodes[1].Locked = true
-	project.Nodes[1].Rounds = []entity.Round{{
-		N: 1, Kind: pending.Kind, ArtifactID: pending.ArtifactID, PendingID: pending.ID, RunID: pending.RunID,
-	}}
+	project.Nodes[4].Locked = true
+	project.Nodes[4].ScriptVersions = []entity.ScriptVersion{{N: 1, ArtifactID: pending.ArtifactID, RunID: pending.RunID}}
 	if err := projects.Save(ctx, project); err != nil {
 		t.Fatal(err)
 	}
@@ -111,7 +114,7 @@ func TestProjectLoadCompletesCommittedPendingTransaction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if loaded.Revision != 2 || !loaded.Nodes[1].Locked || len(loaded.Nodes[1].Rounds) != 1 {
+	if loaded.Revision != 2 || !loaded.Nodes[4].Locked || len(loaded.Nodes[4].ScriptVersions) != 1 {
 		t.Fatalf("project commit was not preserved: %+v", loaded)
 	}
 	stored, err := pendingStore.Load(ctx, pending.ID)
