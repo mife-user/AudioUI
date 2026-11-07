@@ -1,6 +1,6 @@
 # 文档索引
 
-> M2-11～13 已选择 RM-018 的本地脚本子范围；M2-11A 设计与 M2-11B 工程格式/图领域模型已验收，完整产品闭环尚未实现。M2-00～10 旧模型验收事实保留；RM-019 云端与 RM-020 视频仍待评估。
+> M2-11～13 已选择 RM-018 的本地脚本子范围；M2-11A 设计、M2-11B 工程格式/图领域模型与 M2-11C 发送快照均已验收；M2-11D 已验收（2026-11-07），完整产品闭环尚未实现。M2-00～10 旧模型验收事实保留；RM-019 云端与 RM-020 视频仍待评估。
 
 | 文档 | 读者 | 状态 | 说明 |
 |---|---|---|---|
@@ -40,6 +40,8 @@
 | [dev/evidence/agent-mcp-startup-race.md](dev/evidence/agent-mcp-startup-race.md) | 开发 / 测试 | 证据 | SDK 版本探测触发重复启动并清理活动 MCP 配置的原因、修复与验证 |
 | [dev/evidence/m2-10b.md](dev/evidence/m2-10b.md) | 产品 / 测试 | 证据 | M2-10B 待应用与候选端口验收证据（已验收；浏览器实测留在 M2-10C） |
 | [dev/evidence/m2-10c.md](dev/evidence/m2-10c.md) | 产品 / 测试 | 证据 | M2-10C 页面验收已由用户确认；附件截图未归档到仓库 |
+| [dev/evidence/m2-11c.md](dev/evidence/m2-11c.md) | 产品 / 测试 | 证据 | M2-11C 发送快照、上下文与运行授权（用户已验收） |
+| [dev/evidence/m2-11d.md](dev/evidence/m2-11d.md) | 产品 / 测试 | 自检与验收证据 | M2-11D 受限 reply、原子结果事务与恢复自检；不代表 M2-13 完整验收 |
 | [agent-protocol.md](agent-protocol.md) | 开发 | 草案 | MCP 工具、能力位、权限、会话 |
 | [acceptance.md](acceptance.md) | 产品 / 测试 | 草案 | 验收标准与发布门禁 |
 | [decisions.md](decisions.md) | 开发 | 草案 | 架构决策记录 |

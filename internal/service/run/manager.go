@@ -25,8 +25,9 @@ const (
 )
 
 var (
-	ErrAgentUnavailable = errors.New("AGENT_UNAVAILABLE")
-	ErrRunNotFound      = errors.New("RUN_NOT_FOUND")
+	ErrAgentUnavailable   = errors.New("AGENT_UNAVAILABLE")
+	ErrRunNotFound        = errors.New("RUN_NOT_FOUND")
+	ErrRunPendingConflict = errors.New("RUN_PENDING_CONFLICT")
 )
 
 type ProjectService interface {
@@ -644,14 +645,39 @@ func (m *Manager) RecordRunPending(ctx context.Context, scope port.RunScope, pen
 	if state == nil || !sameScope(state.scope, scope) || pending.RunID != scope.RunID || pending.NodeID != scope.NodeID {
 		return port.ErrTurnNotActive
 	}
+	// The reply callback already holds a lease if finish has begun closing the run.
 	if !state.acquireLease() {
-		return port.ErrTurnNotActive
+		state.leaseMu.Lock()
+		alreadyLeased := state.leases > 0
+		state.leaseMu.Unlock()
+		if !alreadyLeased {
+			return port.ErrTurnNotActive
+		}
+	} else {
+		defer state.releaseLease()
+		m.resetWatchdog(state)
 	}
-	defer state.releaseLease()
-	m.resetWatchdog(state)
-	m.emitWith(state, valueobject.RunEvent{Type: valueobject.EventPending, PendingID: pending.ID}, func() {
+	state.eventMu.Lock()
+	state.mu.Lock()
+	recordedPendingID := state.record.PendingID
+	if recordedPendingID != "" && recordedPendingID != pending.ID {
+		state.mu.Unlock()
+		state.eventMu.Unlock()
+		return ErrRunPendingConflict
+	}
+	shouldDrain := false
+	if recordedPendingID == "" {
 		state.record.PendingID = pending.ID
-	})
+		event := nextRunEventLocked(state, valueobject.RunEvent{Type: valueobject.EventPending, PendingID: pending.ID})
+		state.mu.Unlock()
+		shouldDrain = m.queueRunEventLocked(state, event)
+	} else {
+		state.mu.Unlock()
+	}
+	state.eventMu.Unlock()
+	if shouldDrain {
+		m.drainRunEvents(state)
+	}
 	if err := m.persist(state); err != nil {
 		return err
 	}

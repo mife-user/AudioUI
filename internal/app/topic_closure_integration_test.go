@@ -105,7 +105,7 @@ func TestTopicRunAndCandidateProjectionWithControlledAgentDriver(t *testing.T) {
 	}
 	waitForTopicClosure(t, func() bool { return !manager.IsBusy() })
 	firstSnapshot, err := handler.NewRunService(manager).GetRunSnapshot(firstRun.Run.ID)
-	if err != nil || firstSnapshot.Run.Status != valueobject.RunSucceeded || firstSnapshot.Run.PendingID == "" {
+	if err != nil || firstSnapshot.Run.Status != valueobject.RunSucceeded || firstSnapshot.Run.PendingID != "" {
 		t.Fatalf("completed topic run snapshot = %+v, err=%v", firstSnapshot, err)
 	}
 
@@ -122,30 +122,34 @@ func TestTopicRunAndCandidateProjectionWithControlledAgentDriver(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(topicClosureNode(t, beforeApply, topicReceipt.NodeID).Rounds) != 0 {
-		t.Fatal("pending output changed the graph before application")
+	appliedTopic := topicClosureNode(t, beforeApply, topicReceipt.NodeID)
+	if !appliedTopic.Locked || len(appliedTopic.Rounds) != 1 {
+		t.Fatalf("automatic topic result state = %+v", appliedTopic)
 	}
 	candidates, err := workflowSetup.handler.GetTopicCandidates(topicReceipt.NodeID, project.ID)
-	if err != nil || len(candidates) != 0 {
-		t.Fatalf("unapplied topic candidates = %+v, err=%v", candidates, err)
-	}
-
-	applied, err := workflowSetup.handler.ApplyPending(validPending.ID, false, project.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	appliedTopic := topicClosureNode(t, applied, topicReceipt.NodeID)
-	if !appliedTopic.Locked || len(appliedTopic.Rounds) != 1 {
-		t.Fatalf("applied topic state = %+v", appliedTopic)
-	}
-	candidates, err = workflowSetup.handler.GetTopicCandidates(topicReceipt.NodeID, project.ID)
 	if err != nil || len(candidates) != 3 {
-		t.Fatalf("applied topic candidates = %+v, err=%v", candidates, err)
+		t.Fatalf("generated topic candidates = %+v, err=%v", candidates, err)
 	}
+	generatedCandidateIDs := make(map[string]bool, len(candidates))
 	for index, candidate := range candidates {
 		if candidate.Index != index || candidate.Title == "" || candidate.Angle == "" || candidate.Hook == "" {
 			t.Fatalf("candidate[%d] = %+v", index, candidate)
 		}
+	}
+	for _, node := range beforeApply.Nodes {
+		if node.Type == valueobject.NodeTypeCandidate && node.Parent == topicReceipt.NodeID {
+			generatedCandidateIDs[node.ID] = true
+			if node.CandidateSource == nil || node.CandidateSource.Index < 0 || node.CandidateSource.Index >= len(candidates) ||
+				node.CandidateSource.ArtifactID != appliedTopic.Rounds[0].ArtifactID {
+				t.Fatalf("generated candidate provenance = %+v", node)
+			}
+		}
+	}
+	if len(generatedCandidateIDs) != len(candidates) {
+		t.Fatalf("generated candidate node count = %d, want %d", len(generatedCandidateIDs), len(candidates))
+	}
+	if _, err := workflowSetup.handler.ApplyPending(validPending.ID, false, project.ID); !errors.Is(err, workflow.ErrPendingAlreadyApplied) {
+		t.Fatalf("reapplying automatic topic result error = %v, want PENDING_ALREADY_APPLIED", err)
 	}
 
 	candidateIndex := 0
@@ -262,12 +266,14 @@ func (s *topicClosureSession) Send(ctx context.Context, _ string) error {
 	if s.scope.NodeID == s.driver.blockNodeID {
 		payload = []byte(validTopicsFixture)
 	}
-	pending, err := s.driver.workflow.CreateRunPending(ctx, s.scope, valueobject.OutputKindTopics, payload, "fixture-"+s.scope.NodeID)
+	pending, err := s.driver.workflow.SubmitRunReply(ctx, s.scope, valueobject.OutputKindTopics, payload, "fixture-"+s.scope.NodeID)
 	if err != nil {
 		return err
 	}
-	if err := s.driver.manager.RecordRunPending(ctx, s.scope, pending); err != nil {
-		return err
+	if pending.Status == valueobject.PendingPending || pending.Status == valueobject.PendingInvalid {
+		if err := s.driver.manager.RecordRunPending(ctx, s.scope, pending); err != nil {
+			return err
+		}
 	}
 	s.eventSink(valueobject.AgentEvent{Type: valueobject.EventStatus, State: &valueobject.AgentState{Status: valueobject.SessionIdle}})
 	return nil

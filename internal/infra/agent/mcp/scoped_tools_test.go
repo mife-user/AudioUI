@@ -55,7 +55,7 @@ func (f *scopedRunTools) ReadRunArtifact(_ context.Context, scope port.RunScope,
 	return f.artifact, nil
 }
 
-func (f *scopedRunTools) CreateRunPending(_ context.Context, _ port.RunScope, kind valueobject.OutputKind, payload []byte, requestID string) (entity.Pending, error) {
+func (f *scopedRunTools) SubmitRunReply(_ context.Context, _ port.RunScope, kind valueobject.OutputKind, payload []byte, requestID string) (entity.Pending, error) {
 	if f.replyEntered != nil {
 		close(f.replyEntered)
 		<-f.replyRelease
@@ -90,6 +90,17 @@ func (l *activeRunLease) End() {
 	l.mu.Lock()
 	l.active = false
 	l.mu.Unlock()
+}
+
+type observingRunLease struct {
+	*activeRunLease
+	pending []entity.Pending
+	err     error
+}
+
+func (l *observingRunLease) RecordRunPending(_ context.Context, _ port.RunScope, pending entity.Pending) error {
+	l.pending = append(l.pending, pending.Clone())
+	return l.err
 }
 
 func scopedMCPOptions(root string) Options {
@@ -159,11 +170,41 @@ func TestSnapshotReplyRejectsKindOutsideOutputContract(t *testing.T) {
 		Arguments: json.RawMessage(`{"node_id":"n_agent","kind":"script","payload":{"title":"x","scenes":[{"narration":"y","duration":1}]}}`),
 	}}
 	result, err = server.replyRun(context.Background(), agentScript)
-	if err != nil || result == nil || !result.IsError || !strings.Contains(toolResultText(result), "OUTPUT_COMMIT_UNAVAILABLE") {
-		t.Fatalf("Agent script reply result=%+v err=%v, want OUTPUT_COMMIT_UNAVAILABLE", result, err)
+	if err != nil || result == nil || result.IsError {
+		t.Fatalf("Agent script reply result=%+v err=%v, want accepted structured result", result, err)
 	}
-	if len(options.RunTools.(*scopedRunTools).payload) != 0 {
-		t.Fatal("unsupported Agent script reply reached the pending sink")
+	if len(options.RunTools.(*scopedRunTools).payload) == 0 {
+		t.Fatal("valid Agent script reply did not reach the result sink")
+	}
+}
+
+func TestReplyRunRecordsOnlyPendingResults(t *testing.T) {
+	options := scopedMCPOptions(t.TempDir())
+	tools := options.RunTools.(*scopedRunTools)
+	lifecycle := &observingRunLease{activeRunLease: &activeRunLease{active: true}}
+	options.RunLifecycle = lifecycle
+	server, err := New(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := &sdkmcp.CallToolRequest{Params: &sdkmcp.CallToolParamsRaw{
+		Arguments: json.RawMessage(`{"node_id":"n_target","kind":"script","payload":{"title":"x","scenes":[]}}`),
+	}}
+
+	tools.pending.Status = valueobject.PendingApplied
+	if result, err := server.replyRun(context.Background(), request); err != nil || result == nil || result.IsError {
+		t.Fatalf("automatic result reply = %+v err=%v", result, err)
+	}
+	if len(lifecycle.pending) != 0 {
+		t.Fatalf("automatic result recorded as pending: %+v", lifecycle.pending)
+	}
+
+	tools.pending.Status = valueobject.PendingPending
+	if result, err := server.replyRun(context.Background(), request); err != nil || result == nil || result.IsError {
+		t.Fatalf("pending result reply = %+v err=%v", result, err)
+	}
+	if len(lifecycle.pending) != 1 || lifecycle.pending[0].Status != valueobject.PendingPending {
+		t.Fatalf("pending result observer calls = %+v", lifecycle.pending)
 	}
 }
 

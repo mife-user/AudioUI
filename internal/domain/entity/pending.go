@@ -20,8 +20,23 @@ type Pending struct {
 	Payload      string                    `json:"payload"`
 	Summary      string                    `json:"summary,omitempty"`
 	Error        string                    `json:"error,omitempty"`
-	ArtifactID   string                    `json:"artifactId,omitempty"`
-	CreatedAt    string                    `json:"createdAt"`
+	ArtifactID    string                    `json:"artifactId,omitempty"`
+	OutputBinding      *RunOutputBinding         `json:"outputBinding,omitempty"`
+	OutputSchemaVersion int                      `json:"outputSchemaVersion,omitempty"`
+	ResultNodeID       string                    `json:"resultNodeId,omitempty"`
+	CreatedNodeIDs     []string                  `json:"createdNodeIds,omitempty"`
+	CreatedAt          string                    `json:"createdAt"`
+}
+
+func (p Pending) Clone() Pending {
+	clone := p
+	clone.ChainPath = append([]string(nil), p.ChainPath...)
+	clone.CreatedNodeIDs = append([]string(nil), p.CreatedNodeIDs...)
+	if p.OutputBinding != nil {
+		binding := *p.OutputBinding
+		clone.OutputBinding = &binding
+	}
+	return clone
 }
 
 // PendingFile is the pending.json index document.

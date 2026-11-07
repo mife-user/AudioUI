@@ -63,10 +63,12 @@ type ValidateOutput struct {
 }
 
 type ScopedReplyOutput struct {
-	Accepted  bool                      `json:"accepted"`
-	PendingID string                    `json:"pendingId,omitempty"`
-	Status    valueobject.PendingStatus `json:"status,omitempty"`
-	Error     string                    `json:"error,omitempty"`
+	Accepted       bool                      `json:"accepted"`
+	PendingID      string                    `json:"pendingId,omitempty"`
+	Status         valueobject.PendingStatus `json:"status,omitempty"`
+	ResultNodeID   string                    `json:"resultNodeId,omitempty"`
+	CreatedNodeIDs []string                  `json:"createdNodeIds,omitempty"`
+	Error          string                    `json:"error,omitempty"`
 }
 
 type rawStructuredInput struct {
@@ -124,7 +126,7 @@ func (s *Server) registerRunTools() {
 	sdkmcp.AddTool(s.sdk, &sdkmcp.Tool{Name: "read_artifact", Description: "Read an artifact referenced by a path ancestor in UTF-8 byte chunks up to 16 KiB."}, s.readRunArtifact)
 	s.sdk.AddTool(&sdkmcp.Tool{
 		Name:        "reply",
-		Description: "Send a chat message or submit a structured result supported by the active workflow. Agent script result submission is unavailable.",
+		Description: "Send a chat message or submit a topics/script result under the active run's frozen output contract. Valid output is committed by AudioUI; existing Script versions require confirmation.",
 		InputSchema: rawObjectSchema(map[string]any{
 			"node_id":    map[string]any{"type": "string"},
 			"kind":       map[string]any{"type": "string"},
@@ -301,19 +303,22 @@ func (s *Server) replyRun(ctx context.Context, request *sdkmcp.CallToolRequest) 
 		if scope.ExecutionSnapshot.Version != 0 && valueobject.OutputKind(input.Kind) != scope.ExecutionSnapshot.OutputContract.Kind {
 			return errors.New("OUTPUT_KIND_MISMATCH")
 		}
-		if scope.ExecutionSnapshot.Version != 0 && scope.ExecutionSnapshot.PathNodes[len(scope.ExecutionSnapshot.PathNodes)-1].Type == valueobject.NodeTypeAgent {
-			return errors.New("OUTPUT_COMMIT_UNAVAILABLE")
-		}
-		pending, err := s.options.RunTools.CreateRunPending(ctx, scope, valueobject.OutputKind(input.Kind), input.Payload, input.RequestID)
+		pending, err := s.options.RunTools.SubmitRunReply(ctx, scope, valueobject.OutputKind(input.Kind), input.Payload, input.RequestID)
 		if err != nil {
 			return err
 		}
-		if observer, ok := s.options.RunLifecycle.(port.RunPendingObserver); ok {
-			if err := observer.RecordRunPending(ctx, scope, pending); err != nil {
-				return err
+		if pending.Status == valueobject.PendingPending || pending.Status == valueobject.PendingInvalid {
+			if observer, ok := s.options.RunLifecycle.(port.RunPendingObserver); ok {
+				if err := observer.RecordRunPending(ctx, scope, pending); err != nil {
+					return err
+				}
 			}
 		}
-		output = ScopedReplyOutput{Accepted: true, PendingID: pending.ID, Status: pending.Status, Error: pending.Error}
+		output = ScopedReplyOutput{
+			Accepted: true, PendingID: pending.ID, Status: pending.Status,
+			ResultNodeID: pending.ResultNodeID,
+			CreatedNodeIDs: append([]string(nil), pending.CreatedNodeIDs...), Error: pending.Error,
+		}
 		return nil
 	})
 	if err != nil {

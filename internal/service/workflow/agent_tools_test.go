@@ -21,14 +21,6 @@ func scopedRun() port.RunScope {
 	}
 }
 
-func scopedPromptRun() port.RunScope {
-	scope := scopedRun()
-	scope.NodeID = "n_a"
-	scope.ChainID = "c_n_a"
-	scope.ChainPath = []string{"n_topic", "n_candidate", "n_a"}
-	return scope
-}
-
 func putRunArtifact(t *testing.T, h *pendingHarness, kind valueobject.OutputKind, nodeID string, payload []byte) entity.Artifact {
 	t.Helper()
 	artifact, err := h.artifacts.Put(context.Background(), payload, entity.ArtifactMeta{
@@ -273,12 +265,52 @@ func TestReadRunArtifactFailsClosedForInvalidCandidateAndConflictingReferences(t
 	}
 }
 
-func TestCreateRunPendingBindsScopeAndSerializesConcurrentReplies(t *testing.T) {
+func TestSubmitRunReplyCommitsScriptAndDeduplicatesByRequestIdentity(t *testing.T) {
 	h := newPendingHarness(t, baseProject())
-	scope := scopedPromptRun()
+	scope := beginReplyScope(t, h, "r_reply", "n_b")
+	payload := validScriptPayload()
+
+	first, err := h.service.SubmitRunReply(context.Background(), scope, valueobject.OutputKindScript, payload, "req_first")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Status != valueobject.PendingApplied || first.RequestID != "req_first" || first.ResultNodeID == "" || len(first.CreatedNodeIDs) != 1 || first.CreatedNodeIDs[0] != first.ResultNodeID {
+		t.Fatalf("applied reply = %+v", first)
+	}
+	if h.session.project.Revision != 2 {
+		t.Fatalf("project revision = %d, want 2", h.session.project.Revision)
+	}
+	graph, err := entity.NewGraph(&h.session.project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resultNode, ok := graph.Node(first.ResultNodeID)
+	if !ok || resultNode.Type != valueobject.NodeTypeScript || resultNode.Parent != scope.NodeID || len(resultNode.ScriptVersions) != 1 || resultNode.ScriptVersions[0].ArtifactID != first.ArtifactID {
+		t.Fatalf("generated script node = %+v, ok=%t", resultNode, ok)
+	}
+
+	beforeNodes := len(h.session.project.Nodes)
+	beforeChanges := len(*h.changes)
+	repeated, err := h.service.SubmitRunReply(context.Background(), scope, valueobject.OutputKindScript, payload, "req_first")
+	if err != nil || repeated.ID != first.ID || h.session.project.Revision != 2 || len(h.session.project.Nodes) != beforeNodes || len(*h.changes) != beforeChanges {
+		t.Fatalf("idempotent reply = %+v err=%v revision=%d nodes=%d", repeated, err, h.session.project.Revision, len(h.session.project.Nodes))
+	}
+
+	changed := []byte(`{"title":"别的脚本","scenes":[{"narration":"旁白","duration":0}]}`)
+	if _, err := h.service.SubmitRunReply(context.Background(), scope, valueobject.OutputKindScript, changed, "req_first"); !errors.Is(err, ErrRequestIDConflict) {
+		t.Fatalf("same request id with different input error = %v, want REQUEST_ID_CONFLICT", err)
+	}
+	if _, err := h.service.SubmitRunReply(context.Background(), scope, valueobject.OutputKindScript, payload, "req_second"); !errors.Is(err, ErrRunResultConflict) {
+		t.Fatalf("second result error = %v, want RUN_RESULT_CONFLICT", err)
+	}
+}
+
+func TestSubmitRunReplyPreservesInvalidPayloadAndRejectsWrongScope(t *testing.T) {
+	h := newPendingHarness(t, baseProject())
+	scope := beginReplyScope(t, h, "r_invalid", "n_b")
 	badScope := scope
 	badScope.ProjectID = "p_other"
-	if _, err := h.service.CreateRunPending(context.Background(), badScope, valueobject.OutputKindScript, validScriptPayload(), "req_bad"); !errors.Is(err, port.ErrChainScopeDenied) {
+	if _, err := h.service.SubmitRunReply(context.Background(), badScope, valueobject.OutputKindScript, validScriptPayload(), "req_bad"); !errors.Is(err, port.ErrChainScopeDenied) {
 		t.Fatalf("wrong project error = %v, want CHAIN_SCOPE_DENIED", err)
 	}
 	if h.session.project.Revision != 1 {
@@ -286,7 +318,7 @@ func TestCreateRunPendingBindsScopeAndSerializesConcurrentReplies(t *testing.T) 
 	}
 
 	invalid := []byte(`{"title":"无效","scenes":[]}`)
-	pending, err := h.service.CreateRunPending(context.Background(), scope, valueobject.OutputKindScript, invalid, "req_first")
+	pending, err := h.service.SubmitRunReply(context.Background(), scope, valueobject.OutputKindScript, invalid, "req_invalid")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -297,8 +329,14 @@ func TestCreateRunPendingBindsScopeAndSerializesConcurrentReplies(t *testing.T) 
 	if err != nil || !bytes.Equal(detail.RawPayload, invalid) {
 		t.Fatalf("stored payload = %s err=%v", detail.RawPayload, err)
 	}
+	if h.session.project.Revision != 2 {
+		t.Fatalf("invalid result revision = %d, want 2", h.session.project.Revision)
+	}
+}
 
-	h = newPendingHarness(t, baseProject())
+func TestSubmitRunReplySerializesConcurrentResults(t *testing.T) {
+	h := newPendingHarness(t, baseProject())
+	scope := beginReplyScope(t, h, "r_concurrent", "n_b")
 	var wg sync.WaitGroup
 	start := make(chan struct{})
 	results := make(chan error, 2)
@@ -307,7 +345,7 @@ func TestCreateRunPendingBindsScopeAndSerializesConcurrentReplies(t *testing.T) 
 		go func(requestID string) {
 			defer wg.Done()
 			<-start
-			_, err := h.service.CreateRunPending(context.Background(), scope, valueobject.OutputKindScript, validScriptPayload(), requestID)
+			_, err := h.service.SubmitRunReply(context.Background(), scope, valueobject.OutputKindScript, validScriptPayload(), requestID)
 			results <- err
 		}(requestID)
 	}
@@ -319,7 +357,7 @@ func TestCreateRunPendingBindsScopeAndSerializesConcurrentReplies(t *testing.T) 
 		switch {
 		case err == nil:
 			created++
-		case errors.Is(err, ErrTurnPendingExists):
+		case errors.Is(err, ErrRunResultConflict):
 			rejected++
 		default:
 			t.Fatalf("concurrent reply error = %v", err)
@@ -327,5 +365,19 @@ func TestCreateRunPendingBindsScopeAndSerializesConcurrentReplies(t *testing.T) 
 	}
 	if created != 1 || rejected != 1 {
 		t.Fatalf("concurrent reply results: created=%d rejected=%d", created, rejected)
+	}
+}
+
+func beginReplyScope(t *testing.T, h *pendingHarness, runID, nodeID string) port.RunScope {
+	t.Helper()
+	_, snapshot, err := h.service.BeginRun(context.Background(), runID, nodeID, h.session.project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return port.RunScope{
+		RunID: runID, ProjectID: snapshot.ProjectID, TreeID: snapshot.TreeID, NodeID: snapshot.NodeID,
+		ChainID: "c_" + snapshot.NodeID, ChainPath: append([]string(nil), snapshot.ChainPath...),
+		ContextHash: h.hasher.hashes.ContextHash, AncestorHash: h.hasher.hashes.AncestorHash,
+		ParamsHash: h.hasher.hashes.ParamsHash, ExecutionSnapshot: snapshot,
 	}
 }

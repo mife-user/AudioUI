@@ -8,7 +8,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"slices"
+	"strings"
 	"time"
 
 	"audio-ui/internal/domain/entity"
@@ -33,6 +35,414 @@ type CreatePendingInput struct {
 
 func ValidateStructuredPayload(kind valueobject.OutputKind, payload []byte) error {
 	return valueobject.ValidateStructuredPayload(kind, payload)
+}
+
+func (s *Service) SubmitRunReply(ctx context.Context, scope port.RunScope, kind valueobject.OutputKind, payload []byte, requestID string) (entity.Pending, error) {
+	if err := ctx.Err(); err != nil {
+		return entity.Pending{}, err
+	}
+	if len(payload) > valueobject.MaxPendingPayloadSize {
+		return entity.Pending{}, ErrPendingPayloadTooLarge
+	}
+	if requestID != "" && len(requestID) > valueobject.MaxPendingRequestIDLength {
+		return entity.Pending{}, fmt.Errorf("%w: requestId is too long", ErrInvalidInput)
+	}
+	if kind == valueobject.OutputKindSceneDSL {
+		return entity.Pending{}, ErrUnsupportedUntilM3
+	}
+	if kind != valueobject.OutputKindTopics && kind != valueobject.OutputKindScript {
+		return entity.Pending{}, valueobject.ErrOutputKindInvalid
+	}
+	if err := validateRunReplyScope(scope, kind); err != nil {
+		return entity.Pending{}, err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return entity.Pending{}, err
+	}
+	var result entity.Pending
+	err := s.opts.Project.WithExclusive(ctx, func(access port.ProjectAccess) error {
+		project, graph, err := loadProjectGraph(ctx, access)
+		if err != nil {
+			return err
+		}
+		snapshot := scope.ExecutionSnapshot
+		if project.ID != scope.ProjectID || project.Version != snapshot.ProjectVersion || snapshot.ProjectRevision > project.Revision {
+			return port.ErrChainScopeDenied
+		}
+		if err := s.ensureRunReplyLock(scope); err != nil {
+			return err
+		}
+		store, err := s.pendingStore(ctx, project.ID)
+		if err != nil {
+			return err
+		}
+		pendingItems, err := store.List(ctx)
+		if err != nil {
+			return err
+		}
+		for _, existing := range pendingItems {
+			if existing.RunID != scope.RunID {
+				continue
+			}
+			if !sameRunReply(existing, scope, kind, requestID, payload) {
+				if requestID != "" && existing.RequestID == requestID {
+					return ErrRequestIDConflict
+				}
+				return ErrRunResultConflict
+			}
+			existingPayload, err := store.GetPayload(ctx, existing.ID)
+			if err != nil {
+				return err
+			}
+			if bytes.Equal(existingPayload, payload) {
+				result = existing
+				return nil
+			}
+			if requestID != "" && existing.RequestID == requestID {
+				return ErrRequestIDConflict
+			}
+			return ErrRunResultConflict
+		}
+		if err := validateRunSnapshotGraph(graph, snapshot); err != nil {
+			return err
+		}
+		target, ok := graph.Node(scope.NodeID)
+		if !ok {
+			return port.ErrChainScopeDenied
+		}
+		output, err := validateSnapshotOutputBinding(graph, target, snapshot)
+		if err != nil {
+			return err
+		}
+		if s.isNodeLockedByOtherRun(scope.RunID, target.ID) || output != nil && s.isNodeLockedByOtherRun(scope.RunID, output.ID) {
+			return ErrRunningChainLocked
+		}
+
+		pendingID, err := valueobject.NewID(valueobject.PendingIDPrefix)
+		if err != nil {
+			return err
+		}
+		binding := snapshot.OutputBinding
+		pending := entity.Pending{
+			ID: pendingID, RunID: scope.RunID, RequestID: requestID,
+			ChainID: scope.ChainID, ChainPath: append([]string(nil), scope.ChainPath...),
+			NodeID: scope.NodeID, Kind: kind, ContextHash: scope.ContextHash,
+			AncestorHash: scope.AncestorHash, ParamsHash: scope.ParamsHash,
+			Payload: pendingPayloadPath(pendingID), Summary: pendingSummary(kind, payload),
+			OutputBinding: &binding, OutputSchemaVersion: snapshot.OutputContract.SchemaVersion,
+			CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+		}
+		if binding.Bound {
+			pending.ResultNodeID = binding.NodeID
+		}
+
+		if validationErr := valueobject.ValidateStructuredPayload(kind, payload); validationErr != nil {
+			if errors.Is(validationErr, valueobject.ErrUnsupportedOutput) || errors.Is(validationErr, valueobject.ErrOutputKindInvalid) {
+				return validationErr
+			}
+			if activePendingCount(pendingItems, scope.TreeID) >= valueobject.MaxPendingPerTree {
+				return ErrPendingLimit
+			}
+			pending.Status = valueobject.PendingInvalid
+			pending.Error = validationErr.Error()
+			result = pending
+			_, err = s.commitPendingMutation(ctx, access, project, pending, payload, nil, nil, ChangeReasonPending)
+			return err
+		}
+
+		canonical, err := valueobject.CanonicalJSON(payload)
+		if err != nil {
+			return fmt.Errorf("%w: %v", ErrPendingInvalid, err)
+		}
+		if len(canonical) > valueobject.MaxPendingPayloadSize {
+			return ErrPendingPayloadTooLarge
+		}
+		pending.Status = valueobject.PendingApplied
+		pending.ArtifactID = artifactID(canonical)
+		artifactNodeID := target.ID
+		meta := entity.ArtifactMeta{
+			Kind: kind, CreatedAt: pending.CreatedAt,
+			SourceRunID: scope.RunID, SourcePendingID: pending.ID,
+		}
+		var artifactStore port.ArtifactStore
+		switch target.Type {
+		case valueobject.NodeTypeTopic:
+			if target.Locked || len(target.Rounds) != 0 {
+				return ErrNodeLocked
+			}
+			candidates, err := decodeTopicCandidates(payload)
+			if err != nil {
+				return fmt.Errorf("%w: %v", ErrPendingInvalid, err)
+			}
+			nodeIDs := make([]string, len(candidates))
+			candidateNodes := make([]entity.Node, len(candidates))
+			topicID := target.ID
+			for index, candidate := range candidates {
+				id, err := valueobject.NewID(valueobject.NodeIDPrefix)
+				if err != nil {
+					return err
+				}
+				nodeIDs[index] = id
+				candidateNodes[index] = entity.Node{
+					ID: id, Type: valueobject.NodeTypeCandidate,
+					Title:           generatedNodeTitle(candidate.Title, fmt.Sprintf("候选 %d", index+1)),
+					Parent:          topicID,
+					CandidateSource: &entity.CandidateSource{TopicNodeID: topicID, ArtifactID: pending.ArtifactID, Index: index},
+					Position:        entity.Position{X: target.Position.X + 420, Y: target.Position.Y + float64(index)*160},
+					Rounds:          []entity.Round{},
+				}
+			}
+			pending.CreatedNodeIDs = nodeIDs
+			target.Locked = true
+			target.Stale = false
+			target.Rounds = append(target.Rounds, entity.Round{
+				N: nextRound(target.Rounds), Kind: kind, ArtifactID: pending.ArtifactID,
+				PendingID: pending.ID, RunID: scope.RunID,
+			})
+			project.Nodes = append(project.Nodes, candidateNodes...)
+			meta.NodeID = topicID
+		case valueobject.NodeTypeAgent:
+			if output == nil {
+				id, err := valueobject.NewID(valueobject.NodeIDPrefix)
+				if err != nil {
+					return err
+				}
+				title, err := decodeScriptTitle(payload)
+				if err != nil {
+					return fmt.Errorf("%w: %v", ErrPendingInvalid, err)
+				}
+				project.Nodes = append(project.Nodes, entity.Node{
+					ID: id, Type: valueobject.NodeTypeScript, Title: generatedNodeTitle(title, "新脚本"),
+					Parent: target.ID, Position: entity.Position{X: target.Position.X + 420, Y: target.Position.Y},
+					ScriptVersions: []entity.ScriptVersion{}, Rounds: []entity.Round{},
+				})
+				output = &project.Nodes[len(project.Nodes)-1]
+				pending.CreatedNodeIDs = []string{id}
+			} else if len(output.ScriptVersions) > 0 {
+				if activePendingCount(pendingItems, scope.TreeID) >= valueobject.MaxPendingPerTree {
+					return ErrPendingLimit
+				}
+				pending.Status = valueobject.PendingPending
+				pending.ArtifactID = ""
+				result = pending
+				_, err = s.commitPendingMutation(ctx, access, project, pending, payload, nil, nil, ChangeReasonPending)
+				return err
+			}
+			pending.ResultNodeID = output.ID
+			artifactNodeID = output.ID
+			meta.NodeID = artifactNodeID
+			meta.SourceRunID = scope.RunID
+			output.ScriptVersions = append(output.ScriptVersions, entity.ScriptVersion{
+				N: len(output.ScriptVersions) + 1, ArtifactID: pending.ArtifactID, RunID: scope.RunID,
+			})
+			output.Stale = false
+			if binding.Bound {
+				descendants, err := graph.Subtree(output.ID)
+				if err != nil {
+					return err
+				}
+				markSubtreeStale(&project, descendants[1:])
+			}
+		default:
+			return ErrRunEntryUnavailable
+		}
+		if err := validateFinalGraph(&project); err != nil {
+			return fmt.Errorf("图校验失败: %w", err)
+		}
+		if s.opts.Artifacts == nil {
+			return ErrArtifactStoreUnavailable
+		}
+		artifactStore, err = s.opts.Artifacts.ForProject(ctx, project.ID)
+		if err != nil {
+			return err
+		}
+		artifact := &entityArtifact{payload: canonical, meta: meta}
+		result = pending
+		_, err = s.commitPendingMutation(ctx, access, project, pending, payload, artifactStore, artifact, ChangeReasonGraph)
+		return err
+	})
+	if err != nil {
+		return entity.Pending{}, err
+	}
+	return result, nil
+}
+
+func validateRunReplyScope(scope port.RunScope, kind valueobject.OutputKind) error {
+	if scope.RunID == "" || scope.ProjectID == "" || scope.TreeID == "" || scope.NodeID == "" ||
+		scope.ChainID != "c_"+scope.NodeID || len(scope.ChainPath) == 0 || scope.ChainPath[0] != scope.TreeID ||
+		scope.ChainPath[len(scope.ChainPath)-1] != scope.NodeID || scope.ContextHash == "" ||
+		scope.AncestorHash == "" || scope.ParamsHash == "" {
+		return port.ErrTurnNotActive
+	}
+	snapshot := scope.ExecutionSnapshot
+	if snapshot.Validate() != nil || snapshot.ProjectVersion != valueobject.ProjectFileVersion ||
+		snapshot.ProjectID != scope.ProjectID || snapshot.TreeID != scope.TreeID || snapshot.NodeID != scope.NodeID ||
+		!slices.Equal(snapshot.ChainPath, scope.ChainPath) {
+		return port.ErrChainScopeDenied
+	}
+	if snapshot.OutputContract.SchemaVersion != 1 || snapshot.OutputContract.Kind != kind {
+		return ErrOutputKindMismatch
+	}
+	target := snapshot.PathNodes[len(snapshot.PathNodes)-1]
+	switch target.Type {
+	case valueobject.NodeTypeTopic:
+		if kind != valueobject.OutputKindTopics || snapshot.OutputBinding.Bound {
+			return ErrOutputKindMismatch
+		}
+	case valueobject.NodeTypeAgent:
+		if kind != valueobject.OutputKindScript {
+			return ErrOutputKindMismatch
+		}
+	default:
+		return ErrRunEntryUnavailable
+	}
+	return nil
+}
+
+func (s *Service) ensureRunReplyLock(scope port.RunScope) error {
+	lock, ok := s.locks[scope.RunID]
+	if !ok || lock.RunID != scope.RunID || lock.ProjectID != scope.ProjectID ||
+		lock.TreeID != scope.TreeID || lock.NodeID != scope.NodeID || !slices.Equal(lock.Path, scope.ChainPath) {
+		return port.ErrTurnNotActive
+	}
+	expected := make(map[string]struct{}, len(scope.ChainPath)+1)
+	for _, id := range scope.ChainPath {
+		expected[id] = struct{}{}
+	}
+	if scope.ExecutionSnapshot.OutputBinding.Bound {
+		expected[scope.ExecutionSnapshot.OutputBinding.NodeID] = struct{}{}
+	}
+	if len(expected) != len(lock.Members) {
+		return port.ErrTurnNotActive
+	}
+	for id := range expected {
+		if _, ok := lock.Members[id]; !ok {
+			return port.ErrTurnNotActive
+		}
+		if s.isNodeLockedByOtherRun(scope.RunID, id) {
+			return ErrRunningChainLocked
+		}
+	}
+	return nil
+}
+
+func sameRunReply(pending entity.Pending, scope port.RunScope, kind valueobject.OutputKind, requestID string, payload []byte) bool {
+	binding := scope.ExecutionSnapshot.OutputBinding
+	return pending.RunID == scope.RunID && pending.RequestID == requestID &&
+		pending.ChainID == scope.ChainID && slices.Equal(pending.ChainPath, scope.ChainPath) &&
+		pending.NodeID == scope.NodeID && pending.Kind == kind &&
+		pending.ContextHash == scope.ContextHash && pending.AncestorHash == scope.AncestorHash &&
+		pending.ParamsHash == scope.ParamsHash && pending.OutputSchemaVersion == scope.ExecutionSnapshot.OutputContract.SchemaVersion &&
+		pending.OutputBinding != nil && *pending.OutputBinding == binding && len(payload) > 0
+}
+
+func validateRunSnapshotGraph(graph *entity.Graph, snapshot entity.RunExecutionSnapshot) error {
+	path, err := graph.PathToRoot(snapshot.NodeID)
+	if err != nil || !slices.Equal(path, snapshot.ChainPath) {
+		return port.ErrChainScopeDenied
+	}
+	for _, frozen := range snapshot.PathNodes {
+		live, ok := graph.Node(frozen.ID)
+		if !ok || live.Type != frozen.Type || live.Title != frozen.Title || live.Parent != frozen.Parent ||
+			live.Locked != frozen.Locked || live.Stale != frozen.Stale ||
+			!reflect.DeepEqual(live.ParentCandidate, frozen.ParentCandidate) ||
+			!reflect.DeepEqual(live.CandidateSource, frozen.CandidateSource) ||
+			!reflect.DeepEqual(live.Params, frozen.Params) || !slices.Equal(live.Rounds, frozen.Rounds) ||
+			!slices.Equal(live.ScriptVersions, frozen.ScriptVersions) {
+			return port.ErrChainScopeDenied
+		}
+	}
+	return nil
+}
+
+func validateSnapshotOutputBinding(graph *entity.Graph, target *entity.Node, snapshot entity.RunExecutionSnapshot) (*entity.Node, error) {
+	if target.Type != valueobject.NodeTypeAgent {
+		return nil, nil
+	}
+	binding := snapshot.OutputBinding
+	var scriptChildren []*entity.Node
+	for _, id := range graph.Children(target.ID) {
+		child, ok := graph.Node(id)
+		if ok && child.Type == valueobject.NodeTypeScript {
+			scriptChildren = append(scriptChildren, child)
+		}
+	}
+	if !binding.Bound {
+		if len(scriptChildren) != 0 {
+			return nil, ErrOutputBindingConflict
+		}
+		return nil, nil
+	}
+	if binding.ParentNodeID != target.ID || len(scriptChildren) != 1 || scriptChildren[0].ID != binding.NodeID {
+		return nil, ErrOutputBindingConflict
+	}
+	output := scriptChildren[0]
+	if len(output.ScriptVersions) != binding.BaselineVersion {
+		return nil, ErrOutputVersionConflict
+	}
+	if binding.BaselineVersion == 0 {
+		if binding.BaselineArtifactID != "" {
+			return nil, ErrOutputVersionConflict
+		}
+	} else {
+		latest := output.ScriptVersions[len(output.ScriptVersions)-1]
+		if latest.N != binding.BaselineVersion || latest.ArtifactID != binding.BaselineArtifactID {
+			return nil, ErrOutputVersionConflict
+		}
+	}
+	return output, nil
+}
+
+func activePendingCount(items []entity.Pending, treeID string) int {
+	count := 0
+	for _, item := range items {
+		if len(item.ChainPath) > 0 && item.ChainPath[0] == treeID &&
+			(item.Status == valueobject.PendingPending || item.Status == valueobject.PendingInvalid) {
+			count++
+		}
+	}
+	return count
+}
+
+type topicReplyCandidate struct {
+	Title string `json:"title"`
+	Angle string `json:"angle"`
+	Hook  string `json:"hook"`
+}
+
+func decodeTopicCandidates(payload []byte) ([]topicReplyCandidate, error) {
+	var result struct {
+		Topics []topicReplyCandidate `json:"topics"`
+	}
+	if err := json.Unmarshal(payload, &result); err != nil {
+		return nil, err
+	}
+	return result.Topics, nil
+}
+
+func decodeScriptTitle(payload []byte) (string, error) {
+	var result struct {
+		Title string `json:"title"`
+	}
+	if err := json.Unmarshal(payload, &result); err != nil {
+		return "", err
+	}
+	return result.Title, nil
+}
+
+func generatedNodeTitle(title, fallback string) string {
+	title = strings.TrimSpace(title)
+	if title == "" {
+		title = fallback
+	}
+	runes := []rune(title)
+	if len(runes) > valueobject.MaxNodeTitleLength {
+		title = string(runes[:valueobject.MaxNodeTitleLength])
+	}
+	return title
 }
 
 func (s *Service) CreatePending(ctx context.Context, input CreatePendingInput) (entity.Pending, error) {
@@ -128,15 +538,7 @@ func (s *Service) CreatePending(ctx context.Context, input CreatePendingInput) (
 			}
 			return ErrTurnPendingExists
 		}
-		activeForTree := 0
-		for _, existing := range pendingItems {
-			if len(existing.ChainPath) == 0 || existing.ChainPath[0] != root.ID {
-				continue
-			}
-			if existing.Status == valueobject.PendingPending || existing.Status == valueobject.PendingInvalid {
-				activeForTree++
-			}
-		}
+		activeForTree := activePendingCount(pendingItems, root.ID)
 		if activeForTree >= valueobject.MaxPendingPerTree {
 			return ErrPendingLimit
 		}
@@ -163,7 +565,7 @@ func (s *Service) CreatePending(ctx context.Context, input CreatePendingInput) (
 			Summary: pendingSummary(input.Kind, input.Payload), Error: message,
 			CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
 		}
-		_, err = s.commitPendingMutation(ctx, access, project, result, input.Payload, nil, nil)
+		_, err = s.commitPendingMutation(ctx, access, project, result, input.Payload, nil, nil, ChangeReasonPending)
 		return err
 	})
 	if err != nil {
@@ -274,6 +676,10 @@ func (s *Service) ApplyPending(ctx context.Context, id string, force bool, expec
 		if err := valueobject.ValidateStructuredPayload(pending.Kind, payload); err != nil {
 			return fmt.Errorf("%w: %v", ErrPendingInvalid, err)
 		}
+		if pending.OutputBinding != nil {
+			result, err = s.applyScriptOutputPending(ctx, access, project, graph, pending, payload, force)
+			return err
+		}
 		node, err := requireNode(graph, pending.NodeID, "node")
 		if err != nil {
 			return err
@@ -291,18 +697,8 @@ func (s *Service) ApplyPending(ctx context.Context, id string, force bool, expec
 		if node.Locked || len(node.Rounds) != 0 {
 			return fmt.Errorf("%w: %s", ErrNodeLocked, node.ID)
 		}
-		if s.opts.ContextHasher == nil {
-			return ErrContextHasherUnavailable
-		}
-		hashes, err := s.opts.ContextHasher.InputHashes(ctx, project, node.ID)
-		if err != nil {
+		if err := s.validatePendingInputHashes(ctx, project, pending, force); err != nil {
 			return err
-		}
-		if !force && pending.ParamsHash != hashes.ParamsHash {
-			return ErrParamsChanged
-		}
-		if !force && pending.AncestorHash != hashes.AncestorHash {
-			return ErrContextChanged
 		}
 		canonical, err := valueobject.CanonicalJSON(payload)
 		if err != nil {
@@ -341,13 +737,97 @@ func (s *Service) ApplyPending(ctx context.Context, id string, force bool, expec
 			}
 		}
 		markSubtreeStale(&project, descendants[1:])
-		result, err = s.commitPendingMutation(ctx, access, project, pending, payload, artifactStore, &entityArtifact{payload: canonical, meta: meta})
+		result, err = s.commitPendingMutation(ctx, access, project, pending, payload, artifactStore, &entityArtifact{payload: canonical, meta: meta}, ChangeReasonPending)
 		return err
 	})
 	if err != nil {
 		return entity.Project{}, err
 	}
 	return result, nil
+}
+
+func (s *Service) validatePendingInputHashes(ctx context.Context, project entity.Project, pending entity.Pending, force bool) error {
+	if s.opts.ContextHasher == nil {
+		return ErrContextHasherUnavailable
+	}
+	hashes, err := s.opts.ContextHasher.InputHashes(ctx, project, pending.NodeID)
+	if err != nil {
+		return err
+	}
+	if !force && pending.ParamsHash != hashes.ParamsHash {
+		return ErrParamsChanged
+	}
+	if !force && pending.AncestorHash != hashes.AncestorHash {
+		return ErrContextChanged
+	}
+	return nil
+}
+
+func (s *Service) applyScriptOutputPending(ctx context.Context, access port.ProjectAccess, project entity.Project, graph *entity.Graph, pending entity.Pending, payload []byte, force bool) (entity.Project, error) {
+	binding := pending.OutputBinding
+	if pending.Kind != valueobject.OutputKindScript || pending.OutputSchemaVersion != 1 || binding == nil || !binding.Bound ||
+		binding.ParentNodeID != pending.NodeID || pending.ResultNodeID != binding.NodeID {
+		return entity.Project{}, ErrOutputBindingConflict
+	}
+	agent, err := requireNode(graph, pending.NodeID, "Agent")
+	if err != nil || agent.Type != valueobject.NodeTypeAgent {
+		return entity.Project{}, ErrOutputBindingConflict
+	}
+	output, err := requireNode(graph, binding.NodeID, "Script")
+	if err != nil || output.Type != valueobject.NodeTypeScript || output.Parent != agent.ID {
+		return entity.Project{}, ErrOutputBindingConflict
+	}
+	if s.isNodeLocked(agent.ID) || s.isNodeLocked(output.ID) {
+		return entity.Project{}, ErrRunningChainLocked
+	}
+	if len(output.ScriptVersions) != binding.BaselineVersion {
+		return entity.Project{}, ErrOutputVersionConflict
+	}
+	if binding.BaselineVersion > 0 {
+		latest := output.ScriptVersions[len(output.ScriptVersions)-1]
+		if latest.N != binding.BaselineVersion || latest.ArtifactID != binding.BaselineArtifactID {
+			return entity.Project{}, ErrOutputVersionConflict
+		}
+	}
+	if err := s.validatePendingInputHashes(ctx, project, pending, force); err != nil {
+		return entity.Project{}, err
+	}
+	canonical, err := valueobject.CanonicalJSON(payload)
+	if err != nil {
+		return entity.Project{}, fmt.Errorf("%w: %v", ErrPendingInvalid, err)
+	}
+	if len(canonical) > valueobject.MaxPendingPayloadSize {
+		return entity.Project{}, ErrPendingPayloadTooLarge
+	}
+	if s.opts.Artifacts == nil {
+		return entity.Project{}, ErrArtifactStoreUnavailable
+	}
+	artifactStore, err := s.opts.Artifacts.ForProject(ctx, project.ID)
+	if err != nil {
+		return entity.Project{}, err
+	}
+	pending.Status = valueobject.PendingApplied
+	pending.ArtifactID = artifactID(canonical)
+	pending.Error = ""
+	output.ScriptVersions = append(output.ScriptVersions, entity.ScriptVersion{
+		N: len(output.ScriptVersions) + 1, ArtifactID: pending.ArtifactID, RunID: pending.RunID,
+	})
+	output.Stale = false
+	descendants, err := graph.Subtree(output.ID)
+	if err != nil {
+		return entity.Project{}, err
+	}
+	markSubtreeStale(&project, descendants[1:])
+	if err := validateFinalGraph(&project); err != nil {
+		return entity.Project{}, fmt.Errorf("图校验失败: %w", err)
+	}
+	meta := entity.ArtifactMeta{
+		Kind: valueobject.OutputKindScript, NodeID: output.ID, CreatedAt: pending.CreatedAt,
+		SourceRunID: pending.RunID, SourcePendingID: pending.ID,
+	}
+	return s.commitPendingMutation(ctx, access, project, pending, payload, artifactStore, &entityArtifact{
+		payload: canonical, meta: meta,
+	}, ChangeReasonPending)
 }
 
 func (s *Service) DiscardPending(ctx context.Context, id, expectedProjectID string) (entity.Project, error) {
@@ -385,7 +865,7 @@ func (s *Service) DiscardPending(ctx context.Context, id, expectedProjectID stri
 			return err
 		}
 		pending.Status = valueobject.PendingDiscarded
-		result, err = s.commitPendingMutation(ctx, access, project, pending, payload, nil, nil)
+		result, err = s.commitPendingMutation(ctx, access, project, pending, payload, nil, nil, ChangeReasonPending)
 		return err
 	})
 	if err != nil {
@@ -399,7 +879,7 @@ type entityArtifact struct {
 	meta    entity.ArtifactMeta
 }
 
-func (s *Service) commitPendingMutation(ctx context.Context, access port.ProjectAccess, project entity.Project, pending entity.Pending, payload []byte, artifactStore port.ArtifactStore, artifact *entityArtifact) (entity.Project, error) {
+func (s *Service) commitPendingMutation(ctx context.Context, access port.ProjectAccess, project entity.Project, pending entity.Pending, payload []byte, artifactStore port.ArtifactStore, artifact *entityArtifact, changeReason string) (entity.Project, error) {
 	store, err := s.pendingStore(ctx, project.ID)
 	if err != nil {
 		return entity.Project{}, err
@@ -445,13 +925,14 @@ func (s *Service) commitPendingMutation(ctx context.Context, access port.Project
 		return entity.Project{}, err
 	}
 	if err := store.Save(ctx, pending, payload); err != nil {
+		s.changedWithReason(saved.ID, saved.Revision, changeReason)
 		return entity.Project{}, err
 	}
 	if err := store.DeleteTransaction(ctx); err != nil {
-		s.changedPending(saved.ID, saved.Revision)
+		s.changedWithReason(saved.ID, saved.Revision, changeReason)
 		return entity.Project{}, err
 	}
-	s.changedPending(saved.ID, saved.Revision)
+	s.changedWithReason(saved.ID, saved.Revision, changeReason)
 	return saved, nil
 }
 

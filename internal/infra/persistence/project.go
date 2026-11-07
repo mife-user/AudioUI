@@ -170,7 +170,7 @@ func (s *ProjectStore) Load(ctx context.Context, id string) (entity.Project, err
 	if err != nil {
 		return entity.Project{}, err
 	}
-	if err := recoverPendingTransaction(ctx, projectPaths.Dir, project.Revision); err != nil {
+	if err := recoverPendingTransaction(ctx, projectPaths.Dir, project); err != nil {
 		return entity.Project{}, err
 	}
 	return project, nil

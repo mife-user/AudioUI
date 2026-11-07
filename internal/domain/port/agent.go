@@ -83,7 +83,7 @@ type ArtifactReader interface {
 }
 
 type ReplySink interface {
-	CreateRunPending(ctx context.Context, scope RunScope, kind valueobject.OutputKind, payload []byte, requestID string) (entity.Pending, error)
+	SubmitRunReply(ctx context.Context, scope RunScope, kind valueobject.OutputKind, payload []byte, requestID string) (entity.Pending, error)
 }
 
 type RunToolService interface {

@@ -98,6 +98,55 @@ func TestStartRunUsesOneShotSpecAndPersistsTerminalUsage(t *testing.T) {
 	}
 }
 
+func TestRecordRunPendingRetryAfterStoreFailureDoesNotDuplicateEvent(t *testing.T) {
+	h := newRunHarness(t)
+	record, err := h.manager.Start(context.Background(), "n_topic")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pending := entity.Pending{ID: "pa_test", RunID: record.ID, NodeID: "n_topic", Status: valueobject.PendingPending}
+	storeErr := errors.New("injected run index failure")
+	h.store.mu.Lock()
+	h.store.saveErr = storeErr
+	h.store.mu.Unlock()
+	if err := h.manager.RecordRunPending(context.Background(), h.toolFactory.scope, pending); !errors.Is(err, storeErr) {
+		t.Fatalf("first pending record error = %v, want injected error", err)
+	}
+	countPendingEvents := func() int {
+		count := 0
+		for _, event := range h.publisher.snapshot() {
+			if event.Type == valueobject.EventPending && event.PendingID == pending.ID {
+				count++
+			}
+		}
+		return count
+	}
+	if count := countPendingEvents(); count != 1 {
+		t.Fatalf("pending events after failed index write = %d, want 1", count)
+	}
+
+	h.store.mu.Lock()
+	h.store.saveErr = nil
+	h.store.mu.Unlock()
+	if err := h.manager.RecordRunPending(context.Background(), h.toolFactory.scope, pending); err != nil {
+		t.Fatalf("retry pending record: %v", err)
+	}
+	if count := countPendingEvents(); count != 1 {
+		t.Fatalf("pending retry duplicated event: %d", count)
+	}
+	otherPending := pending
+	otherPending.ID = "pa_other"
+	if err := h.manager.RecordRunPending(context.Background(), h.toolFactory.scope, otherPending); !errors.Is(err, ErrRunPendingConflict) {
+		t.Fatalf("different pending identity error = %v, want RUN_PENDING_CONFLICT", err)
+	}
+	stored, err := h.store.Load(context.Background(), record.ID)
+	if err != nil || stored.PendingID != pending.ID {
+		t.Fatalf("persisted pending id = %q err=%v", stored.PendingID, err)
+	}
+	h.driver.spec.EventSink(valueobject.AgentEvent{Type: valueobject.EventStatus, State: &valueobject.AgentState{Status: valueobject.SessionIdle}})
+	waitFor(t, func() bool { return !h.manager.IsBusy() })
+}
+
 func TestStartResolvesDriverAgainAfterUnavailableProbe(t *testing.T) {
 	h := newRunHarness(t)
 	h.manager.opts.Driver = nil
@@ -519,6 +568,56 @@ func TestRunTerminationWaitsForActiveMCPLease(t *testing.T) {
 	}
 }
 
+func TestRecordRunPendingInsideMCPLeaseSurvivesTerminationStart(t *testing.T) {
+	h := newRunHarness(t)
+	record, err := h.manager.Start(context.Background(), "n_topic")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pending := entity.Pending{ID: "pa_leased", RunID: record.ID, NodeID: "n_topic", Status: valueobject.PendingPending}
+	entered := make(chan struct{})
+	recordPending := make(chan struct{})
+	operationDone := make(chan error, 1)
+	go func() {
+		operationDone <- h.manager.WithActiveRun(context.Background(), h.toolFactory.scope, func() error {
+			close(entered)
+			<-recordPending
+			return h.manager.RecordRunPending(context.Background(), h.toolFactory.scope, pending)
+		})
+	}()
+	<-entered
+	state := h.manager.getActive(record.ID)
+	finishDone := make(chan struct{})
+	go func() {
+		h.manager.finish(state, valueobject.RunSucceeded, "", nil)
+		close(finishDone)
+	}()
+	waitFor(t, func() bool {
+		state.leaseMu.Lock()
+		defer state.leaseMu.Unlock()
+		return state.closing
+	})
+	close(recordPending)
+	if err := <-operationDone; err != nil {
+		t.Fatalf("record pending under active reply lease: %v", err)
+	}
+	<-finishDone
+
+	stored, err := h.store.Load(context.Background(), record.ID)
+	if err != nil || stored.PendingID != pending.ID {
+		t.Fatalf("terminal run pending id = %q err=%v", stored.PendingID, err)
+	}
+	pendingEvents := 0
+	for _, event := range h.publisher.snapshot() {
+		if event.Type == valueobject.EventPending && event.PendingID == pending.ID {
+			pendingEvents++
+		}
+	}
+	if pendingEvents != 1 {
+		t.Fatalf("pending events = %d, want 1", pendingEvents)
+	}
+}
+
 func TestRecoverInterruptedRunsAcrossProjectsAndKeepsHistory(t *testing.T) {
 	started := testRecord("r_start", "p_one", valueobject.RunStarting)
 	running := testRecord("r_running", "p_two", valueobject.RunRunning)
@@ -719,6 +818,7 @@ func (p *fakeRunStores) ForProject(_ context.Context, projectID string) (port.Ru
 type memoryRunStore struct {
 	mu      sync.Mutex
 	records map[string]entity.RunRecord
+	saveErr error
 }
 
 func (s *memoryRunStore) List(context.Context) ([]entity.RunSummary, error) {
@@ -741,8 +841,11 @@ func (s *memoryRunStore) Load(_ context.Context, id string) (entity.RunRecord, e
 }
 func (s *memoryRunStore) Save(_ context.Context, record entity.RunRecord) error {
 	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.saveErr != nil {
+		return s.saveErr
+	}
 	s.records[record.ID] = cloneRecord(record)
-	s.mu.Unlock()
 	return nil
 }
 

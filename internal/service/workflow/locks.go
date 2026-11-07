@@ -224,6 +224,18 @@ func (s *Service) isNodeLocked(id string) bool {
 	return false
 }
 
+func (s *Service) isNodeLockedByOtherRun(runID, id string) bool {
+	for owner, lock := range s.locks {
+		if owner == runID {
+			continue
+		}
+		if _, ok := lock.Members[id]; ok {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Service) ensureEditable(ids ...string) error {
 	for _, id := range ids {
 		if s.isNodeLocked(id) {

@@ -211,18 +211,6 @@ func (s *Service) readSnapshotRunArtifact(ctx context.Context, scope port.RunSco
 	return result, nil
 }
 
-func (s *Service) CreateRunPending(ctx context.Context, scope port.RunScope, kind valueobject.OutputKind, payload []byte, requestID string) (entity.Pending, error) {
-	if scope.RunID == "" || scope.ProjectID == "" || scope.TreeID == "" || scope.NodeID == "" || scope.ChainID != "c_"+scope.NodeID || len(scope.ChainPath) == 0 || scope.ChainPath[len(scope.ChainPath)-1] != scope.NodeID {
-		return entity.Pending{}, port.ErrTurnNotActive
-	}
-	return s.CreatePending(ctx, CreatePendingInput{
-		RunID: scope.RunID, ProjectID: scope.ProjectID, TreeID: scope.TreeID,
-		ChainID: scope.ChainID, ChainPath: scope.ChainPath, NodeID: scope.NodeID,
-		Kind: kind, ContextHash: scope.ContextHash, AncestorHash: scope.AncestorHash,
-		ParamsHash: scope.ParamsHash, RequestID: requestID, Payload: payload,
-	})
-}
-
 func (s *Service) runGraph(ctx context.Context, scope port.RunScope) (entity.Project, *entity.Graph, error) {
 	if err := ctx.Err(); err != nil {
 		return entity.Project{}, nil, err

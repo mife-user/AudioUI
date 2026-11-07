@@ -83,6 +83,10 @@ export interface Pending {
     "summary"?: string;
     "error"?: string;
     "artifactId"?: string;
+    "outputBinding"?: RunOutputBinding | null;
+    "outputSchemaVersion"?: number;
+    "resultNodeId"?: string;
+    "createdNodeIds"?: string[] | null;
     "createdAt": string;
 }
 

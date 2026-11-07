@@ -1,6 +1,7 @@
 package persistence
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -34,8 +35,8 @@ func (s *PendingStore) List(ctx context.Context) ([]entity.Pending, error) {
 	}
 	result := make([]entity.Pending, len(index.Pending))
 	for i, pending := range index.Pending {
-		pending.ChainPath = append([]string{}, pending.ChainPath...)
 		result[i] = pending
+		result[i].Payload = s.payloadRelative(pending.ID)
 	}
 	return result, nil
 }
@@ -254,7 +255,17 @@ func samePendingIdentity(left, right entity.Pending) bool {
 		left.ChainID == right.ChainID && slices.Equal(left.ChainPath, right.ChainPath) &&
 		left.NodeID == right.NodeID && left.Kind == right.Kind &&
 		left.ContextHash == right.ContextHash && left.AncestorHash == right.AncestorHash &&
-		left.ParamsHash == right.ParamsHash && left.CreatedAt == right.CreatedAt
+		left.ParamsHash == right.ParamsHash && left.CreatedAt == right.CreatedAt &&
+		left.OutputSchemaVersion == right.OutputSchemaVersion &&
+		sameOutputBinding(left.OutputBinding, right.OutputBinding) &&
+		left.ResultNodeID == right.ResultNodeID && slices.Equal(left.CreatedNodeIDs, right.CreatedNodeIDs)
+}
+
+func sameOutputBinding(left, right *entity.RunOutputBinding) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	return *left == *right
 }
 
 func validatePendingTransaction(transaction entity.PendingTransaction) error {
@@ -277,8 +288,12 @@ func validatePendingTransaction(transaction entity.PendingTransaction) error {
 		return nil
 	}
 	meta := *transaction.ArtifactMeta
+	artifactNodeID := transaction.Pending.NodeID
+	if transaction.Pending.ResultNodeID != "" {
+		artifactNodeID = transaction.Pending.ResultNodeID
+	}
 	if transaction.Pending.Status != valueobject.PendingApplied || transaction.Pending.ArtifactID == "" ||
-		meta.Kind != transaction.Pending.Kind || meta.NodeID != transaction.Pending.NodeID ||
+		meta.Kind != transaction.Pending.Kind || meta.NodeID != artifactNodeID ||
 		meta.CreatedAt != transaction.Pending.CreatedAt || meta.SourceRunID != transaction.Pending.RunID ||
 		meta.SourcePendingID != transaction.Pending.ID {
 		return fmt.Errorf("artifact metadata does not match pending")
@@ -286,14 +301,17 @@ func validatePendingTransaction(transaction entity.PendingTransaction) error {
 	if len(transaction.ArtifactPayload) == 0 || len(transaction.ArtifactPayload) > valueobject.MaxPendingPayloadSize {
 		return fmt.Errorf("invalid artifact payload size %d", len(transaction.ArtifactPayload))
 	}
+	canonical, err := valueobject.CanonicalJSON(transaction.Payload)
+	if err != nil || !bytes.Equal(canonical, transaction.ArtifactPayload) {
+		return fmt.Errorf("artifact payload does not match pending payload")
+	}
 	return valueobject.ValidateStructuredPayload(meta.Kind, transaction.ArtifactPayload)
 }
 
 func normalizePending(pending entity.Pending) entity.Pending {
+	pending = pending.Clone()
 	if pending.ChainPath == nil {
 		pending.ChainPath = []string{}
-	} else {
-		pending.ChainPath = append([]string{}, pending.ChainPath...)
 	}
 	return pending
 }
@@ -326,6 +344,62 @@ func validatePending(pending entity.Pending) error {
 	}
 	if !pending.Status.Valid() {
 		return fmt.Errorf("%w: status %q", ErrInvalidPending, pending.Status)
+	}
+	if pending.OutputBinding != nil {
+		if pending.OutputSchemaVersion != 1 || pending.ChainID != "c_"+pending.NodeID || len(pending.ChainPath) == 0 || pending.ChainPath[0] == "" || pending.ChainPath[len(pending.ChainPath)-1] != pending.NodeID {
+			return fmt.Errorf("%w: invalid output contract identity", ErrInvalidPending)
+		}
+		binding := pending.OutputBinding
+		if binding.Bound {
+			if err := valueobject.ValidateID(binding.NodeID); err != nil {
+				return fmt.Errorf("%w: output node id: %v", ErrInvalidPending, err)
+			}
+			if err := valueobject.ValidateID(binding.ParentNodeID); err != nil {
+				return fmt.Errorf("%w: output parent node id: %v", ErrInvalidPending, err)
+			}
+			if pending.Kind != valueobject.OutputKindScript || binding.ParentNodeID != pending.NodeID || binding.NodeID == binding.ParentNodeID ||
+				binding.BaselineVersion < 0 || (binding.BaselineVersion == 0) != (binding.BaselineArtifactID == "") ||
+				pending.ResultNodeID != binding.NodeID || len(pending.CreatedNodeIDs) != 0 {
+				return fmt.Errorf("%w: invalid output binding", ErrInvalidPending)
+			}
+		} else {
+			if binding.NodeID != "" || binding.ParentNodeID != "" || binding.BaselineVersion != 0 || binding.BaselineArtifactID != "" {
+				return fmt.Errorf("%w: unbound output contains a target", ErrInvalidPending)
+			}
+			switch pending.Kind {
+			case valueobject.OutputKindTopics:
+				if pending.ResultNodeID != "" || (pending.Status == valueobject.PendingApplied) != (len(pending.CreatedNodeIDs) > 0) {
+					return fmt.Errorf("%w: invalid topic result identity", ErrInvalidPending)
+				}
+			case valueobject.OutputKindScript:
+				if pending.Status == valueobject.PendingApplied {
+					if len(pending.CreatedNodeIDs) != 1 || pending.ResultNodeID != pending.CreatedNodeIDs[0] {
+						return fmt.Errorf("%w: invalid generated Script identity", ErrInvalidPending)
+					}
+				} else if pending.ResultNodeID != "" || len(pending.CreatedNodeIDs) != 0 {
+					return fmt.Errorf("%w: unexpected generated Script identity", ErrInvalidPending)
+				}
+			default:
+				return fmt.Errorf("%w: invalid output kind", ErrInvalidPending)
+			}
+		}
+	} else if pending.OutputSchemaVersion != 0 {
+		return fmt.Errorf("%w: output schema version has no binding", ErrInvalidPending)
+	}
+	if pending.ResultNodeID != "" {
+		if err := valueobject.ValidateID(pending.ResultNodeID); err != nil {
+			return fmt.Errorf("%w: result node id: %v", ErrInvalidPending, err)
+		}
+	}
+	seenCreated := make(map[string]struct{}, len(pending.CreatedNodeIDs))
+	for _, id := range pending.CreatedNodeIDs {
+		if err := valueobject.ValidateID(id); err != nil {
+			return fmt.Errorf("%w: created node id: %v", ErrInvalidPending, err)
+		}
+		if _, exists := seenCreated[id]; exists {
+			return fmt.Errorf("%w: duplicate created node id %q", ErrInvalidPending, id)
+		}
+		seenCreated[id] = struct{}{}
 	}
 	if pending.CreatedAt == "" {
 		return fmt.Errorf("%w: createdAt is empty", ErrInvalidPending)

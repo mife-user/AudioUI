@@ -7,9 +7,11 @@
 
 ## M2-11～13 本地脚本目标协议（设计已验收；分阶段实现）
 
-> 本节是用户验收的 RM-018 本地脚本子范围设计。M2-11B 与 M2-11C（发送快照、上下文和运行授权）均已验收；M2-11D 结构化结果事务及 M2-12～13 未实现。M2-00～10 实际协议保留在下方章节；云端仍属 RM-019，视频仍属 RM-020。
+> 本节是用户验收的 RM-018 本地脚本子范围设计。M2-11B 与 M2-11C（发送快照、上下文和运行授权）均已验收；M2-11D 受限结构化结果提交已于 2026-11-07 通过用户验收；M2-12A～13 未完成。M2-00～10 实际协议保留在下方章节；云端仍属 RM-019，视频仍属 RM-020。
 
-> **M2-11C 实现状态（已于 2026-11-07 验收）**：`BeginRun` 可运行 Agent 并在同一工作流锁内冻结 Agent 路径、候选来源、Prompt 任务/约束、输出绑定基准和输出契约；Prompt 不能独立运行。路径祖先与指定 Script 输出受运行锁保护，路径外兄弟可编辑。上下文读取单个 Candidate、完整当前 Prompt 任务及冻结 Script 版本，不要求中间 Prompt 有 applied round；MCP 图/产物查询使用快照授权，不回退实时图。run-scoped MCP 不注册通用文件工具；本地 Agent 内置文件工具读取祖先与 exe 同级只读 `runtime/`、写入当前 `steps/`。Agent 的 script 自动创建/首版提交/已有版本确认追加仍属 M2-11D，未实现。
+> **M2-11C 实现状态（已于 2026-11-07 验收）**：`BeginRun` 可运行 Agent 并在同一工作流锁内冻结 Agent 路径、候选来源、Prompt 任务/约束、输出绑定基准和输出契约；Prompt 不能独立运行。路径祖先与指定 Script 输出受运行锁保护，路径外兄弟可编辑。上下文读取单个 Candidate、完整当前 Prompt 任务及冻结 Script 版本，不要求中间 Prompt 有 applied round；MCP 图/产物查询使用快照授权，不回退实时图。run-scoped MCP 不注册通用文件工具；本地 Agent 内置文件工具读取祖先与 exe 同级只读 `runtime/`、写入当前 `steps/`。
+
+> **M2-11D 实现状态（已验收，2026-11-07）**：结构化 `reply` 经过活动运行租约与冻结输出契约校验；合法 topics 原子生成 Candidate，合法 Script 无绑定时建节点、空绑定时写首版、已有版本时进入绑定基准的待确认追加流程。无效结构化 payload 保留有界原文；同运行结果重放幂等，版本冲突不受 `force` 绕过。自检范围和未覆盖项见 `docs/dev/evidence/m2-11d.md`。
 
 ### 发送快照
 
@@ -56,9 +58,12 @@ MCP `reply` 的 `node_id` 指当前 topic 或 Agent 运行目标；Agent 的脚�
 |---|---|
 | `NODE_CONNECTION_INVALID` | 连接组合不在 M2-11 类型矩阵 |
 | `OUTPUT_BINDING_CONFLICT` | Agent 已绑定另一个直接输出，或 reply 不匹配发送时绑定 |
-| `OUTPUT_COMMIT_UNAVAILABLE` | 当前 Agent 运行尚未开放 Script 结构化结果提交；待输出事务接入后再启用 |
+| `OUTPUT_KIND_MISMATCH` | reply kind 与冻结输出契约或目标节点类型不匹配 |
 | `OUTPUT_VERSION_CONFLICT` | 确认时脚本目标的基准版本已变化 |
+| `REQUEST_ID_CONFLICT` | 同一 request ID 被复用于不同结果 |
 | `RUN_RESULT_CONFLICT` | 同一运行收到不同身份/内容的结构化结果 |
+| `RUN_PENDING_CONFLICT` | 同一运行记录了不同的 pending 身份 |
+| `PENDING_PAYLOAD_TOO_LARGE` | reply 原始 payload 超过持久化上限 |
 | `UNSUPPORTED_VERSION` | 工程格式版本不可用 |
 
 继续复用 `SCHEMA_INVALID`、`OUTPUT_KIND_INVALID`、`TURN_NOT_ACTIVE`、`CHAIN_SCOPE_DENIED`、`NODE_LOCKED`、`BUSY`、`REQUEST_ID_CONFLICT` 等既有错误码。错误由 Go 服务端产生，UI 以稳定 code 呈现。
@@ -163,11 +168,11 @@ type Capabilities struct {
 | `list_node_types` | 读 | `topic` / `candidate` / `prompt` / `agent` / `script` 的类型、参数名与输出类型 |
 | `validate(kind, payload)` | 读 | 复用 `topics`/`script` 唯一 Schema 校验器，不落盘；`scene_dsl` 返回 `UNSUPPORTED_UNTIL_M3` |
 | `read_artifact(artifactId, offset, limit)` | 读 | 当前运行路径祖先产物分块读取，单次 ≤16 KiB；`topics` 只返回该路径所选候选对象 |
-| `reply(node_id, kind, payload, request_id?)` | 写消息 | `message` 进入对话；M2 旧模型的 topic `topics` 仍按待应用产物路径处理。v2 topic Candidate 自动生成及 Agent `script` 自动建节点/首版提交/版本确认追加留给 M2-11D，当前未实现 |
+| `reply(node_id, kind, payload, request_id?)` | 写消息/结果 | `message` 进入对话；v2 topic 的合法 `topics` 自动生成 Candidate；Agent `script` 按冻结绑定自动建节点、写入空输出首版，已有版本时生成待确认追加结果。Schema 无效时保留 invalid 原文；运行身份、契约或目标不匹配时拒绝，不提供 Agent apply/写图工具 |
 | `read_file` / `list_dir` / `grep` / `stat` | M1 legacy MCP | 只在非 run-scoped 的 M1 直接工作区注册；M2 运行不通过 MCP 代理通用文件操作 |
 | `ask_user` | 交互 | 触发 QuestionCard，等待用户选择/输入 |
 
-`get_graph` 和 `get_node` 以运行保存的 `ExecutionSnapshot` 为唯一授权数据，不查询 `Project.Current` 替代发送时图；两者只暴露快照路径节点，路径外（即使同树）统一返回 `CHAIN_SCOPE_DENIED`。`get_graph` 可返回快照中绑定的 Script 输出标识与基准版本。`reply` 先校验运行活动状态：运行已结束或 node_id 是路径内非目标节点时返回 `TURN_NOT_ACTIVE`；路径外 node_id 返回 `CHAIN_SCOPE_DENIED`。M2-11C 冻结输出契约，但 Agent `script` 结构化结果事务尚未实现（M2-11D）。运行生命周期端口须持有活动运行租约直到查询或写操作结束，避免终止与调用竞态。
+`get_graph` 和 `get_node` 以运行保存的 `ExecutionSnapshot` 为唯一授权数据，不查询 `Project.Current` 替代发送时图；两者只暴露快照路径节点，路径外（即使同树）统一返回 `CHAIN_SCOPE_DENIED`。`get_graph` 可返回快照中绑定的 Script 输出标识与基准版本。`reply` 先校验运行活动状态：运行已结束或 node_id 是路径内非目标节点时返回 `TURN_NOT_ACTIVE`；路径外 node_id 返回 `CHAIN_SCOPE_DENIED`。M2-11D 的结构化提交在活动运行租约内完成，topics/script 只能按冻结契约进入 workflow 原子提交；已有 Script 确认时复核基准版本。运行生命周期端口须持有活动运行租约直到查询或写操作结束，避免终止与调用竞态。
 
 `read_artifact` 仅授权发送快照中明确引用的路径祖先 artifact；目标节点自身、兄弟、其他树或未引用的 ID 均返回 `CHAIN_SCOPE_DENIED`。candidate 产物只返回 `CandidateSource` 指定的单个 topics 对象；Script 仅授权快照中的不可变版本。授权 kind 以快照引用为准，不信任 CAS 首写 `meta.kind`；同一 artifact ID 若在多个祖先引用但过滤视图不一致，拒绝读取。缺失或越界候选返回 `CANDIDATE_INVALID`，缺失脚本版本明确失败，不退回实时图。
 

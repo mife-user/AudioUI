@@ -4,7 +4,7 @@
 
 ## M2-11～13 目标架构草案：本地 Agent 与脚本闭环
 
-> 用户已选择将 RM-018 的本地脚本子范围纳入 M2-11～13；M2-11A 设计、M2-11B 工程格式/图领域模型及 M2-11C 发送快照/上下文/运行授权均已验收（M2-11C 于 2026-11-07 验收）；M2-11D～13 未完成。M2-00～10 的实现与验收仍作为旧节点模型历史基线保留。RM-019 云端和 RM-020 视频输出/渲染不在当前范围。
+> 用户已选择将 RM-018 的本地脚本子范围纳入 M2-11～13；M2-11A 设计、M2-11B 工程格式/图领域模型及 M2-11C 发送快照/上下文/运行授权均已验收（M2-11C 于 2026-11-07 验收）；M2-11D 受限结果提交已于 2026-11-07 通过用户验收；M2-12A～13 未完成。M2-00～10 的实现与验收仍作为旧节点模型历史基线保留。RM-019 云端和 RM-020 视频输出/渲染不在当前范围。
 
 ```text
 Topic 节点（本地运行）
@@ -26,12 +26,18 @@ Prompt 节点（任务与约束） → Agent 节点（本地一次性运行） �
 - 本阶段继续使用现有本地 Agent 适配器与绿色版路径边界。通用文件/Bash 能力由本地 Agent 执行环境提供；应用 MCP 仅提供受运行授权的应用交互和必要的快照查询。保留 RM-017 Bash 协作式门禁残余风险，不宣称 OS 沙箱。
 - 云端执行、用户账户/上传/隔离/计费留 ADR-028/RM-019；视频节点、视频产物、DSL/前端代码选择与渲染导出留 RM-020。不得将这些能力描述为 M2-11～13 已实现。
 
+## M2-11D 当前实现边界（用户已验收，2026-11-07）
+
+- `workflow.SubmitRunReply` 校验 v2 快照、工程路径、kind/schema 契约、绑定目标及活动运行锁；有效 topics 在一个 revision 事务中提交 CAS artifact、Topic round、锁定状态、Candidate 节点与结果回执。Agent Script 无绑定时创建直接 Script 并写首版，绑定空 Script 时写入首版，已有版本时保存绑定目标/基准版本的 pending。
+- 确认仅对仍匹配的 Agent→Script 绑定和基准版本追加新 ScriptVersion；取消保留旧版本。已提交结果不启动下游。Request ID 和同运行结果去重由 pending 回执实现，冲突拒绝；MCP `reply` 保持原始 payload 与 `RunLifecycle.WithActiveRun`，自动结果不记录为人工 pending。
+- `pending.txn.json` 以 project revision 区分未提交回滚与已提交恢复；已提交恢复核对 Candidate/Script 与 pending/artifact 的图关联后补齐 CAS/index。组件测试和未覆盖项见 `docs/dev/evidence/m2-11d.md`。前端工作台、Wails/WebView2、真实 CLI 与 M2-13 端到端集成仍未验收。
+
 ## M2-11C 当前实现边界（已验收，2026-11-07）
 
 - `workflow.BeginRun` 在图命令共用锁内生成发送快照并允许 Agent 作为运行入口；Prompt 不可独立运行。运行锁覆盖 Agent 祖先路径及快照中指定的直接 Script 输出；路径外兄弟仍可编辑。
 - `RunExecutionSnapshot` 固定工程/路径、Candidate 的来源 artifact 与索引、Prompt/Agent 参数、祖先 Script 精确版本、输出绑定基准和 `topics@1` / `script@1` 输出契约。上下文使用快照解析单个候选、当前 Prompt 完整任务/约束及祖先 Script 版本；不要求中间 Prompt 有旧式 applied round。缺失的 Candidate/Script 产物显式失败，祖先产物按既有预算规则降级。
 - 运行期图与 artifact 查询只使用快照路径投影和冻结 artifact 引用，不读取 `Project.Current` 来替代发送时数据。Run-scoped MCP 不再注册通用文件工具；本地 Agent 内置工具读取限制为运行路径祖先与 exe 同级 `runtime/`，写入限制为当前节点 `steps/`。M1 legacy MCP 文件工具保留；Bash 仍为 RM-017 协作式门禁，不是 OS 沙箱。
-- M2-11D 受限结构化 `reply`、自动创建/追加 Script 版本的事务尚未实现；M2-12A 新模型工作台也未实现。当前状态与门禁见 `docs/dev/evidence/m2-11c.md`。
+- M2-11D 受限结构化 `reply`、topics Candidate 原子生成和 Agent Script 自动建节点/首版/版本确认追加已实现，并于 2026-11-07 通过用户验收；M2-12A 新模型工作台尚未实现。状态与门禁见 `docs/dev/evidence/m2-11d.md`。
 
 ## 目标架构草案：本地工作台 + 可切换 Agent（云端方向待评估）
 
@@ -111,7 +117,7 @@ infra         json / claudecli / edgetts / renderer-bridge
 | `service/run` | 运行生命周期、一次性 Agent 会话、TurnGate、每运行 MCP/token、transcript |
 | `service/context` | 路径上下文、候选解析、token 估算与预算、哈希、工作区清单 |
 | `service/permission` | 三档权限、120s 超时、allow-run、审计 |
-| `service/workflow` | 图命令、自由改挂、树校验、运行锁、待应用产物、轮次与锁定；提供 run-scope 图/节点/产物读取与 pending 创建适配 |
+| `service/workflow` | 图命令、自由改挂、树校验、运行锁、pending 与受限运行结果提交/确认；提供 run-scope 图/节点/产物读取 |
 | `service/render` | 渲染任务、轮次、缓存 |
 | `service/media` | TTS、音频探测、导出 |
 | `infra/media/edgetts` | TTS 适配器 |
