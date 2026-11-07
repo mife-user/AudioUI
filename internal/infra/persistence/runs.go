@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 
 	"audio-ui/internal/domain/entity"
@@ -151,6 +152,10 @@ func normalizeRun(record entity.RunRecord, limit int) entity.RunRecord {
 	} else {
 		record.ChainPath = append([]string{}, record.ChainPath...)
 	}
+	if record.ExecutionSnapshot != nil {
+		snapshot := record.ExecutionSnapshot.Clone()
+		record.ExecutionSnapshot = &snapshot
+	}
 	if record.Transcript == nil {
 		record.Transcript = []valueobject.TranscriptItem{}
 	}
@@ -197,6 +202,14 @@ func validateRun(record entity.RunRecord) error {
 	if record.PendingID != "" {
 		if err := valueobject.ValidateID(record.PendingID); err != nil {
 			return fmt.Errorf("%w: pendingId: %v", ErrInvalidRun, err)
+		}
+	}
+	if record.ExecutionSnapshot != nil {
+		if err := record.ExecutionSnapshot.Validate(); err != nil {
+			return fmt.Errorf("%w: execution snapshot: %v", ErrInvalidRun, err)
+		}
+		if record.ExecutionSnapshot.TreeID != record.TreeID || record.ExecutionSnapshot.NodeID != record.NodeID || !slices.Equal(record.ExecutionSnapshot.ChainPath, record.ChainPath) {
+			return fmt.Errorf("%w: execution snapshot does not match run summary", ErrInvalidRun)
 		}
 	}
 	return nil

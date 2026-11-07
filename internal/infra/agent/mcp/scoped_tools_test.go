@@ -117,6 +117,56 @@ func scopedMCPOptions(root string) Options {
 	}
 }
 
+func TestSnapshotReplyRejectsKindOutsideOutputContract(t *testing.T) {
+	options := scopedMCPOptions(t.TempDir())
+	project := entity.Project{Version: 2, ID: "p_scoped", Nodes: []entity.Node{
+		{ID: "n_topic", Type: valueobject.NodeTypeTopic, Rounds: []entity.Round{{N: 1, Kind: valueobject.OutputKindTopics, ArtifactID: "sha256:topics"}}},
+		{ID: "n_candidate", Type: valueobject.NodeTypeCandidate, Parent: "n_topic", CandidateSource: &entity.CandidateSource{TopicNodeID: "n_topic", ArtifactID: "sha256:topics", Index: 0}},
+		{ID: "n_prompt", Type: valueobject.NodeTypePrompt, Parent: "n_candidate"},
+		{ID: "n_agent", Type: valueobject.NodeTypeAgent, Parent: "n_prompt"},
+	}}
+	graph, err := entity.NewGraph(&project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := graph.SnapshotForRun("n_agent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := snapshot.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	scope := options.RunScope.Clone()
+	scope.TreeID = snapshot.TreeID
+	scope.NodeID = snapshot.NodeID
+	scope.ChainID = "c_" + snapshot.NodeID
+	scope.ChainPath = append([]string(nil), snapshot.ChainPath...)
+	scope.ExecutionSnapshot = snapshot
+	options.RunScope = &scope
+	options.RunTools.(*scopedRunTools).scope = scope
+	server := &Server{options: options}
+	request := &sdkmcp.CallToolRequest{Params: &sdkmcp.CallToolParamsRaw{
+		Arguments: json.RawMessage(`{"node_id":"n_agent","kind":"topics","payload":{"topics":[]}}`),
+	}}
+	result, err := server.replyRun(context.Background(), request)
+	if err != nil || result == nil || !result.IsError || !strings.Contains(toolResultText(result), "OUTPUT_KIND_MISMATCH") {
+		t.Fatalf("reply result=%+v err=%v, want OUTPUT_KIND_MISMATCH", result, err)
+	}
+	if len(options.RunTools.(*scopedRunTools).payload) != 0 {
+		t.Fatal("mismatched reply reached the pending sink")
+	}
+	agentScript := &sdkmcp.CallToolRequest{Params: &sdkmcp.CallToolParamsRaw{
+		Arguments: json.RawMessage(`{"node_id":"n_agent","kind":"script","payload":{"title":"x","scenes":[{"narration":"y","duration":1}]}}`),
+	}}
+	result, err = server.replyRun(context.Background(), agentScript)
+	if err != nil || result == nil || !result.IsError || !strings.Contains(toolResultText(result), "OUTPUT_COMMIT_UNAVAILABLE") {
+		t.Fatalf("Agent script reply result=%+v err=%v, want OUTPUT_COMMIT_UNAVAILABLE", result, err)
+	}
+	if len(options.RunTools.(*scopedRunTools).payload) != 0 {
+		t.Fatal("unsupported Agent script reply reached the pending sink")
+	}
+}
+
 func TestScopedMCPToolSurfaceAndRawReply(t *testing.T) {
 	root := t.TempDir()
 	options := scopedMCPOptions(root)
@@ -158,9 +208,14 @@ func TestScopedMCPToolSurfaceAndRawReply(t *testing.T) {
 	for _, tool := range listed.Tools {
 		names[tool.Name] = true
 	}
-	for _, name := range []string{"get_chain", "get_graph", "get_node", "list_node_types", "validate", "read_artifact", "reply", "read_file", "list_dir", "grep", "stat", "ask_user"} {
+	for _, name := range []string{"get_chain", "get_graph", "get_node", "list_node_types", "validate", "read_artifact", "reply", "ask_user"} {
 		if !names[name] {
 			t.Fatalf("missing tool %q: %v", name, names)
+		}
+	}
+	for _, forbiddenFileTool := range []string{"read_file", "list_dir", "grep", "stat"} {
+		if names[forbiddenFileTool] {
+			t.Fatalf("run-scoped MCP exposed native file tool %q", forbiddenFileTool)
 		}
 	}
 	for _, forbidden := range []string{"create_node", "connect", "update_params", "delete_node", "apply_artifact"} {

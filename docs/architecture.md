@@ -4,7 +4,7 @@
 
 ## M2-11～13 目标架构草案：本地 Agent 与脚本闭环
 
-> 用户已选择将 RM-018 的本地脚本子范围纳入 M2-11～13；本设计稿待 M2-11A 评审，未实现。M2-00～10 的现行实现与验收仍是旧节点模型，保留历史事实但不覆盖新目标。RM-019 云端和 RM-020 视频输出/渲染不在当前范围。
+> 用户已选择将 RM-018 的本地脚本子范围纳入 M2-11～13；M2-11A 设计、M2-11B 工程格式/图领域模型及 M2-11C 发送快照/上下文/运行授权均已验收（M2-11C 于 2026-11-07 验收）；M2-11D～13 未完成。M2-00～10 的实现与验收仍作为旧节点模型历史基线保留。RM-019 云端和 RM-020 视频输出/渲染不在当前范围。
 
 ```text
 Topic 节点（本地运行）
@@ -25,6 +25,13 @@ Prompt 节点（任务与约束） → Agent 节点（本地一次性运行） �
 - 新工程使用 `project.json` v2，不自动迁移 v1；读取旧版本返回 `UNSUPPORTED_VERSION`，不可兼容工程不阻塞其他有效工程列表、新建或打开。M1 sessions 导入直接创建 v2 工程。`bin` 指定旧工程的清理为 M2-11B 一次性手工动作，不进入启动逻辑；`bin` 外旧工程不删除、不自动迁移。
 - 本阶段继续使用现有本地 Agent 适配器与绿色版路径边界。通用文件/Bash 能力由本地 Agent 执行环境提供；应用 MCP 仅提供受运行授权的应用交互和必要的快照查询。保留 RM-017 Bash 协作式门禁残余风险，不宣称 OS 沙箱。
 - 云端执行、用户账户/上传/隔离/计费留 ADR-028/RM-019；视频节点、视频产物、DSL/前端代码选择与渲染导出留 RM-020。不得将这些能力描述为 M2-11～13 已实现。
+
+## M2-11C 当前实现边界（已验收，2026-11-07）
+
+- `workflow.BeginRun` 在图命令共用锁内生成发送快照并允许 Agent 作为运行入口；Prompt 不可独立运行。运行锁覆盖 Agent 祖先路径及快照中指定的直接 Script 输出；路径外兄弟仍可编辑。
+- `RunExecutionSnapshot` 固定工程/路径、Candidate 的来源 artifact 与索引、Prompt/Agent 参数、祖先 Script 精确版本、输出绑定基准和 `topics@1` / `script@1` 输出契约。上下文使用快照解析单个候选、当前 Prompt 完整任务/约束及祖先 Script 版本；不要求中间 Prompt 有旧式 applied round。缺失的 Candidate/Script 产物显式失败，祖先产物按既有预算规则降级。
+- 运行期图与 artifact 查询只使用快照路径投影和冻结 artifact 引用，不读取 `Project.Current` 来替代发送时数据。Run-scoped MCP 不再注册通用文件工具；本地 Agent 内置工具读取限制为运行路径祖先与 exe 同级 `runtime/`，写入限制为当前节点 `steps/`。M1 legacy MCP 文件工具保留；Bash 仍为 RM-017 协作式门禁，不是 OS 沙箱。
+- M2-11D 受限结构化 `reply`、自动创建/追加 Script 版本的事务尚未实现；M2-12A 新模型工作台也未实现。当前状态与门禁见 `docs/dev/evidence/m2-11c.md`。
 
 ## 目标架构草案：本地工作台 + 可切换 Agent（云端方向待评估）
 
@@ -115,12 +122,12 @@ infra         json / claudecli / edgetts / renderer-bridge
 | `infra/logging` | zap + lumberjack、日志 tail |
 | `infra/winmsg` | Wails 启动前的原生错误提示 |
 | `infra/agent/claudecli` | Claude SDK 适配、原生 CLI、一次性运行、工具注入、事件映射 |
-| `infra/agent/mcp` | HTTP MCP 服务、每运行 token、路径范围只读图工具、结构化 reply、artifact 分块读取 |
+| `infra/agent/mcp` | HTTP MCP 服务、每运行 token、应用交互与运行快照查询、artifact 分块读取；run-scoped 不代理通用文件工具 |
 | `infra/agenthost` | Windows stdio 代理、隐藏窗口、Job Object |
 | `infra/persistence` | `project.json`、`runs.json`/`runs/`、`pending.json`、`pending.txn.json`、artifact、`config.json`、迁移 |
 | `infra/eventbus` | 预留；M2 的 Wails 事件桥仍在 `internal/app/eventbus.go` |
 | `infra/audit` | 独立 audit.log（含 runId/treeId/nodeId/chainId） |
-| `infra/workspace` | topic 树路径叠加读取（当前节点 → 祖先 → 根 `runtime/`）、节点写作用域、list/grep/stat |
+| `infra/workspace` | topic 树路径叠加读取（当前节点 → 祖先 → 根 `runtime/`）、节点写作用域、本地 Agent 内置工具路径 guard；M1 direct-view MCP 保留 |
 
 ## 5. 进程与并发
 

@@ -49,7 +49,8 @@ func (e *ContextTooLargeError) Unwrap() error { return ErrContextTooLarge }
 type Input struct {
 	Project   entity.Project
 	NodeID    string
-	Workspace port.RunWorkspaceReader
+	Snapshot  entity.RunExecutionSnapshot
+	Workspace port.RunWorkspace
 	Budget    int
 }
 
@@ -82,10 +83,12 @@ type targetSection struct {
 }
 
 type workspaceSection struct {
-	CWD       string          `json:"cwd"`
-	Overlay   []string        `json:"overlay"`
-	Files     []WorkspaceFile `json:"files"`
-	Truncated bool            `json:"truncated"`
+	CWD             string          `json:"cwd"`
+	Overlay         []string        `json:"overlay"`
+	Files           []WorkspaceFile `json:"files"`
+	Truncated       bool            `json:"truncated"`
+	NativeReadRoots []string        `json:"nativeReadRoots,omitempty"`
+	NativeWriteRoot string          `json:"nativeWriteRoot,omitempty"`
 }
 
 type ancestorIdentity struct {
@@ -94,6 +97,7 @@ type ancestorIdentity struct {
 	Title           string                 `json:"title"`
 	Params          entity.NodeParams      `json:"params"`
 	Round           int                    `json:"round"`
+	ArtifactVersion int                    `json:"artifactVersion,omitempty"`
 	ArtifactKind    valueobject.OutputKind `json:"artifactKind"`
 	ArtifactID      string                 `json:"artifactId"`
 	CandidateNumber *int                   `json:"candidateNumber,omitempty"`
@@ -108,12 +112,15 @@ type ancestorSection struct {
 }
 
 type contextBody struct {
-	Version   int               `json:"version"`
-	Target    targetSection     `json:"target"`
-	Task      entity.NodeParams `json:"task"`
-	Path      []ancestorSection `json:"path"`
-	Workspace workspaceSection  `json:"workspace"`
-	Contract  []string          `json:"contract"`
+	Version        int                       `json:"version"`
+	Target         targetSection             `json:"target"`
+	TaskNodeID     string                    `json:"taskNodeId,omitempty"`
+	Task           entity.NodeParams         `json:"task"`
+	Path           []ancestorSection         `json:"path"`
+	Workspace      workspaceSection          `json:"workspace"`
+	Contract       []string                  `json:"contract"`
+	OutputBinding  *entity.RunOutputBinding  `json:"outputBinding,omitempty"`
+	OutputContract *entity.RunOutputContract `json:"outputContract,omitempty"`
 }
 
 type promptMetadata struct {
@@ -134,10 +141,14 @@ type resolvedAncestor struct {
 }
 
 type resolvedInput struct {
-	target    targetSection
-	params    entity.NodeParams
-	ancestors []resolvedAncestor
-	workspace workspaceSection
+	target         targetSection
+	params         entity.NodeParams
+	targetParams   entity.NodeParams
+	taskNodeID     string
+	outputBinding  *entity.RunOutputBinding
+	outputContract *entity.RunOutputContract
+	ancestors      []resolvedAncestor
+	workspace      workspaceSection
 }
 
 // Build creates the prompt, its hashes and a preflight estimate. If necessary,
@@ -160,11 +171,11 @@ func (b *Builder) Build(ctx context.Context, input Input) (Result, error) {
 		return Result{}, err
 	}
 	body := contextBody{
-		Version:   valueobject.DefaultContextVersion,
-		Target:    resolved.target,
-		Task:      resolved.params,
-		Workspace: resolved.workspace,
-		Contract:  outputContract(resolved.target),
+		Version: valueobject.DefaultContextVersion, Target: resolved.target,
+		TaskNodeID: resolved.taskNodeID, Task: resolved.params,
+		Workspace:     resolved.workspace,
+		Contract:      outputContract(resolved.target, resolved.outputBinding),
+		OutputBinding: resolved.outputBinding, OutputContract: resolved.outputContract,
 	}
 	levels := make([]int, len(resolved.ancestors))
 	nextAncestor := 0
@@ -197,8 +208,8 @@ func (b *Builder) Build(ctx context.Context, input Input) (Result, error) {
 	}
 }
 
-func (b *Builder) BuildRunContext(ctx context.Context, project entity.Project, nodeID string, workspace port.RunWorkspace, budget int) (port.RunContext, error) {
-	result, err := b.Build(ctx, Input{Project: project, NodeID: nodeID, Workspace: workspace, Budget: budget})
+func (b *Builder) BuildRunContext(ctx context.Context, project entity.Project, nodeID string, snapshot entity.RunExecutionSnapshot, workspace port.RunWorkspace, budget int) (port.RunContext, error) {
+	result, err := b.Build(ctx, Input{Project: project, NodeID: nodeID, Snapshot: snapshot, Workspace: workspace, Budget: budget})
 	if err != nil {
 		return port.RunContext{}, err
 	}
@@ -221,6 +232,13 @@ func (b *Builder) InputHashes(ctx context.Context, input Input) (valueobject.Con
 }
 
 func (b *Builder) resolve(ctx context.Context, input Input, includeWorkspace bool) (resolvedInput, error) {
+	if input.Snapshot.Version != 0 {
+		return b.resolveSnapshot(ctx, input, includeWorkspace)
+	}
+	return b.resolveLegacy(ctx, input, includeWorkspace)
+}
+
+func (b *Builder) resolveLegacy(ctx context.Context, input Input, includeWorkspace bool) (resolvedInput, error) {
 	if err := ctx.Err(); err != nil {
 		return resolvedInput{}, err
 	}
@@ -302,11 +320,238 @@ func (b *Builder) resolve(ctx context.Context, input Input, includeWorkspace boo
 		workspace = workspaceSection{CWD: "trees/" + root.ID + "/", Overlay: overlay, Files: files.Files, Truncated: files.Truncated}
 	}
 	return resolvedInput{
-		target:    targetSection{TreeID: root.ID, ChainPath: append([]string(nil), chainPath...), NodeID: target.ID, NodeType: target.Type, OutputKind: kind},
-		params:    target.Params,
-		ancestors: ancestors,
-		workspace: workspace,
+		target:       targetSection{TreeID: root.ID, ChainPath: append([]string(nil), chainPath...), NodeID: target.ID, NodeType: target.Type, OutputKind: kind},
+		params:       target.Params,
+		targetParams: target.Params,
+		ancestors:    ancestors,
+		workspace:    workspace,
 	}, nil
+}
+
+func (b *Builder) resolveSnapshot(ctx context.Context, input Input, includeWorkspace bool) (resolvedInput, error) {
+	if err := ctx.Err(); err != nil {
+		return resolvedInput{}, err
+	}
+	project := input.Project
+	if err := valueobject.ValidateID(project.ID); err != nil {
+		return resolvedInput{}, fmt.Errorf("invalid project: %w", err)
+	}
+	snapshot := input.Snapshot.Clone()
+	if err := snapshot.Validate(); err != nil {
+		return resolvedInput{}, fmt.Errorf("invalid execution snapshot: %w", err)
+	}
+	if snapshot.ProjectID != project.ID || snapshot.NodeID != input.NodeID {
+		return resolvedInput{}, fmt.Errorf("%w: snapshot does not match project and target", ErrWorkspaceScope)
+	}
+	if snapshot.PathNodes[0].Type != valueobject.NodeTypeTopic {
+		return resolvedInput{}, fmt.Errorf("%w: run path must start at a topic", ErrNotInChain)
+	}
+	target := snapshot.PathNodes[len(snapshot.PathNodes)-1]
+	kind, err := outputKind(&target)
+	if err != nil {
+		return resolvedInput{}, err
+	}
+	if kind != snapshot.OutputContract.Kind {
+		return resolvedInput{}, fmt.Errorf("%w: snapshot output contract does not match target", ErrNodeKindMismatch)
+	}
+	if includeWorkspace {
+		if isNil(input.Workspace) {
+			return resolvedInput{}, fmt.Errorf("%w: run workspace is required", ErrWorkspaceScope)
+		}
+		scope := input.Workspace.Scope()
+		if scope.ProjectID != snapshot.ProjectID || scope.TreeID != snapshot.TreeID || scope.NodeID != snapshot.NodeID || !slices.Equal(scope.ChainPath, snapshot.ChainPath) {
+			return resolvedInput{}, fmt.Errorf("%w: workspace does not match execution snapshot", ErrWorkspaceScope)
+		}
+	}
+
+	params := target.Params
+	taskNodeID := ""
+	if target.Type == valueobject.NodeTypeAgent {
+		if len(snapshot.PathNodes) < 2 {
+			return resolvedInput{}, fmt.Errorf("%w: agent path has no prompt task", ErrNotInChain)
+		}
+		task := snapshot.PathNodes[len(snapshot.PathNodes)-2]
+		if task.Type != valueobject.NodeTypePrompt {
+			return resolvedInput{}, fmt.Errorf("%w: agent path must end with a prompt task", ErrNotInChain)
+		}
+		taskKind, err := outputKind(&task)
+		if err != nil {
+			return resolvedInput{}, err
+		}
+		if taskKind != valueobject.OutputKindScript {
+			return resolvedInput{}, fmt.Errorf("%w: prompt cannot output %s", ErrNodeKindMismatch, taskKind)
+		}
+		params = task.Params
+		taskNodeID = task.ID
+	}
+
+	needsStore := false
+	for _, node := range snapshot.PathNodes[:len(snapshot.PathNodes)-1] {
+		if node.Type == valueobject.NodeTypeCandidate || node.Type == valueobject.NodeTypeScript {
+			needsStore = true
+			break
+		}
+	}
+	var store port.ArtifactStore
+	if needsStore {
+		if b == nil || isNil(b.artifacts) {
+			return resolvedInput{}, fmt.Errorf("%w: artifact store unavailable", ErrAncestorNotReady)
+		}
+		store, err = b.artifacts.ForProject(ctx, snapshot.ProjectID)
+		if err != nil {
+			return resolvedInput{}, fmt.Errorf("open artifact store: %w", err)
+		}
+		if isNil(store) {
+			return resolvedInput{}, fmt.Errorf("%w: artifact store unavailable", ErrAncestorNotReady)
+		}
+	}
+	ancestors := make([]resolvedAncestor, 0, len(snapshot.PathNodes)-1)
+	for i := 0; i < len(snapshot.PathNodes)-1; i++ {
+		node := snapshot.PathNodes[i]
+		identity := ancestorIdentity{NodeID: node.ID, NodeType: node.Type, Title: node.Title, Params: node.Params}
+		var ancestor resolvedAncestor
+		switch node.Type {
+		case valueobject.NodeTypeCandidate:
+			if node.CandidateSource == nil || node.CandidateSource.TopicNodeID != node.Parent {
+				return resolvedInput{}, fmt.Errorf("%w: candidate %s", ErrCandidateInvalid, node.ID)
+			}
+			reference, ok := snapshotArtifact(snapshot, node.ID)
+			if !ok || reference.Kind != valueobject.OutputKindTopics || reference.ArtifactID != node.CandidateSource.ArtifactID || reference.CandidateIndex == nil || *reference.CandidateIndex != node.CandidateSource.Index {
+				return resolvedInput{}, fmt.Errorf("%w: candidate %s snapshot source mismatch", ErrCandidateInvalid, node.ID)
+			}
+			ancestor, err = loadSnapshotAncestor(ctx, store, node, reference)
+			if err == nil {
+				number := node.CandidateSource.Index + 1
+				ancestor.identity.CandidateNumber = &number
+			}
+		case valueobject.NodeTypeScript:
+			if len(node.ScriptVersions) == 0 {
+				return resolvedInput{}, fmt.Errorf("%w: script %s has no immutable version", ErrAncestorNotReady, node.ID)
+			}
+			latest := node.ScriptVersions[len(node.ScriptVersions)-1]
+			reference, ok := snapshotArtifact(snapshot, node.ID)
+			if !ok || reference.Kind != valueobject.OutputKindScript || reference.ArtifactID != latest.ArtifactID || reference.Version != latest.N {
+				return resolvedInput{}, fmt.Errorf("%w: script %s snapshot version mismatch", ErrAncestorNotReady, node.ID)
+			}
+			ancestor, err = loadSnapshotAncestor(ctx, store, node, reference)
+			if err == nil {
+				ancestor.identity.ArtifactVersion = reference.Version
+			}
+		case valueobject.NodeTypePrompt:
+			identity.Params = entity.NodeParams{}
+			ancestor = resolvedAncestor{identity: identity}
+		default:
+			ancestor = resolvedAncestor{identity: identity}
+		}
+		if err != nil {
+			return resolvedInput{}, err
+		}
+		if ancestor.identity.NodeID == "" {
+			ancestor.identity = identity
+		}
+		ancestors = append(ancestors, ancestor)
+	}
+
+	workspace := workspaceSection{}
+	if includeWorkspace {
+		files, err := collectManifest(ctx, input.Workspace)
+		if err != nil {
+			return resolvedInput{}, err
+		}
+		overlay := make([]string, 0, len(snapshot.ChainPath)+1)
+		readRoots := make([]string, 0, len(snapshot.ChainPath)+1)
+		for i := len(snapshot.ChainPath) - 1; i >= 0; i-- {
+			overlay = append(overlay, "steps/"+snapshot.ChainPath[i]+"/")
+		}
+		overlay = append(overlay, "<exe>/runtime/")
+		for _, id := range snapshot.ChainPath {
+			readRoots = append(readRoots, "steps/"+id+"/")
+		}
+		if runtimePath := input.Workspace.RuntimeReadPath(); runtimePath != "" {
+			readRoots = append(readRoots, runtimePath)
+		}
+		workspace = workspaceSection{
+			CWD: "trees/" + snapshot.TreeID + "/", Overlay: overlay,
+			Files: files.Files, Truncated: files.Truncated,
+			NativeReadRoots: readRoots, NativeWriteRoot: "steps/" + snapshot.NodeID + "/",
+		}
+	}
+	binding := snapshot.OutputBinding
+	contract := snapshot.OutputContract
+	var outputBinding *entity.RunOutputBinding
+	var outputContract *entity.RunOutputContract
+	if target.Type == valueobject.NodeTypeAgent {
+		outputBinding = &binding
+		outputContract = &contract
+	}
+	return resolvedInput{
+		target: targetSection{
+			TreeID: snapshot.TreeID, ChainPath: append([]string(nil), snapshot.ChainPath...),
+			NodeID: target.ID, NodeType: target.Type, OutputKind: kind,
+		},
+		params: params, targetParams: target.Params, taskNodeID: taskNodeID,
+		outputBinding: outputBinding, outputContract: outputContract,
+		ancestors: ancestors, workspace: workspace,
+	}, nil
+}
+
+func snapshotArtifact(snapshot entity.RunExecutionSnapshot, nodeID string) (entity.RunArtifactReference, bool) {
+	var found entity.RunArtifactReference
+	ok := false
+	for _, reference := range snapshot.Artifacts {
+		if reference.NodeID != nodeID {
+			continue
+		}
+		if ok {
+			return entity.RunArtifactReference{}, false
+		}
+		found, ok = reference, true
+	}
+	return found, ok
+}
+
+func loadSnapshotAncestor(ctx context.Context, store port.ArtifactStore, node entity.Node, reference entity.RunArtifactReference) (resolvedAncestor, error) {
+	if err := ctx.Err(); err != nil {
+		return resolvedAncestor{}, err
+	}
+	artifact, payload, err := store.Get(ctx, reference.ArtifactID)
+	if err != nil {
+		return resolvedAncestor{}, fmt.Errorf("%w: node %s: %w", ErrAncestorNotReady, node.ID, err)
+	}
+	if artifact.ID != reference.ArtifactID || len(payload) > valueobject.MaxPendingPayloadSize || !utf8.Valid(payload) || !json.Valid(payload) {
+		return resolvedAncestor{}, fmt.Errorf("%w: node %s has an invalid artifact", ErrAncestorNotReady, node.ID)
+	}
+	if artifact.Kind != reference.Kind {
+		if err := valueobject.ValidateStructuredPayload(reference.Kind, payload); err != nil {
+			return resolvedAncestor{}, fmt.Errorf("%w: node %s artifact does not match its snapshot kind", ErrAncestorNotReady, node.ID)
+		}
+	}
+	selected := payload
+	identity := ancestorIdentity{
+		NodeID: node.ID, NodeType: node.Type, Title: node.Title, Params: node.Params,
+		ArtifactKind: reference.Kind, ArtifactID: reference.ArtifactID,
+	}
+	if reference.Kind == valueobject.OutputKindTopics {
+		if reference.CandidateIndex == nil {
+			return resolvedAncestor{}, fmt.Errorf("%w: candidate index missing", ErrCandidateInvalid)
+		}
+		var topics struct {
+			Topics []json.RawMessage `json:"topics"`
+		}
+		if err := json.Unmarshal(payload, &topics); err != nil || *reference.CandidateIndex < 0 || *reference.CandidateIndex >= len(topics.Topics) {
+			return resolvedAncestor{}, fmt.Errorf("%w: topic %s", ErrCandidateInvalid, node.ID)
+		}
+		selected = topics.Topics[*reference.CandidateIndex]
+	}
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal(selected, &object); err != nil || object == nil {
+		return resolvedAncestor{}, fmt.Errorf("%w: node %s artifact must be an object", ErrAncestorNotReady, node.ID)
+	}
+	var compact bytes.Buffer
+	if err := json.Compact(&compact, selected); err != nil {
+		return resolvedAncestor{}, fmt.Errorf("%w: node %s: %v", ErrAncestorNotReady, node.ID, err)
+	}
+	return resolvedAncestor{identity: identity, payload: append(json.RawMessage(nil), compact.Bytes()...)}, nil
 }
 
 func outputKind(node *entity.Node) (valueobject.OutputKind, error) {
@@ -421,23 +666,49 @@ func inputHashes(input resolvedInput) (valueobject.ContextHashes, error) {
 	if err != nil {
 		return valueobject.ContextHashes{}, err
 	}
-	paramsHash, err := hashJSON(input.params)
+	var paramsMaterial any = input.params
+	if input.outputContract != nil {
+		paramsMaterial = struct {
+			TaskNodeID     string                    `json:"taskNodeId"`
+			Task           entity.NodeParams         `json:"task"`
+			Target         entity.NodeParams         `json:"target"`
+			OutputBinding  *entity.RunOutputBinding  `json:"outputBinding"`
+			OutputContract *entity.RunOutputContract `json:"outputContract"`
+		}{input.taskNodeID, input.params, input.targetParams, input.outputBinding, input.outputContract}
+	}
+	paramsHash, err := hashJSON(paramsMaterial)
 	if err != nil {
 		return valueobject.ContextHashes{}, err
 	}
 	return valueobject.ContextHashes{AncestorHash: ancestorHash, ParamsHash: paramsHash}, nil
 }
 
-func outputContract(target targetSection) []string {
+func outputContract(target targetSection, binding *entity.RunOutputBinding) []string {
+	if target.NodeType != valueobject.NodeTypeAgent {
+		contract := []string{
+			"只根据当前路径与任务工作；禁止直接修改工程图。",
+			"工作区文件仅提供逻辑路径与大小，不自动注入文件内容；二进制资源仅通过路径引用。",
+			"祖先产物的摘录或引用可用 read_artifact 按块读取（每次不超过 16 KiB）；topic 只返回当前路径所选候选。",
+			"有歧义时调用 ask_user；结构化输出使用 reply，payload 不超过 256 KiB。",
+			fmt.Sprintf("reply 的 node_id 必须是 %s，kind 必须是 %s；产物须经用户应用。", target.NodeID, target.OutputKind),
+		}
+		if target.OutputKind == valueobject.OutputKindTopics {
+			return append(contract, `topics payload: {"topics":[{"title":"...","angle":"...","hook":"..."}]}；候选为 3–10 条。`)
+		}
+		return append(contract, `script payload: {"title":"...","scenes":[{"narration":"...","duration":0}]}；至少一个场景。`)
+	}
 	contract := []string{
 		"只根据当前路径与任务工作；禁止直接修改工程图。",
 		"工作区文件仅提供逻辑路径与大小，不自动注入文件内容；二进制资源仅通过路径引用。",
-		"祖先产物的摘录或引用可用 read_artifact 按块读取（每次不超过 16 KiB）；topic 只返回当前路径所选候选。",
-		"有歧义时调用 ask_user；结构化输出使用 reply，payload 不超过 256 KiB。",
-		fmt.Sprintf("reply 的 node_id 必须是 %s，kind 必须是 %s；产物须经用户应用。", target.NodeID, target.OutputKind),
+		"祖先产物的摘录或引用可用 read_artifact 按块读取（每次不超过 16 KiB）；候选、提示词任务与脚本版本均按发送快照读取。",
+		"有歧义时调用 ask_user；reply 可用于聊天消息，结构化 Script 提交当前不可用。",
+		"输出契约固定为 script@1。",
+		fmt.Sprintf("reply 的 node_id 必须是 %s，kind 必须是 %s；输出 Script 节点以发送时绑定为准，不能自行指定。", target.NodeID, target.OutputKind),
 	}
-	if target.OutputKind == valueobject.OutputKindTopics {
-		return append(contract, `topics payload: {"topics":[{"title":"...","angle":"...","hook":"..."}]}；候选为 3–10 条。`)
+	if binding != nil && binding.Bound {
+		contract = append(contract, fmt.Sprintf("输出绑定到 Script 节点 %s，基准版本为 %d；不得覆盖既有版本。", binding.NodeID, binding.BaselineVersion))
+	} else {
+		contract = append(contract, "当前没有绑定 Script 输出节点；不得直接修改工程图。")
 	}
 	return append(contract, `script payload: {"title":"...","scenes":[{"narration":"...","duration":0}]}；至少一个场景。`)
 }

@@ -1,6 +1,10 @@
 package entity
 
-import "audio-ui/internal/domain/valueobject"
+import (
+	"fmt"
+
+	"audio-ui/internal/domain/valueobject"
+)
 
 // RunSummary is the runs.json index entry. Transcript and context preview
 // live in runs/<runId>.json so listing runs stays cheap.
@@ -25,11 +29,200 @@ type RunSummary struct {
 	FinishedAt        string                `json:"finishedAt,omitempty"`
 }
 
+type RunArtifactReference struct {
+	NodeID         string                 `json:"nodeId"`
+	ArtifactID     string                 `json:"artifactId"`
+	Kind           valueobject.OutputKind `json:"kind"`
+	CandidateIndex *int                   `json:"candidateIndex,omitempty"`
+	Version        int                    `json:"version,omitempty"`
+}
+
+type RunOutputBinding struct {
+	Bound              bool   `json:"bound"`
+	NodeID             string `json:"nodeId,omitempty"`
+	ParentNodeID       string `json:"parentNodeId,omitempty"`
+	BaselineVersion    int    `json:"baselineVersion"`
+	BaselineArtifactID string `json:"baselineArtifactId,omitempty"`
+}
+
+type RunOutputContract struct {
+	Kind          valueobject.OutputKind `json:"kind"`
+	SchemaVersion int                    `json:"schemaVersion"`
+}
+
+type RunExecutionSnapshot struct {
+	Version         int                    `json:"version"`
+	ProjectVersion  int                    `json:"projectVersion"`
+	ProjectID       string                 `json:"projectId"`
+	ProjectRevision int64                  `json:"projectRevision"`
+	TreeID          string                 `json:"treeId"`
+	NodeID          string                 `json:"nodeId"`
+	ChainPath       []string               `json:"chainPath"`
+	PathNodes       []Node                 `json:"pathNodes"`
+	Artifacts       []RunArtifactReference `json:"artifacts"`
+	OutputBinding   RunOutputBinding       `json:"outputBinding"`
+	OutputContract  RunOutputContract      `json:"outputContract"`
+}
+
+func (s RunExecutionSnapshot) Clone() RunExecutionSnapshot {
+	clone := s
+	clone.ChainPath = append([]string(nil), s.ChainPath...)
+	clone.PathNodes = make([]Node, len(s.PathNodes))
+	for i, node := range s.PathNodes {
+		clone.PathNodes[i] = node.Clone()
+	}
+	clone.Artifacts = make([]RunArtifactReference, len(s.Artifacts))
+	for i, reference := range s.Artifacts {
+		clone.Artifacts[i] = reference
+		if reference.CandidateIndex != nil {
+			index := *reference.CandidateIndex
+			clone.Artifacts[i].CandidateIndex = &index
+		}
+	}
+	return clone
+}
+
+func (s RunExecutionSnapshot) Validate() error {
+	if s.Version != 1 || s.ProjectID == "" || s.ProjectVersion <= 0 || s.TreeID == "" || s.NodeID == "" || len(s.ChainPath) == 0 || len(s.ChainPath) != len(s.PathNodes) {
+		return fmt.Errorf("%w: incomplete execution snapshot", ErrGraphInvalid)
+	}
+	if err := valueobject.ValidateID(s.ProjectID); err != nil {
+		return err
+	}
+	if s.ChainPath[0] != s.TreeID || s.ChainPath[len(s.ChainPath)-1] != s.NodeID || s.PathNodes[0].Type != valueobject.NodeTypeTopic {
+		return fmt.Errorf("%w: invalid snapshot path", ErrGraphInvalid)
+	}
+	for i, node := range s.PathNodes {
+		if node.ID != s.ChainPath[i] {
+			return fmt.Errorf("%w: path node mismatch", ErrGraphInvalid)
+		}
+	}
+	project := Project{Version: s.ProjectVersion, ID: s.ProjectID, Revision: s.ProjectRevision, Nodes: s.PathNodes}
+	graph, err := NewGraph(&project)
+	if err != nil {
+		return err
+	}
+	if s.ProjectVersion >= 2 {
+		err = graph.Validate()
+	} else {
+		err = graph.ValidateForest()
+	}
+	if err != nil {
+		return err
+	}
+	path, err := graph.PathToRoot(s.NodeID)
+	if err != nil || len(path) != len(s.ChainPath) {
+		return fmt.Errorf("%w: invalid snapshot path", ErrGraphInvalid)
+	}
+	for i := range path {
+		if path[i] != s.ChainPath[i] {
+			return fmt.Errorf("%w: invalid snapshot path", ErrGraphInvalid)
+		}
+	}
+	target, _ := graph.Node(s.NodeID)
+	if target.Type == valueobject.NodeTypeTopic {
+		if s.OutputContract.Kind != valueobject.OutputKindTopics || s.OutputBinding.Bound {
+			return fmt.Errorf("%w: invalid topic output contract", ErrGraphInvalid)
+		}
+	} else if target.Type == valueobject.NodeTypeAgent {
+		if s.OutputContract.Kind != valueobject.OutputKindScript {
+			return fmt.Errorf("%w: invalid agent output contract", ErrGraphInvalid)
+		}
+		if s.OutputBinding.Bound {
+			if valueobject.ValidateID(s.OutputBinding.NodeID) != nil || s.OutputBinding.NodeID == target.ID || s.OutputBinding.ParentNodeID != s.NodeID || s.OutputBinding.BaselineVersion < 0 {
+				return fmt.Errorf("%w: invalid output binding", ErrGraphInvalid)
+			}
+			if (s.OutputBinding.BaselineVersion == 0) != (s.OutputBinding.BaselineArtifactID == "") {
+				return fmt.Errorf("%w: invalid output binding baseline", ErrGraphInvalid)
+			}
+		} else if s.OutputBinding.NodeID != "" || s.OutputBinding.ParentNodeID != "" || s.OutputBinding.BaselineVersion != 0 || s.OutputBinding.BaselineArtifactID != "" {
+			return fmt.Errorf("%w: unbound output contains a target", ErrGraphInvalid)
+		}
+	} else {
+		return fmt.Errorf("%w: invalid run target", ErrGraphInvalid)
+	}
+	if s.OutputContract.SchemaVersion != 1 {
+		return fmt.Errorf("%w: unsupported output schema version", ErrGraphInvalid)
+	}
+	pathNodes := make(map[string]Node, len(s.ChainPath)-1)
+	for i, node := range s.PathNodes[:len(s.PathNodes)-1] {
+		pathNodes[s.ChainPath[i]] = node
+	}
+	seenArtifacts := make(map[string]struct{}, len(s.Artifacts))
+	for _, reference := range s.Artifacts {
+		node, ok := pathNodes[reference.NodeID]
+		if !ok || valueobject.ValidateID(reference.NodeID) != nil || reference.ArtifactID == "" {
+			return fmt.Errorf("%w: invalid artifact reference", ErrGraphInvalid)
+		}
+		if _, exists := seenArtifacts[reference.NodeID]; exists {
+			return fmt.Errorf("%w: duplicate artifact reference", ErrGraphInvalid)
+		}
+		seenArtifacts[reference.NodeID] = struct{}{}
+		if s.ProjectVersion >= 2 {
+			switch node.Type {
+			case valueobject.NodeTypeCandidate:
+				if node.CandidateSource == nil || reference.ArtifactID != node.CandidateSource.ArtifactID || reference.Kind != valueobject.OutputKindTopics || reference.CandidateIndex == nil || *reference.CandidateIndex != node.CandidateSource.Index || reference.Version != 0 {
+					return fmt.Errorf("%w: candidate artifact does not match snapshot source", ErrGraphInvalid)
+				}
+			case valueobject.NodeTypeScript:
+				if len(node.ScriptVersions) == 0 {
+					return fmt.Errorf("%w: script artifact has no version", ErrGraphInvalid)
+				}
+				latest := node.ScriptVersions[len(node.ScriptVersions)-1]
+				if reference.ArtifactID != latest.ArtifactID || reference.Kind != valueobject.OutputKindScript || reference.CandidateIndex != nil || reference.Version != latest.N {
+					return fmt.Errorf("%w: script artifact does not match latest snapshot version", ErrGraphInvalid)
+				}
+			default:
+				return fmt.Errorf("%w: artifact reference is not a candidate or script node", ErrGraphInvalid)
+			}
+		} else {
+			matched := false
+			for _, round := range node.Rounds {
+				if round.ArtifactID == reference.ArtifactID && round.Kind == reference.Kind && round.N == reference.Version {
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				return fmt.Errorf("%w: artifact reference does not match a round", ErrGraphInvalid)
+			}
+			if reference.Kind == valueobject.OutputKindTopics {
+				if reference.CandidateIndex == nil || *reference.CandidateIndex < 0 {
+					return fmt.Errorf("%w: invalid candidate reference", ErrGraphInvalid)
+				}
+			} else if reference.Kind != valueobject.OutputKindScript || reference.CandidateIndex != nil {
+				return fmt.Errorf("%w: invalid artifact kind", ErrGraphInvalid)
+			}
+		}
+	}
+	if s.ProjectVersion >= 2 {
+		for id, node := range pathNodes {
+			if node.Type == valueobject.NodeTypeCandidate {
+				if _, ok := seenArtifacts[id]; !ok {
+					return fmt.Errorf("%w: candidate artifact reference missing", ErrGraphInvalid)
+				}
+			}
+			if node.Type == valueobject.NodeTypeScript && len(node.ScriptVersions) > 0 {
+				if _, ok := seenArtifacts[id]; !ok {
+					return fmt.Errorf("%w: script artifact reference missing", ErrGraphInvalid)
+				}
+			}
+		}
+	}
+	if s.OutputBinding.Bound {
+		if _, exists := pathNodes[s.OutputBinding.NodeID]; exists {
+			return fmt.Errorf("%w: output binding overlaps run path", ErrGraphInvalid)
+		}
+	}
+	return nil
+}
+
 // RunRecord is the per-run detail document.
 type RunRecord struct {
 	RunSummary
 	ContextPreview          string                       `json:"contextPreview,omitempty"`
 	ContextPreviewTruncated bool                         `json:"contextPreviewTruncated,omitempty"`
+	ExecutionSnapshot       *RunExecutionSnapshot        `json:"executionSnapshot,omitempty"`
 	Transcript              []valueobject.TranscriptItem `json:"transcript"`
 }
 

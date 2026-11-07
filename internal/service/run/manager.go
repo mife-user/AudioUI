@@ -36,7 +36,7 @@ type ProjectService interface {
 }
 
 type WorkflowService interface {
-	BeginRun(ctx context.Context, runID, nodeID string, expectedProjectID ...string) (entity.Project, []string, error)
+	BeginRun(ctx context.Context, runID, nodeID string, expectedProjectID ...string) (entity.Project, entity.RunExecutionSnapshot, error)
 	ReleaseRunLock(ctx context.Context, runID string) error
 }
 
@@ -186,11 +186,13 @@ func (m *Manager) Start(ctx context.Context, nodeID string, expectedProjectID ..
 		_ = m.gate.Release(runID)
 	}()
 
-	project, chainPath, err := m.opts.Workflow.BeginRun(ctx, runID, nodeID, expectedProjectID...)
+	project, executionSnapshot, err := m.opts.Workflow.BeginRun(ctx, runID, nodeID, expectedProjectID...)
 	if err != nil {
 		return entity.RunRecord{}, err
 	}
 	lockAcquired = true
+	executionSnapshot = executionSnapshot.Clone()
+	chainPath := executionSnapshot.ChainPath
 	if len(chainPath) < 1 {
 		return entity.RunRecord{}, errors.New("NOT_IN_CHAIN: empty run path")
 	}
@@ -207,7 +209,7 @@ func (m *Manager) Start(ctx context.Context, nodeID string, expectedProjectID ..
 	if budget == 0 {
 		budget = valueobject.DefaultContextTokenBudget
 	}
-	runContext, err := m.opts.Contexts.BuildRunContext(ctx, project, nodeID, workspace, budget)
+	runContext, err := m.opts.Contexts.BuildRunContext(ctx, project, nodeID, executionSnapshot, workspace, budget)
 	if err != nil {
 		return entity.RunRecord{}, err
 	}
@@ -224,7 +226,7 @@ func (m *Manager) Start(ctx context.Context, nodeID string, expectedProjectID ..
 		RunID: runID, ProjectID: project.ID, TreeID: treeID, NodeID: nodeID,
 		ChainID: "c_" + nodeID, ChainPath: append([]string(nil), chainPath...),
 		ContextHash: runContext.Hashes.ContextHash, AncestorHash: runContext.Hashes.AncestorHash,
-		ParamsHash: runContext.Hashes.ParamsHash,
+		ParamsHash: runContext.Hashes.ParamsHash, ExecutionSnapshot: executionSnapshot.Clone(),
 	}
 	record := entity.RunRecord{
 		RunSummary: entity.RunSummary{
@@ -235,14 +237,15 @@ func (m *Manager) Start(ctx context.Context, nodeID string, expectedProjectID ..
 			TokenBudget: runContext.Estimate.TokenBudget, StartedAt: now.Format(time.RFC3339Nano),
 		},
 		ContextPreview: preview, ContextPreviewTruncated: truncated,
-		Transcript: []valueobject.TranscriptItem{},
+		ExecutionSnapshot: &executionSnapshot,
+		Transcript:        []valueobject.TranscriptItem{},
 	}
 	if err := store.Save(ctx, record); err != nil {
 		return entity.RunRecord{}, err
 	}
 	runCtx, cancel := context.WithCancel(context.Background())
 	state := &runState{
-		scope: scope, store: store, record: record, runContext: runCtx, cancel: cancel,
+		scope: scope.Clone(), store: store, record: record, runContext: runCtx, cancel: cancel,
 		permissionsByID: make(map[string]valueobject.PermissionRequest),
 		questionsByID:   make(map[string]valueobject.QuestionRequest),
 	}
@@ -291,7 +294,7 @@ func (m *Manager) Start(ctx context.Context, nodeID string, expectedProjectID ..
 	state.configReady = true
 	state.mu.Unlock()
 	spec := RunSpec{
-		Scope: scope, Workspace: workspace, Context: runContext, MCPConfigPath: mcpConfigPath,
+		Scope: scope.Clone(), Workspace: workspace, Context: runContext, MCPConfigPath: mcpConfigPath,
 		SystemPrompt: runSystemPrompt,
 		BuiltinTools: append([]string(nil), runBuiltinTools...),
 		AllowedTools: append([]string(nil), runAllowedTools...),
@@ -300,7 +303,7 @@ func (m *Manager) Start(ctx context.Context, nodeID string, expectedProjectID ..
 	state.spec = spec
 	state.mu.Unlock()
 
-	permissions, err := m.opts.Permissions.NewRunPermissions(scope, workspace.Resolver(), func(event valueobject.AgentEvent) {
+	permissions, err := m.opts.Permissions.NewRunPermissions(scope.Clone(), workspace.Resolver(), func(event valueobject.AgentEvent) {
 		m.onAgentEvent(state, event)
 	})
 	if err != nil {
@@ -317,7 +320,7 @@ func (m *Manager) Start(ctx context.Context, nodeID string, expectedProjectID ..
 		m.resolveRequest(state, kind, id)
 	})
 
-	tool, err := m.opts.ToolServers.NewForRun(scope, workspace.CWD(), runID, permissions, func(message string) {
+	tool, err := m.opts.ToolServers.NewForRun(scope.Clone(), workspace.CWD(), runID, permissions, func(message string) {
 		m.onReply(state, message)
 	}, workspace, m)
 	if err != nil {
@@ -1097,6 +1100,10 @@ func (s *runState) runSnapshot() entity.RunSnapshot {
 func cloneRunRecord(record entity.RunRecord) entity.RunRecord {
 	clone := record
 	clone.ChainPath = append([]string(nil), record.ChainPath...)
+	if record.ExecutionSnapshot != nil {
+		snapshot := record.ExecutionSnapshot.Clone()
+		clone.ExecutionSnapshot = &snapshot
+	}
 	clone.Transcript = append([]valueobject.TranscriptItem(nil), record.Transcript...)
 	return clone
 }
@@ -1206,13 +1213,12 @@ func errorCode(err error) string {
 // ErrorCode returns the stable code used for run lifecycle failures.
 func ErrorCode(err error) string { return errorCode(err) }
 
-const runSystemPrompt = "You are AudioUI's one-shot node execution agent. Work only on the active node task and its provided workspace path. Follow the output contract in the initial context. Use ask_user when a decision is required, and use reply for chat or structured output. Never attempt to change the graph or apply an artifact."
+const runSystemPrompt = "You are AudioUI's one-shot node execution agent. Work only on the active node task and its provided workspace path. Follow the output contract in the initial context. Use ask_user when a decision is required, and use reply for chat messages; submit structured output only when the output contract explicitly permits it. Never attempt to change the graph or apply an artifact."
 
 var runBuiltinTools = []string{"Read", "Glob", "Grep", "Write", "Edit", "Bash"}
 
 var runAllowedTools = []string{
 	"mcp__audioui__get_chain", "mcp__audioui__get_graph", "mcp__audioui__get_node",
 	"mcp__audioui__list_node_types", "mcp__audioui__validate", "mcp__audioui__read_artifact",
-	"mcp__audioui__reply", "mcp__audioui__read_file", "mcp__audioui__list_dir",
-	"mcp__audioui__grep", "mcp__audioui__stat", "mcp__audioui__ask_user",
+	"mcp__audioui__reply", "mcp__audioui__ask_user",
 }

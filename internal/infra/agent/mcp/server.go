@@ -51,8 +51,7 @@ type Server struct {
 
 func New(options Options) (*Server, error) {
 	if options.RunScope != nil {
-		scope := *options.RunScope
-		scope.ChainPath = append([]string(nil), options.RunScope.ChainPath...)
+		scope := options.RunScope.Clone()
 		options.RunScope = &scope
 		if err := validateRunToolOptions(options); err != nil {
 			return nil, err
@@ -237,13 +236,13 @@ func (s *Server) registerTools() {
 	if s.options.RunScope == nil {
 		sdkmcp.AddTool(s.sdk, &sdkmcp.Tool{Name: "get_chain", Description: "Return the active AudioUI chain and workspace."}, s.getChain)
 		sdkmcp.AddTool(s.sdk, &sdkmcp.Tool{Name: "reply", Description: "Send a chat message to the AudioUI session. Only kind=message is supported in M1."}, s.reply)
+		sdkmcp.AddTool(s.sdk, &sdkmcp.Tool{Name: "read_file", Description: "Read a UTF-8 text file inside the workspace."}, s.readFile)
+		sdkmcp.AddTool(s.sdk, &sdkmcp.Tool{Name: "list_dir", Description: "List a directory inside the workspace."}, s.listDir)
+		sdkmcp.AddTool(s.sdk, &sdkmcp.Tool{Name: "grep", Description: "Search text files inside the workspace with a regular expression."}, s.grep)
+		sdkmcp.AddTool(s.sdk, &sdkmcp.Tool{Name: "stat", Description: "Return metadata for a path inside the workspace."}, s.stat)
 	} else {
 		s.registerRunTools()
 	}
-	sdkmcp.AddTool(s.sdk, &sdkmcp.Tool{Name: "read_file", Description: "Read a UTF-8 text file inside the workspace."}, s.readFile)
-	sdkmcp.AddTool(s.sdk, &sdkmcp.Tool{Name: "list_dir", Description: "List a directory inside the workspace."}, s.listDir)
-	sdkmcp.AddTool(s.sdk, &sdkmcp.Tool{Name: "grep", Description: "Search text files inside the workspace with a regular expression."}, s.grep)
-	sdkmcp.AddTool(s.sdk, &sdkmcp.Tool{Name: "stat", Description: "Return metadata for a path inside the workspace."}, s.stat)
 	sdkmcp.AddTool(s.sdk, &sdkmcp.Tool{Name: "ask_user", Description: "Ask the user a question with optional choices. Blocks until answered or timed out."}, s.askUser)
 }
 

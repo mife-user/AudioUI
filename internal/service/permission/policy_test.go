@@ -75,7 +75,19 @@ func TestPolicyEnforcesRunScopedBuiltinFileTools(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(tree, "steps", "n_current"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	guard, err := paths.NewRunGuard(tree, "n_current", []string{"n_root", "n_parent", "n_current"})
+	runtimeDir := filepath.Join(root, "runtime")
+	if err := os.MkdirAll(runtimeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runtimeFile := filepath.Join(runtimeDir, "font.txt")
+	if err := os.WriteFile(runtimeFile, []byte("font"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	guard, err := paths.NewRunGuard(tree, "n_current", []string{"n_root", "n_parent", "n_current"}, runtimeDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtimeRelative, err := filepath.Rel(tree, runtimeFile)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,9 +101,14 @@ func TestPolicyEnforcesRunScopedBuiltinFileTools(t *testing.T) {
 		{name: "read current ancestor", tool: "Read", args: map[string]any{"file_path": "steps/n_parent/notes.md"}, want: port.PolicyAllow},
 		{name: "read current step", tool: "Read", args: map[string]any{"file_path": "steps/n_current/notes.md"}, want: port.PolicyAllow},
 		{name: "read sibling", tool: "Read", args: map[string]any{"file_path": "steps/n_sibling/secret.md"}, want: port.PolicyDeny},
+		{name: "read shared runtime", tool: "Read", args: map[string]any{"file_path": runtimeFile}, want: port.PolicyAllow},
 		{name: "write current step", tool: "Write", args: map[string]any{"file_path": "steps/n_current/out.md"}, want: port.PolicyConfirm},
 		{name: "write ancestor", tool: "Edit", args: map[string]any{"file_path": "steps/n_parent/out.md"}, want: port.PolicyDeny},
 		{name: "write sibling", tool: "Write", args: map[string]any{"file_path": "steps/n_sibling/out.md"}, want: port.PolicyDeny},
+		{name: "write shared runtime", tool: "Write", args: map[string]any{"file_path": runtimeFile}, want: port.PolicyDeny},
+		{name: "default glob path", tool: "Glob", args: map[string]any{"pattern": "**/*.md"}, want: port.PolicyDeny},
+		{name: "explicit glob path", tool: "Glob", args: map[string]any{"pattern": "**/*.md", "path": "steps/n_parent"}, want: port.PolicyAllow},
+		{name: "runtime relative path", tool: "Grep", args: map[string]any{"pattern": "font", "path": runtimeRelative}, want: port.PolicyAllow},
 		{name: "logical overlay MCP read", tool: "mcp__audioui__read_file", args: map[string]any{"path": "runtime-fonts/font.txt"}, want: port.PolicyAllow},
 		{name: "unknown MCP read tool", tool: "mcp__audioui__read", args: map[string]any{"path": "secret.md"}, want: port.PolicyConfirm},
 	}

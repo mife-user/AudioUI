@@ -149,6 +149,41 @@ export interface Round {
     "runId": string;
 }
 
+export interface RunArtifactReference {
+    "nodeId": string;
+    "artifactId": string;
+    "kind": valueobject$0.OutputKind;
+    "candidateIndex"?: number | null;
+    "version"?: number;
+}
+
+export interface RunExecutionSnapshot {
+    "version": number;
+    "projectVersion": number;
+    "projectId": string;
+    "projectRevision": number;
+    "treeId": string;
+    "nodeId": string;
+    "chainPath": string[] | null;
+    "pathNodes": Node[] | null;
+    "artifacts": RunArtifactReference[] | null;
+    "outputBinding": RunOutputBinding;
+    "outputContract": RunOutputContract;
+}
+
+export interface RunOutputBinding {
+    "bound": boolean;
+    "nodeId"?: string;
+    "parentNodeId"?: string;
+    "baselineVersion": number;
+    "baselineArtifactId"?: string;
+}
+
+export interface RunOutputContract {
+    "kind": valueobject$0.OutputKind;
+    "schemaVersion": number;
+}
+
 /**
  * RunRecord is the per-run detail document.
  */
@@ -173,6 +208,7 @@ export interface RunRecord {
     "finishedAt"?: string;
     "contextPreview"?: string;
     "contextPreviewTruncated"?: boolean;
+    "executionSnapshot"?: RunExecutionSnapshot | null;
     "transcript": valueobject$0.TranscriptItem[] | null;
 }
 

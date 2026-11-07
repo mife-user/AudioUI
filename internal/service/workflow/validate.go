@@ -77,10 +77,14 @@ func markSubtreeStale(project *entity.Project, ids []string) {
 }
 
 func validateRunEntry(node *entity.Node) error {
-	if node.Type != valueobject.NodeTypeTopic {
+	switch node.Type {
+	case valueobject.NodeTypeTopic, valueobject.NodeTypeAgent:
+		return nil
+	case valueobject.NodeTypePrompt:
+		return fmt.Errorf("%w: prompt nodes require a connected Agent", ErrRunEntryUnavailable)
+	default:
 		return fmt.Errorf("%w: %s", ErrRunEntryUnavailable, node.Type)
 	}
-	return nil
 }
 
 func normalizeTitle(title string, nodeType valueobject.NodeType) (string, error) {

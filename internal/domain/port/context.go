@@ -13,7 +13,7 @@ type ContextHasher interface {
 
 // RunContextBuilder constructs the one-shot prompt for an executable node.
 type RunContextBuilder interface {
-	BuildRunContext(ctx context.Context, project entity.Project, nodeID string, workspace RunWorkspace, budget int) (RunContext, error)
+	BuildRunContext(ctx context.Context, project entity.Project, nodeID string, snapshot entity.RunExecutionSnapshot, workspace RunWorkspace, budget int) (RunContext, error)
 }
 
 type RunContext struct {

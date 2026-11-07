@@ -38,13 +38,14 @@ type viewLayer struct {
 // View is the logical read-only overlay for one run path. Layers are ordered
 // from the current node through its ancestors, with root runtime last.
 type View struct {
-	projectID     string
-	treeDir       string
-	writeDir      string
-	chainPath     []string
-	layers        []viewLayer
-	runGuard      *paths.RunGuard
-	allowAbsolute bool
+	projectID       string
+	treeDir         string
+	writeDir        string
+	chainPath       []string
+	layers          []viewLayer
+	runGuard        *paths.RunGuard
+	runtimeReadPath string
+	allowAbsolute   bool
 }
 
 // NewRunView derives a topic-tree workspace view. chainPath must be the real
@@ -80,7 +81,12 @@ func NewRunView(layout valueobject.Layout, projectID, treeID, nodeID string, cha
 	if err := secureDirectoryPath(layout.Root, treeDir, true); err != nil {
 		return nil, err
 	}
-	runGuard, err := paths.NewRunGuard(treeDir, nodeID, chainPath)
+	runtimeDir := filepath.Join(layout.Root, "runtime")
+	runtimeReadPath, err := filepath.Rel(treeDir, runtimeDir)
+	if err != nil {
+		return nil, err
+	}
+	runGuard, err := paths.NewRunGuard(treeDir, nodeID, chainPath, runtimeDir)
 	if err != nil {
 		return nil, err
 	}
@@ -103,7 +109,7 @@ func NewRunView(layout valueobject.Layout, projectID, treeID, nodeID string, cha
 		writeDir:  runGuard.WriteDir(),
 		chainPath: runGuard.ChainPath(),
 		layers:    make([]viewLayer, 0, len(chainPath)+1),
-		runGuard:  runGuard,
+		runGuard:  runGuard, runtimeReadPath: filepath.ToSlash(runtimeReadPath),
 	}
 	for i := len(chainPath) - 1; i >= 0; i-- {
 		stepDir, stepErr := projectPaths.StepDir(treeID, chainPath[i])
@@ -116,7 +122,6 @@ func NewRunView(layout valueobject.Layout, projectID, treeID, nodeID string, cha
 		}
 		view.layers = append(view.layers, layer)
 	}
-	runtimeDir := filepath.Join(layout.Root, "runtime")
 	if layout.RuntimeDir != "" {
 		configuredRuntime, absErr := filepath.Abs(layout.RuntimeDir)
 		if absErr != nil {
@@ -196,10 +201,11 @@ func newViewLayer(root string) (viewLayer, error) {
 	return viewLayer{root: absolute, guard: guard}, nil
 }
 
-func (v *View) TreeDir() string     { return v.treeDir }
-func (v *View) WriteDir() string    { return v.writeDir }
-func (v *View) ChainPath() []string { return append([]string(nil), v.chainPath...) }
-func (v *View) CWD() string         { return v.treeDir }
+func (v *View) TreeDir() string         { return v.treeDir }
+func (v *View) WriteDir() string        { return v.writeDir }
+func (v *View) ChainPath() []string     { return append([]string(nil), v.chainPath...) }
+func (v *View) CWD() string             { return v.treeDir }
+func (v *View) RuntimeReadPath() string { return v.runtimeReadPath }
 func (v *View) Resolver() port.ScopedPathResolver {
 	if v.runGuard == nil {
 		return nil

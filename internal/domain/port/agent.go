@@ -18,25 +18,34 @@ var (
 )
 
 type RunScope struct {
-	RunID        string
-	ProjectID    string
-	TreeID       string
-	NodeID       string
-	ChainID      string
-	ChainPath    []string
-	ContextHash  string
-	AncestorHash string
-	ParamsHash   string
+	RunID             string
+	ProjectID         string
+	TreeID            string
+	NodeID            string
+	ChainID           string
+	ChainPath         []string
+	ContextHash       string
+	AncestorHash      string
+	ParamsHash        string
+	ExecutionSnapshot entity.RunExecutionSnapshot
+}
+
+func (s RunScope) Clone() RunScope {
+	clone := s
+	clone.ChainPath = append([]string(nil), s.ChainPath...)
+	clone.ExecutionSnapshot = s.ExecutionSnapshot.Clone()
+	return clone
 }
 
 type RunGraphNode struct {
-	ID              string               `json:"id"`
-	Type            valueobject.NodeType `json:"type"`
-	Title           string               `json:"title"`
-	Parent          string               `json:"parent,omitempty"`
-	ParentCandidate *int                 `json:"parentCandidate,omitempty"`
-	Locked          bool                 `json:"locked"`
-	Stale           bool                 `json:"stale"`
+	ID              string                  `json:"id"`
+	Type            valueobject.NodeType    `json:"type"`
+	Title           string                  `json:"title"`
+	Parent          string                  `json:"parent,omitempty"`
+	ParentCandidate *int                    `json:"parentCandidate,omitempty"`
+	CandidateSource *entity.CandidateSource `json:"candidateSource,omitempty"`
+	Locked          bool                    `json:"locked"`
+	Stale           bool                    `json:"stale"`
 }
 
 type RunRound struct {
@@ -49,12 +58,14 @@ type RunRound struct {
 
 type RunNode struct {
 	RunGraphNode
-	Params entity.NodeParams `json:"params"`
-	Rounds []RunRound        `json:"rounds"`
+	Params              entity.NodeParams     `json:"params"`
+	Rounds              []RunRound            `json:"rounds"`
+	LatestScriptVersion *entity.ScriptVersion `json:"latestScriptVersion,omitempty"`
 }
 
 type RunGraph struct {
-	Nodes []RunGraphNode `json:"nodes"`
+	Nodes         []RunGraphNode           `json:"nodes"`
+	OutputBinding *entity.RunOutputBinding `json:"outputBinding,omitempty"`
 }
 
 type RunArtifact struct {

@@ -3,11 +3,13 @@
 > 目标：让 Agent 以结构化、可校验、可替换的方式服务工作台。
 > v1 适配器：Claude Code CLI（stream-json + control protocol）+ 本机 MCP HTTP。
 >
-> **M2-00～10 实际范围**：运行级一次性会话、App 构建上下文、只读图工具、结构化 `reply`、待应用产物；多链单在途。该范围是旧节点模型的历史基线。M2-11～13 的选定本地脚本目标见下文，尚待设计评审。
+> **M2-00～10 实际范围**：运行级一次性会话、App 构建上下文、只读图工具、结构化 `reply`、待应用产物；多链单在途。该范围是旧节点模型的历史基线。M2-11～13 的选定本地脚本目标见下文。
 
-## M2-11～13 本地脚本目标协议（草案，待评审）
+## M2-11～13 本地脚本目标协议（设计已验收；分阶段实现）
 
-> 本节是用户选定的 RM-018 本地脚本子范围设计稿，尚未接入当前 API。M2-00～10 实际协议保留在下方章节；云端仍属 RM-019，视频仍属 RM-020。
+> 本节是用户验收的 RM-018 本地脚本子范围设计。M2-11B 与 M2-11C（发送快照、上下文和运行授权）均已验收；M2-11D 结构化结果事务及 M2-12～13 未实现。M2-00～10 实际协议保留在下方章节；云端仍属 RM-019，视频仍属 RM-020。
+
+> **M2-11C 实现状态（已于 2026-11-07 验收）**：`BeginRun` 可运行 Agent 并在同一工作流锁内冻结 Agent 路径、候选来源、Prompt 任务/约束、输出绑定基准和输出契约；Prompt 不能独立运行。路径祖先与指定 Script 输出受运行锁保护，路径外兄弟可编辑。上下文读取单个 Candidate、完整当前 Prompt 任务及冻结 Script 版本，不要求中间 Prompt 有 applied round；MCP 图/产物查询使用快照授权，不回退实时图。run-scoped MCP 不注册通用文件工具；本地 Agent 内置文件工具读取祖先与 exe 同级只读 `runtime/`、写入当前 `steps/`。Agent 的 script 自动创建/首版提交/已有版本确认追加仍属 M2-11D，未实现。
 
 ### 发送快照
 
@@ -54,6 +56,7 @@ MCP `reply` 的 `node_id` 指当前 topic 或 Agent 运行目标；Agent 的脚�
 |---|---|
 | `NODE_CONNECTION_INVALID` | 连接组合不在 M2-11 类型矩阵 |
 | `OUTPUT_BINDING_CONFLICT` | Agent 已绑定另一个直接输出，或 reply 不匹配发送时绑定 |
+| `OUTPUT_COMMIT_UNAVAILABLE` | 当前 Agent 运行尚未开放 Script 结构化结果提交；待输出事务接入后再启用 |
 | `OUTPUT_VERSION_CONFLICT` | 确认时脚本目标的基准版本已变化 |
 | `RUN_RESULT_CONFLICT` | 同一运行收到不同身份/内容的结构化结果 |
 | `UNSUPPORTED_VERSION` | 工程格式版本不可用 |
@@ -155,18 +158,18 @@ type Capabilities struct {
 | 工具 | 读写 | 说明 |
 |---|---|---|
 | `get_chain` | 读 | 返回 runId、treeId、chainId、chainPath、目标 nodeId 与 workspace |
-| `get_graph` | 读 | 仅返回当前运行路径节点摘要（id/type/title/parent/parentCandidate/locked/stale），不返回路径外节点或产物正文 |
-| `get_node(nodeId)` | 读 | 只读当前运行路径节点的参数与轮次元数据（n/kind/artifactId/pendingId/runId），不含产物正文 |
-| `list_node_types` | 读 | `topic` / `prompt` 的类型、参数名与产出类型 |
+| `get_graph` | 读 | 返回发送快照中的路径节点摘要及冻结输出绑定；不返回路径外节点或产物正文 |
+| `get_node(nodeId)` | 读 | 只读快照路径节点参数；旧模型可返回轮次元数据，v2 Script 节点返回快照中的最新版本信息；不含产物正文 |
+| `list_node_types` | 读 | `topic` / `candidate` / `prompt` / `agent` / `script` 的类型、参数名与输出类型 |
 | `validate(kind, payload)` | 读 | 复用 `topics`/`script` 唯一 Schema 校验器，不落盘；`scene_dsl` 返回 `UNSUPPORTED_UNTIL_M3` |
 | `read_artifact(artifactId, offset, limit)` | 读 | 当前运行路径祖先产物分块读取，单次 ≤16 KiB；`topics` 只返回该路径所选候选对象 |
-| `reply(node_id, kind, payload, request_id?)` | 写消息 | `message` 的 payload 为 `{"text":"..."}` 并进入对话；`topics`/`script` 委托 workflow 创建待应用产物 |
-| `read_file` / `list_dir` / `grep` / `stat` | 读 | 当前运行路径的逻辑叠加视图：当前节点 → 路径祖先 → exe 同级只读 `runtime/`；大小/条数限制；不暴露物理 `steps/` 路径 |
+| `reply(node_id, kind, payload, request_id?)` | 写消息 | `message` 进入对话；M2 旧模型的 topic `topics` 仍按待应用产物路径处理。v2 topic Candidate 自动生成及 Agent `script` 自动建节点/首版提交/版本确认追加留给 M2-11D，当前未实现 |
+| `read_file` / `list_dir` / `grep` / `stat` | M1 legacy MCP | 只在非 run-scoped 的 M1 直接工作区注册；M2 运行不通过 MCP 代理通用文件操作 |
 | `ask_user` | 交互 | 触发 QuestionCard，等待用户选择/输入 |
 
-`get_graph` 和 `get_node` 必须先校验 runId/projectId/treeId/nodeId/chainPath 与当前工程图一致；两者只暴露 `chainPath` 中的节点，路径外（即使同树）统一返回 `CHAIN_SCOPE_DENIED`。路径快照与当前图不一致时 fail closed。`reply` 先校验运行活动状态：运行已结束或 node_id 是路径内非目标节点时返回 `TURN_NOT_ACTIVE`；路径外 node_id 返回 `CHAIN_SCOPE_DENIED`。运行生命周期端口须持有活动运行租约直到写操作结束，避免终止与 pending 提交竞态。
+`get_graph` 和 `get_node` 以运行保存的 `ExecutionSnapshot` 为唯一授权数据，不查询 `Project.Current` 替代发送时图；两者只暴露快照路径节点，路径外（即使同树）统一返回 `CHAIN_SCOPE_DENIED`。`get_graph` 可返回快照中绑定的 Script 输出标识与基准版本。`reply` 先校验运行活动状态：运行已结束或 node_id 是路径内非目标节点时返回 `TURN_NOT_ACTIVE`；路径外 node_id 返回 `CHAIN_SCOPE_DENIED`。M2-11C 冻结输出契约，但 Agent `script` 结构化结果事务尚未实现（M2-11D）。运行生命周期端口须持有活动运行租约直到查询或写操作结束，避免终止与调用竞态。
 
-`read_artifact` 仅授权当前运行路径祖先节点任一轮次引用的 artifact；目标节点自身、兄弟、其他树或未引用的 ID 均返回 `CHAIN_SCOPE_DENIED`。授权后以轮次 `kind` 为准（不信任 CAS 首写 `meta.kind`）；同一 artifact ID 若在多个祖先引用但过滤视图不一致，拒绝读取。对 `topics` 轮次，先按路径下一个节点的 0 基 `parentCandidate` 取出单个候选对象，紧凑 JSON 序列化后再分页；不返回 `topics` 外层数组，也不得回退完整产物。`artifactId` 仍标识原始完整产物，其哈希不等于过滤后字节的哈希。缺失/越界候选返回 `CANDIDATE_INVALID`。
+`read_artifact` 仅授权发送快照中明确引用的路径祖先 artifact；目标节点自身、兄弟、其他树或未引用的 ID 均返回 `CHAIN_SCOPE_DENIED`。candidate 产物只返回 `CandidateSource` 指定的单个 topics 对象；Script 仅授权快照中的不可变版本。授权 kind 以快照引用为准，不信任 CAS 首写 `meta.kind`；同一 artifact ID 若在多个祖先引用但过滤视图不一致，拒绝读取。缺失或越界候选返回 `CANDIDATE_INVALID`，缺失脚本版本明确失败，不退回实时图。
 
 `offset`/`limit` 是过滤后 UTF-8 字节视图的零基字节偏移与最大字节数；`limit` 必须大于 0，超过 16 KiB 时按 16 KiB 处理。offset 必须在数据范围内且位于 UTF-8 字符边界；返回 `nextOffset` 为实际下一字节偏移，不拆分字符；limit 小到无法容纳下一个字符时返回 `ARTIFACT_LIMIT_INVALID`。`offset == totalBytes` 返回空块和 `eof=true`。`reply`/`validate` 的 `payload` 使用 MCP 原始 arguments 读取；Schema 无效但 JSON 合法的结构化 payload 进入 M2-05 校验并按原始 payload 留在 invalid pending，传输层 JSON 无法解析时由 MCP 协议拒绝。
 
@@ -185,25 +188,27 @@ type Capabilities struct {
 
 ### 5.1 上下文包
 
+> M2-00～10 旧模型按 applied round 构建上下文；M2-11C 的 Agent 运行额外使用 `ExecutionSnapshot`：Candidate 读取来源 artifact 的单个索引、当前 Prompt 任务/约束完整保留、祖先 Script 读取冻结的不可变版本。v2 路径不要求每个 Prompt 都有旧式 applied round；本地文件工具边界见第 7 节。
+
 App 在启动运行前构建并作为首条消息注入：
 
 | 段 | 内容 |
 |---|---|
 | 运行目标 | treeId（topic 根）、chainPath、nodeId、节点类型、产出类型（不放 runId，保证同输入同哈希） |
-| 任务 | 目标节点当前参数；不含目标节点自身历史轮次 |
-| 路径 | topic 根 → 父节点：类型、标题、参数、最新已应用轮次产物 |
-| 候选 | 路径从 topic 的哪个候选端口进入，就只带该候选；不带其他候选 |
-| 工作区 | topic 树 cwd、`steps/` 叠加顺序、当前路径祖先文件清单（路径 + 大小）；MCP 只读视图最低优先级为 exe 同级 `runtime/` |
-| 契约 | `reply` 用法、Schema、禁止改图、大小限制、歧义用 `ask_user` |
+| 任务 | Topic 运行使用目标节点参数；Agent 运行使用路径内当前 Prompt 的完整任务与约束，不含目标自身历史 |
+| 路径 | 旧模型为最新 applied round；v2 路径按快照呈现节点身份、单个 Candidate 对象与祖先 Script 不可变版本 |
+| 候选 | v2 Candidate 按 `CandidateSource.artifactId/index` 读取；旧模型 `parentCandidate` 为 0 基序号。只带所选候选，不带其他候选 |
+| 工作区 | topic 树 cwd、`steps/` 叠加顺序、路径清单（路径 + 大小）；M2 内置工具读祖先与 exe 同级只读 `runtime/`，写当前节点 `steps/` |
+| 契约 | `reply` 用法、Schema、输出绑定/基准版本、禁止改图、大小限制、歧义用 `ask_user` |
 | 元数据 | `contextVersion=1`、`contextHash`、`estimatedTokens` |
 
-- `parentCandidate` 为 0 基候选序号（存储与 MCP 参数一致）；上下文中展示给 Agent 时显示为 1 基。
+- v2 路径中的候选索引来自 `CandidateSource.index`，存储为 0 基；上下文展示候选序号时为 1 基。旧 `parentCandidate` 只适用于旧图回归。
 - 不进上下文：目标自身历史、兄弟分支、子节点历史、其他 topic 树、其他候选、未应用产物。
 - 工作区只注入当前运行路径叠加视图的逻辑文件路径与大小，包含可见的共享 runtime 项；不自动注入任何工作区文件正文，二进制资源仅通过路径引用。清单最多遍历 5,000 个文件/目录、深度 64，超限标记 `truncated`。
-- 预算 1,000,000 tokens（`contextTokenBudget`）；超预算从最远祖先逐个「全文 → 原文摘录 → 引用」降级，直接父最后；目标参数始终完整保留。仍超返回 `CONTEXT_TOO_LARGE`，附最终估算值与预算。
+- 预算 1,000,000 tokens（`contextTokenBudget`）；超预算只降级祖先产物，从全文到摘录再到引用；当前 Prompt 任务与约束始终完整保留。仍超返回 `CONTEXT_TOO_LARGE`，附最终估算值与预算。
 - 摘录含参数、最多 2,000 估算 tokens 的 UTF-8 安全原文前缀与产物哈希，不调用模型生成摘要；引用保留路径/轮次元数据、参数及产物哈希，可通过 `read_artifact` 分块读取。
 - `estimatorVersion=1`：ASCII 字母、数字、下划线及连续水平空白分别按每 3 字节向上取整，ASCII 标点/换行各计 1，非 ASCII 按 UTF-8 字节数除以 2 向上取整；估算覆盖完整首条消息，包括元数据，不能保证等于实际 CLI 用量。实际 input tokens 和 `overBudget` 在 M2-07 运行完成后记录。
-- `contextHash` 为去掉元数据后的 `context` 主体经 Go `encoding/json` 紧凑序列化字节的 SHA-256；`ancestorHash` 为图路径祖先、已应用产物标识及所选候选的指纹，不含工作区；`paramsHash` 为目标完整参数的指纹（详见 ADR-026）。工作区清单路径/大小变化会改变 `contextHash`，但不会触发祖先哈希冲突；同大小内容变化与清单截断之外的变化不可由清单识别。
+- `contextHash` 为去掉元数据后的 `context` 主体经 Go `encoding/json` 紧凑序列化字节的 SHA-256；旧模型 `ancestorHash` 为 applied round 与所选候选指纹，v2 为冻结路径身份和产物版本指纹；Agent `paramsHash` 覆盖当前 Prompt 任务、Agent 参数、输出绑定与契约。工作区清单路径/大小变化会改变 `contextHash`，但不会触发祖先哈希冲突。
 - 上下文不含时间戳/runId；相同图、参数与工作区清单得到相同哈希。
 
 ### 5.2 reply 输入
@@ -264,9 +269,9 @@ Schema（M2 最小）：
 
 | 档位 | 工具/操作 |
 |---|---|
-| 自动允许 | `get_chain`、`get_graph`、`get_node`、`list_node_types`、`validate`、`read_artifact`、`reply(message/structured)`、`ask_user`、经服务端叠加视图校验的 `read_file`、`list_dir`、`grep`、`stat`、当前运行路径内只读 Bash allowlist |
+| 自动允许 | run-scoped 应用工具 `get_chain/get_graph/get_node/list_node_types/validate/read_artifact/reply(message)/ask_user`；受 RunGuard 限制的内置只读 `Read`/`Glob`/`Grep`；当前路径内只读 Bash allowlist。M1 legacy MCP 文件工具只在直接工作区模式使用 |
 | 交互确认 | 内置 `Write`、`Edit`、`NotebookEdit`（目标必须位于 `steps/<当前运行节点>/`）、Bash 写/解释器/未知命令 |
-| 硬拒绝 | 越界路径、topic 树内的物理 `runtime/` 与 `artifacts/`、其他 topic 树、当前运行路径外的内置文件读写、明显破坏性系统命令；exe 同级 `runtime/` 仅由 MCP 叠加视图只读暴露 |
+| 硬拒绝 | 越界路径、topic 树内物理 `runtime/` 与 `artifacts/`、其他 topic 树、当前运行路径外的内置文件读写、明显破坏性系统命令；exe 同级 `runtime/` 仅允许内置工具读取 |
 
 规则：
 
@@ -275,8 +280,8 @@ Schema（M2 最小）：
 - 超时 120 秒视为拒绝。
 - 支持允许一次 / 本次运行允许 / 拒绝；“本次运行允许”只对非解释器、非高风险操作开放。
 - 所有决策写 `<exe>/logs/audit.log`，含 runId/treeId/nodeId/chainId；允许决策的审计写失败 → fail closed。
-- 内置 Read/Glob/Grep 物理路径只允许当前运行路径的 `steps/<nodeId>/`；内置 Write/Edit/NotebookEdit 只允许写当前运行节点 `steps/<nodeId>/`，并需交互确认。其他路径在 `PreToolUse` 阶段硬拒绝。
-- MCP 文件读取使用 topic 树内逻辑叠加视图，按当前节点 → 路径祖先 → exe 同级 `runtime/` 查找；返回的路径保持逻辑相对路径。内置文件工具不读取 exe 外部 runtime。
+- 内置 Read/Glob/Grep 的物理路径限于运行路径祖先及 exe 同级 `runtime/`（只读）；内置 Write/Edit/NotebookEdit 只允许写当前运行节点 `steps/<nodeId>/`，并需交互确认。其他路径在 `PreToolUse` 阶段硬拒绝。
+- run-scoped MCP 不代理通用文件操作；M1 legacy MCP 文件工具仍使用独立直接工作区视图，不作为 M2 权限路径。M2 内置 `runtime/` 读取由 RunGuard 约束，不提供 runtime 写入。
 - topic 树 cwd 中名为 `runtime/`、`artifacts/`、`steps/` 的物理目录为保留路径；不得将根 runtime 复制进工程工作区。
 - Bash 三档：只读 allowlist 自动允许；写/解释器/未知确认；越界路径/受保护目录/破坏性命令硬拒绝。Bash 仍是协作式门禁；同树兄弟读取与复杂写目标不能可靠解析，残余风险登记 RM-017。
 - M2 不是 OS 沙箱；这是协作式策略门禁。

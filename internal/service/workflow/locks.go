@@ -68,7 +68,7 @@ func (s *Service) AcquireRunLock(ctx context.Context, runID, treeID, nodeID stri
 	if existing, ok := s.locks[runID]; ok && existing.ProjectID == project.ID && existing.TreeID == treeID && existing.NodeID == nodeID && slices.Equal(existing.Path, chainPath) {
 		return nil
 	}
-	s.recordRunLock(runID, project.ID, project.Revision, treeID, nodeID, chainPath)
+	s.recordRunLock(runID, project.ID, project.Revision, treeID, nodeID, chainPath, "")
 	s.changedWithReason(project.ID, project.Revision, ChangeReasonRunLock)
 	return nil
 }
@@ -76,48 +76,53 @@ func (s *Service) AcquireRunLock(ctx context.Context, runID, treeID, nodeID stri
 // BeginRun takes an executable project snapshot and records its path lock
 // while holding the same workflow mutex used by graph commands. The caller
 // builds context from the returned immutable snapshot.
-func (s *Service) BeginRun(ctx context.Context, runID, nodeID string, expectedProjectID ...string) (entity.Project, []string, error) {
+func (s *Service) BeginRun(ctx context.Context, runID, nodeID string, expectedProjectID ...string) (entity.Project, entity.RunExecutionSnapshot, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := ctx.Err(); err != nil {
-		return entity.Project{}, nil, err
+		return entity.Project{}, entity.RunExecutionSnapshot{}, err
 	}
 	if err := valueobject.ValidateID(runID); err != nil {
-		return entity.Project{}, nil, fmt.Errorf("%w: runId: %v", ErrInvalidInput, err)
+		return entity.Project{}, entity.RunExecutionSnapshot{}, fmt.Errorf("%w: runId: %v", ErrInvalidInput, err)
 	}
 	project, graph, err := s.loadCurrentForProject(ctx, firstExpectedProjectID(expectedProjectID))
 	if err != nil {
-		return entity.Project{}, nil, err
+		return entity.Project{}, entity.RunExecutionSnapshot{}, err
 	}
 	node, err := requireNode(graph, nodeID, "node")
 	if err != nil {
-		return entity.Project{}, nil, err
+		return entity.Project{}, entity.RunExecutionSnapshot{}, err
 	}
 	if node.Locked {
-		return entity.Project{}, nil, fmt.Errorf("%w: %s", ErrNodeLocked, nodeID)
+		return entity.Project{}, entity.RunExecutionSnapshot{}, fmt.Errorf("%w: %s", ErrNodeLocked, nodeID)
 	}
 	if err := validateRunEntry(node); err != nil {
-		return entity.Project{}, nil, err
+		return entity.Project{}, entity.RunExecutionSnapshot{}, err
 	}
 	root, err := chainRoot(graph, nodeID)
 	if err != nil {
-		return entity.Project{}, nil, err
+		return entity.Project{}, entity.RunExecutionSnapshot{}, err
 	}
-	chainPath, err := graph.PathToRoot(nodeID)
+	snapshot, err := graph.SnapshotForRun(nodeID)
 	if err != nil {
-		return entity.Project{}, nil, err
+		return entity.Project{}, entity.RunExecutionSnapshot{}, err
 	}
-	for _, id := range chainPath {
+	chainPath := snapshot.ChainPath
+	if err := validateRunPath(graph, root, nodeID, chainPath); err != nil {
+		return entity.Project{}, entity.RunExecutionSnapshot{}, err
+	}
+	members := append([]string(nil), chainPath...)
+	if snapshot.OutputBinding.Bound {
+		members = append(members, snapshot.OutputBinding.NodeID)
+	}
+	for _, id := range members {
 		if s.isNodeLocked(id) {
-			return entity.Project{}, nil, fmt.Errorf("%w: %s", ErrRunningChainLocked, id)
+			return entity.Project{}, entity.RunExecutionSnapshot{}, fmt.Errorf("%w: %s", ErrRunningChainLocked, id)
 		}
 	}
-	if err := validateRunPath(graph, root, nodeID, chainPath); err != nil {
-		return entity.Project{}, nil, err
-	}
-	s.recordRunLock(runID, project.ID, project.Revision, root, nodeID, chainPath)
+	s.recordRunLock(runID, project.ID, project.Revision, root, nodeID, chainPath, snapshot.OutputBinding.NodeID)
 	s.changedWithReason(project.ID, project.Revision, ChangeReasonRunLock)
-	return project.Clone(), append([]string(nil), chainPath...), nil
+	return project.Clone(), snapshot.Clone(), nil
 }
 
 func validateRunPath(graph *entity.Graph, treeID, nodeID string, chainPath []string) error {
@@ -145,10 +150,13 @@ func validateRunPath(graph *entity.Graph, treeID, nodeID string, chainPath []str
 	return nil
 }
 
-func (s *Service) recordRunLock(runID, projectID string, projectRevision int64, treeID, nodeID string, chainPath []string) {
-	members := make(map[string]struct{}, len(chainPath))
+func (s *Service) recordRunLock(runID, projectID string, projectRevision int64, treeID, nodeID string, chainPath []string, outputNodeID string) {
+	members := make(map[string]struct{}, len(chainPath)+1)
 	for _, id := range chainPath {
 		members[id] = struct{}{}
+	}
+	if outputNodeID != "" {
+		members[outputNodeID] = struct{}{}
 	}
 	if s.locks == nil {
 		s.locks = make(map[string]runLock)

@@ -19,6 +19,10 @@ func (s *Service) ReadRunGraph(ctx context.Context, scope port.RunScope) (port.R
 		return port.RunGraph{}, err
 	}
 	result := port.RunGraph{Nodes: make([]port.RunGraphNode, 0, len(scope.ChainPath))}
+	if scope.ExecutionSnapshot.Version != 0 && scope.ExecutionSnapshot.OutputBinding.Bound {
+		binding := scope.ExecutionSnapshot.OutputBinding
+		result.OutputBinding = &binding
+	}
 	for _, id := range scope.ChainPath {
 		node, ok := graph.Node(id)
 		if !ok {
@@ -30,7 +34,7 @@ func (s *Service) ReadRunGraph(ctx context.Context, scope port.RunScope) (port.R
 }
 
 func (s *Service) ReadRunNode(ctx context.Context, scope port.RunScope, nodeID string) (port.RunNode, error) {
-	_, graph, err := s.runGraph(ctx, scope)
+	project, graph, err := s.runGraph(ctx, scope)
 	if err != nil {
 		return port.RunNode{}, err
 	}
@@ -42,20 +46,34 @@ func (s *Service) ReadRunNode(ctx context.Context, scope port.RunScope, nodeID s
 		return port.RunNode{}, port.ErrChainScopeDenied
 	}
 	rounds := make([]port.RunRound, 0, len(node.Rounds))
-	for _, round := range node.Rounds {
-		rounds = append(rounds, port.RunRound{
-			N: round.N, Kind: round.Kind, ArtifactID: round.ArtifactID,
-			PendingID: round.PendingID, RunID: round.RunID,
-		})
+	if scope.ExecutionSnapshot.Version == 0 || project.Version < 2 {
+		for _, round := range node.Rounds {
+			rounds = append(rounds, port.RunRound{
+				N: round.N, Kind: round.Kind, ArtifactID: round.ArtifactID,
+				PendingID: round.PendingID, RunID: round.RunID,
+			})
+		}
 	}
 	return port.RunNode{
-		RunGraphNode: runGraphNode(node),
-		Params:       node.Params,
-		Rounds:       rounds,
+		RunGraphNode:        runGraphNode(node),
+		Params:              node.Params,
+		Rounds:              rounds,
+		LatestScriptVersion: latestScriptVersion(node),
 	}, nil
 }
 
+func latestScriptVersion(node *entity.Node) *entity.ScriptVersion {
+	if len(node.ScriptVersions) == 0 {
+		return nil
+	}
+	latest := node.ScriptVersions[len(node.ScriptVersions)-1]
+	return &latest
+}
+
 func (s *Service) ReadRunArtifact(ctx context.Context, scope port.RunScope, artifactID string) (port.RunArtifact, error) {
+	if scope.ExecutionSnapshot.Version != 0 {
+		return s.readSnapshotRunArtifact(ctx, scope, artifactID)
+	}
 	project, graph, err := s.runGraph(ctx, scope)
 	if err != nil {
 		return port.RunArtifact{}, err
@@ -132,6 +150,67 @@ func (s *Service) ReadRunArtifact(ctx context.Context, scope port.RunScope, arti
 	return result, nil
 }
 
+func (s *Service) readSnapshotRunArtifact(ctx context.Context, scope port.RunScope, artifactID string) (port.RunArtifact, error) {
+	project, _, err := s.runGraph(ctx, scope)
+	if err != nil {
+		return port.RunArtifact{}, err
+	}
+	var references []entity.RunArtifactReference
+	for _, reference := range scope.ExecutionSnapshot.Artifacts {
+		if reference.ArtifactID == artifactID {
+			references = append(references, reference)
+		}
+	}
+	if len(references) == 0 {
+		return port.RunArtifact{}, port.ErrChainScopeDenied
+	}
+	if s.opts.Artifacts == nil {
+		return port.RunArtifact{}, ErrArtifactStoreUnavailable
+	}
+	store, err := s.opts.Artifacts.ForProject(ctx, project.ID)
+	if err != nil {
+		return port.RunArtifact{}, err
+	}
+	artifact, payload, err := store.Get(ctx, artifactID)
+	if err != nil {
+		if errors.Is(err, port.ErrArtifactNotFound) {
+			return port.RunArtifact{}, port.ErrArtifactNotFound
+		}
+		if errors.Is(err, port.ErrArtifactCorrupt) {
+			return port.RunArtifact{}, port.ErrArtifactCorrupt
+		}
+		return port.RunArtifact{}, fmt.Errorf("%w: %v", port.ErrArtifactCorrupt, err)
+	}
+	if artifact.ID != artifactID || len(payload) > valueobject.MaxPendingPayloadSize || !utf8.Valid(payload) {
+		return port.RunArtifact{}, port.ErrArtifactCorrupt
+	}
+	var result port.RunArtifact
+	for i, reference := range references {
+		if reference.Kind == valueobject.OutputKindSceneDSL {
+			return port.RunArtifact{}, ErrUnsupportedUntilM3
+		}
+		if err := valueobject.ValidateStructuredPayload(reference.Kind, payload); err != nil {
+			return port.RunArtifact{}, fmt.Errorf("%w: %v", port.ErrArtifactCorrupt, err)
+		}
+		candidate := -1
+		if reference.CandidateIndex != nil {
+			candidate = *reference.CandidateIndex
+		}
+		view, err := artifactView(reference.Kind, candidate, payload)
+		if err != nil {
+			return port.RunArtifact{}, err
+		}
+		if i == 0 {
+			result = view
+			continue
+		}
+		if result.Kind != view.Kind || string(result.Data) != string(view.Data) {
+			return port.RunArtifact{}, port.ErrChainScopeDenied
+		}
+	}
+	return result, nil
+}
+
 func (s *Service) CreateRunPending(ctx context.Context, scope port.RunScope, kind valueobject.OutputKind, payload []byte, requestID string) (entity.Pending, error) {
 	if scope.RunID == "" || scope.ProjectID == "" || scope.TreeID == "" || scope.NodeID == "" || scope.ChainID != "c_"+scope.NodeID || len(scope.ChainPath) == 0 || scope.ChainPath[len(scope.ChainPath)-1] != scope.NodeID {
 		return entity.Pending{}, port.ErrTurnNotActive
@@ -150,6 +229,24 @@ func (s *Service) runGraph(ctx context.Context, scope port.RunScope) (entity.Pro
 	}
 	if scope.RunID == "" || scope.ProjectID == "" || scope.TreeID == "" || scope.NodeID == "" || scope.ChainID != "c_"+scope.NodeID || len(scope.ChainPath) == 0 || scope.ChainPath[len(scope.ChainPath)-1] != scope.NodeID {
 		return entity.Project{}, nil, port.ErrTurnNotActive
+	}
+	if scope.ExecutionSnapshot.Version != 0 {
+		snapshot := scope.ExecutionSnapshot
+		if snapshot.Validate() != nil || snapshot.ProjectID != scope.ProjectID || snapshot.TreeID != scope.TreeID || snapshot.NodeID != scope.NodeID || !slices.Equal(snapshot.ChainPath, scope.ChainPath) {
+			return entity.Project{}, nil, port.ErrChainScopeDenied
+		}
+		project := entity.Project{
+			Version: snapshot.ProjectVersion, ID: snapshot.ProjectID,
+			Revision: snapshot.ProjectRevision, Nodes: make([]entity.Node, len(snapshot.PathNodes)),
+		}
+		for i, node := range snapshot.PathNodes {
+			project.Nodes[i] = node.Clone()
+		}
+		graph, err := entity.NewGraph(&project)
+		if err != nil {
+			return entity.Project{}, nil, port.ErrChainScopeDenied
+		}
+		return project, graph, nil
 	}
 	project, err := s.opts.Project.Current(ctx)
 	if err != nil {
@@ -182,9 +279,14 @@ func runGraphNode(node *entity.Node) port.RunGraphNode {
 		value := *node.ParentCandidate
 		candidate = &value
 	}
+	var source *entity.CandidateSource
+	if node.CandidateSource != nil {
+		value := *node.CandidateSource
+		source = &value
+	}
 	return port.RunGraphNode{
 		ID: node.ID, Type: node.Type, Title: node.Title, Parent: node.Parent,
-		ParentCandidate: candidate, Locked: node.Locked, Stale: node.Stale,
+		ParentCandidate: candidate, CandidateSource: source, Locked: node.Locked, Stale: node.Stale,
 	}
 }
 

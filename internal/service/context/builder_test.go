@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -68,7 +69,10 @@ type memoryWorkspace struct {
 	reads int
 }
 
-func (w *memoryWorkspace) Scope() port.WorkspaceScope { return w.scope }
+func (w *memoryWorkspace) Scope() port.WorkspaceScope        { return w.scope }
+func (w *memoryWorkspace) CWD() string                       { return "" }
+func (w *memoryWorkspace) RuntimeReadPath() string           { return "../../runtime" }
+func (w *memoryWorkspace) Resolver() port.ScopedPathResolver { return nil }
 func (w *memoryWorkspace) ListDir(ctx context.Context, path string, maxEntries int) (port.WorkspaceList, error) {
 	if err := ctx.Err(); err != nil {
 		return port.WorkspaceList{}, err
@@ -158,6 +162,175 @@ func decodeBody(t *testing.T, result Result) (contextBody, promptMetadata) {
 		t.Fatal(err)
 	}
 	return body, envelope.Metadata
+}
+
+func snapshotFixture() (*Builder, *memoryArtifacts, entity.Project, entity.RunExecutionSnapshot, *memoryWorkspace, string, string) {
+	store := &memoryArtifacts{items: make(map[string]artifactItem)}
+	topicID := store.add(valueobject.OutputKindTopics, `{"topics":[{"title":"候选甲","angle":"甲角度","hook":"甲开头"},{"title":"候选乙","angle":"乙角度","hook":"乙开头"},{"title":"候选丙","angle":"丙角度","hook":"丙开头"}]}`)
+	scriptID := store.add(valueobject.OutputKindScript, `{"title":"祖先脚本版本","scenes":[{"narration":"不可变祖先正文","duration":12}]}`)
+	baselineID := store.add(valueobject.OutputKindScript, `{"title":"绑定脚本已有版本","scenes":[{"narration":"不应进入上下文","duration":15}]}`)
+	project := entity.Project{
+		Version: 2, ID: "p_test", Name: "快照工程", Revision: 9,
+		Nodes: []entity.Node{
+			{ID: "n_topic", Type: valueobject.NodeTypeTopic, Title: "选题", Params: entity.NodeParams{Idea: "快照主题"}, Rounds: []entity.Round{{N: 1, Kind: valueobject.OutputKindTopics, ArtifactID: topicID}}},
+			{ID: "n_candidate", Type: valueobject.NodeTypeCandidate, Title: "候选乙", Parent: "n_topic", CandidateSource: &entity.CandidateSource{TopicNodeID: "n_topic", ArtifactID: topicID, Index: 1}},
+			{ID: "n_prompt_old", Type: valueobject.NodeTypePrompt, Title: "旧任务", Parent: "n_candidate", Params: entity.NodeParams{Instruction: "旧任务约束", OutputKind: valueobject.OutputKindScript}},
+			{ID: "n_agent_old", Type: valueobject.NodeTypeAgent, Title: "旧 Agent", Parent: "n_prompt_old"},
+			{ID: "n_script", Type: valueobject.NodeTypeScript, Title: "祖先脚本", Parent: "n_agent_old", ScriptVersions: []entity.ScriptVersion{{N: 1, ArtifactID: scriptID, RunID: "r_previous"}}},
+			{ID: "n_prompt", Type: valueobject.NodeTypePrompt, Title: "当前任务", Parent: "n_script", Params: entity.NodeParams{Instruction: "完整的当前任务", OutputKind: valueobject.OutputKindScript, Constraints: &entity.NodeConstraints{Scenes: 4, Duration: 120}}},
+			{ID: "n_agent", Type: valueobject.NodeTypeAgent, Title: "当前 Agent", Parent: "n_prompt"},
+			{ID: "n_output", Type: valueobject.NodeTypeScript, Title: "当前输出", Parent: "n_agent", ScriptVersions: []entity.ScriptVersion{{N: 1, ArtifactID: baselineID, RunID: "r_existing"}}},
+		},
+	}
+	graph, _ := entity.NewGraph(&project)
+	snapshot, _ := graph.SnapshotForRun("n_agent")
+	workspace := &memoryWorkspace{
+		scope: port.WorkspaceScope{ProjectID: "p_test", TreeID: "n_topic", NodeID: "n_agent", ChainPath: append([]string(nil), snapshot.ChainPath...)},
+		dirs:  map[string]port.WorkspaceList{".": {Entries: []port.WorkspaceEntry{{Name: "notes.md", Size: 5}}}},
+	}
+	return NewBuilder(&memoryProvider{store: store}), store, project, snapshot, workspace, scriptID, baselineID
+}
+
+func TestSnapshotContextUsesFrozenCandidateTaskScriptAndOutputBinding(t *testing.T) {
+	builder, store, project, snapshot, workspace, scriptID, baselineID := snapshotFixture()
+	for _, node := range project.Nodes {
+		if node.Type == valueobject.NodeTypePrompt && len(node.Rounds) != 0 {
+			t.Fatalf("prompt %s unexpectedly requires applied rounds", node.ID)
+		}
+	}
+	input := Input{Project: project, NodeID: "n_agent", Snapshot: snapshot, Workspace: workspace}
+	result, err := builder.Build(context.Background(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(store.gets, []string{snapshot.Artifacts[0].ArtifactID, scriptID}) {
+		t.Fatalf("snapshot artifact reads = %v", store.gets)
+	}
+	body, _ := decodeBody(t, result)
+	if body.Target.NodeType != valueobject.NodeTypeAgent || body.Target.OutputKind != valueobject.OutputKindScript || body.TaskNodeID != "n_prompt" {
+		t.Fatalf("target/task contract = %+v task=%s", body.Target, body.TaskNodeID)
+	}
+	if body.Task.Instruction != "完整的当前任务" || body.Task.Constraints == nil || *body.Task.Constraints != (entity.NodeConstraints{Scenes: 4, Duration: 120}) {
+		t.Fatalf("task params = %+v", body.Task)
+	}
+	if body.OutputBinding == nil || !body.OutputBinding.Bound || body.OutputBinding.NodeID != "n_output" || body.OutputBinding.BaselineVersion != 1 || body.OutputBinding.BaselineArtifactID != baselineID {
+		t.Fatalf("output binding = %+v", body.OutputBinding)
+	}
+	if body.OutputContract == nil || body.OutputContract.Kind != valueobject.OutputKindScript || body.OutputContract.SchemaVersion != 1 || !strings.Contains(result.InitialPrompt, "script@1") || !strings.Contains(result.InitialPrompt, "结构化 Script 提交当前不可用") {
+		t.Fatalf("output contract = %+v", body.OutputContract)
+	}
+	if len(body.Path) != len(snapshot.ChainPath)-1 || !strings.Contains(string(body.Path[1].Payload), "候选乙") || body.Path[1].CandidateNumber == nil || *body.Path[1].CandidateNumber != 2 || !strings.Contains(string(body.Path[4].Payload), "不可变祖先正文") {
+		t.Fatalf("snapshot path = %+v", body.Path)
+	}
+	if body.Path[4].ArtifactVersion != 1 || body.Path[4].Round != 0 {
+		t.Fatalf("script ancestor version metadata = %+v", body.Path[4].ancestorIdentity)
+	}
+	for _, forbidden := range []string{"候选甲", "候选丙", "不应进入上下文", "旧任务约束"} {
+		if strings.Contains(result.InitialPrompt, forbidden) {
+			t.Errorf("snapshot context leaked %q", forbidden)
+		}
+	}
+	if body.Workspace.NativeWriteRoot != "steps/n_agent/" || !slices.Contains(body.Workspace.NativeReadRoots, "steps/n_prompt/") || !slices.Contains(body.Workspace.NativeReadRoots, workspace.RuntimeReadPath()) {
+		t.Fatalf("native file scope = %+v", body.Workspace)
+	}
+	degraded := false
+	for budget := result.Estimate.EstimatedTokens - 1; budget > 0; budget-- {
+		budgetInput := input
+		budgetInput.Budget = budget
+		degradedResult, buildErr := builder.Build(context.Background(), budgetInput)
+		if errors.Is(buildErr, ErrContextTooLarge) {
+			break
+		}
+		if buildErr != nil {
+			t.Fatal(buildErr)
+		}
+		degradedBody, _ := decodeBody(t, degradedResult)
+		if degradedBody.Path[1].Representation != "full" || degradedBody.Path[4].Representation != "full" {
+			if degradedBody.Task.Instruction != "完整的当前任务" || degradedBody.Task.Constraints == nil || degradedBody.Task.Constraints.Scenes != 4 {
+				t.Fatalf("budget degradation changed current task: %+v", degradedBody.Task)
+			}
+			degraded = true
+			break
+		}
+	}
+	if !degraded {
+		t.Fatal("ancestor artifacts were not degraded under a smaller budget")
+	}
+
+	candidateProject := project.Clone()
+	candidate := fixtureNode(t, &candidateProject, "n_candidate")
+	candidate.CandidateSource.Index = 0
+	candidate.Title = "候选甲"
+	candidateGraph, err := entity.NewGraph(&candidateProject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidateSnapshot, err := candidateGraph.SnapshotForRun("n_agent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidateResult, err := builder.Build(context.Background(), Input{
+		Project: candidateProject, NodeID: "n_agent", Snapshot: candidateSnapshot, Workspace: workspace,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidateBody, _ := decodeBody(t, candidateResult)
+	if !strings.Contains(string(candidateBody.Path[1].Payload), "候选甲") || strings.Contains(candidateResult.InitialPrompt, "候选乙") || candidateResult.Hashes.AncestorHash == result.Hashes.AncestorHash {
+		t.Fatalf("new candidate snapshot was not isolated: %+v", candidateBody.Path[1])
+	}
+
+	bindingProject := project.Clone()
+	output := fixtureNode(t, &bindingProject, "n_output")
+	output.ScriptVersions = append(output.ScriptVersions, entity.ScriptVersion{N: 2, ArtifactID: "sha256:baseline-v2", RunID: "r_new"})
+	bindingGraph, err := entity.NewGraph(&bindingProject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bindingSnapshot, err := bindingGraph.SnapshotForRun("n_agent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bindingResult, err := builder.Build(context.Background(), Input{
+		Project: bindingProject, NodeID: "n_agent", Snapshot: bindingSnapshot, Workspace: workspace,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bindingBody, _ := decodeBody(t, bindingResult)
+	if bindingBody.OutputBinding == nil || bindingBody.OutputBinding.BaselineVersion != 2 || bindingResult.Hashes.ParamsHash == result.Hashes.ParamsHash {
+		t.Fatalf("new output binding snapshot was not tracked: %+v", bindingBody.OutputBinding)
+	}
+
+	originalPrompt := result.InitialPrompt
+	fixtureNode(t, &input.Project, "n_candidate").CandidateSource.Index = 0
+	fixtureNode(t, &input.Project, "n_prompt").Params.Instruction = "实时图已变化"
+	fixtureNode(t, &input.Project, "n_script").ScriptVersions[0].ArtifactID = baselineID
+	changedProject, err := builder.Build(context.Background(), input)
+	if err != nil || changedProject.InitialPrompt != originalPrompt {
+		t.Fatalf("live graph changes altered frozen context: err=%v", err)
+	}
+
+	delete(store.items, scriptID)
+	if _, err := builder.Build(context.Background(), input); !errors.Is(err, ErrAncestorNotReady) {
+		t.Fatalf("missing snapshot script artifact error = %v, want ANCESTOR_NOT_READY", err)
+	}
+}
+
+func TestSnapshotContextRejectsMismatchedScopeAndArtifactReferences(t *testing.T) {
+	builder, _, project, snapshot, workspace, _, _ := snapshotFixture()
+	input := Input{Project: project, NodeID: "n_agent", Snapshot: snapshot, Workspace: workspace}
+	badScope := *workspace
+	badScope.scope.NodeID = "n_other"
+	input.Workspace = &badScope
+	if _, err := builder.Build(context.Background(), input); !errors.Is(err, ErrWorkspaceScope) {
+		t.Fatalf("mismatched workspace error = %v", err)
+	}
+	input.Workspace = workspace
+	input.Snapshot.Artifacts[0].CandidateIndex = nil
+	if _, err := builder.Build(context.Background(), input); !errors.Is(err, entity.ErrGraphInvalid) {
+		t.Fatalf("invalid snapshot artifact reference error = %v", err)
+	}
 }
 
 func TestContextGoldenAndPathIsolation(t *testing.T) {

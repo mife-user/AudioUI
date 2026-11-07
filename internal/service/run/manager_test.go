@@ -45,6 +45,9 @@ func TestStartRunUsesOneShotSpecAndPersistsTerminalUsage(t *testing.T) {
 	if record.Status != valueobject.RunRunning || record.ChainID != "c_n_topic" || !slices.Equal(record.ChainPath, []string{"n_topic"}) {
 		t.Fatalf("run = %+v", record.RunSummary)
 	}
+	if record.ExecutionSnapshot == nil || record.ExecutionSnapshot.NodeID != "n_topic" || record.ExecutionSnapshot.Validate() != nil {
+		t.Fatalf("run did not preserve a valid execution snapshot: %+v", record.ExecutionSnapshot)
+	}
 	if h.manager.ActiveRunID() != record.ID || !h.manager.IsBusy() {
 		t.Fatal("run gate was not held")
 	}
@@ -70,6 +73,9 @@ func TestStartRunUsesOneShotSpecAndPersistsTerminalUsage(t *testing.T) {
 	stored, err := h.store.Load(context.Background(), record.ID)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if stored.ExecutionSnapshot == nil || stored.ExecutionSnapshot.NodeID != record.ExecutionSnapshot.NodeID || !slices.Equal(stored.ExecutionSnapshot.ChainPath, record.ExecutionSnapshot.ChainPath) {
+		t.Fatalf("persisted run snapshot = %+v", stored.ExecutionSnapshot)
 	}
 	if stored.Status != valueobject.RunSucceeded || !stored.UsageReported || stored.ActualInputTokens != actual || !stored.OverBudget {
 		t.Fatalf("terminal run = %+v", stored.RunSummary)
@@ -629,17 +635,25 @@ type fakeWorkflow struct {
 	released bool
 }
 
-func (w *fakeWorkflow) BeginRun(_ context.Context, _ string, _ string, expectedProjectID ...string) (entity.Project, []string, error) {
+func (w *fakeWorkflow) BeginRun(_ context.Context, _ string, nodeID string, expectedProjectID ...string) (entity.Project, entity.RunExecutionSnapshot, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if len(expectedProjectID) > 0 && expectedProjectID[0] != "" && expectedProjectID[0] != w.project.ID {
-		return entity.Project{}, nil, fmt.Errorf("PROJECT_CHANGED: active %s, expected %s", w.project.ID, expectedProjectID[0])
+		return entity.Project{}, entity.RunExecutionSnapshot{}, fmt.Errorf("PROJECT_CHANGED: active %s, expected %s", w.project.ID, expectedProjectID[0])
 	}
 	if w.beginErr != nil {
-		return entity.Project{}, nil, w.beginErr
+		return entity.Project{}, entity.RunExecutionSnapshot{}, w.beginErr
+	}
+	graph, err := entity.NewGraph(&w.project)
+	if err != nil {
+		return entity.Project{}, entity.RunExecutionSnapshot{}, err
+	}
+	snapshot, err := graph.SnapshotForRun(nodeID)
+	if err != nil {
+		return entity.Project{}, entity.RunExecutionSnapshot{}, err
 	}
 	w.locked = true
-	return w.project.Clone(), append([]string(nil), w.path...), nil
+	return w.project.Clone(), snapshot, nil
 }
 func (w *fakeWorkflow) ReleaseRunLock(context.Context, string) error {
 	w.mu.Lock()
@@ -651,11 +665,11 @@ func (w *fakeWorkflow) ReleaseRunLock(context.Context, string) error {
 
 type fakeContextBuilder struct{}
 
-func (fakeContextBuilder) BuildRunContext(_ context.Context, project entity.Project, nodeID string, workspace port.RunWorkspace, budget int) (port.RunContext, error) {
+func (fakeContextBuilder) BuildRunContext(_ context.Context, project entity.Project, nodeID string, snapshot entity.RunExecutionSnapshot, workspace port.RunWorkspace, budget int) (port.RunContext, error) {
 	scope := workspace.Scope()
 	return port.RunContext{
 		TreeID: scope.TreeID, NodeID: nodeID, ChainPath: scope.ChainPath,
-		OutputKind: valueobject.OutputKindTopics, ContextVersion: 1, InitialPrompt: "initial context",
+		OutputKind: snapshot.OutputContract.Kind, ContextVersion: 1, InitialPrompt: "initial context",
 		Hashes:   valueobject.ContextHashes{ContextHash: "context", AncestorHash: "ancestor", ParamsHash: "params"},
 		Estimate: valueobject.ContextEstimate{EstimatorVersion: 1, EstimatedTokens: 40, TokenBudget: budget},
 	}, nil
@@ -671,6 +685,7 @@ type fakeRunWorkspace struct{ scope port.WorkspaceScope }
 
 func (w *fakeRunWorkspace) Scope() port.WorkspaceScope      { return w.scope }
 func (*fakeRunWorkspace) CWD() string                       { return `C:\workspace\trees\n_topic` }
+func (*fakeRunWorkspace) RuntimeReadPath() string           { return `..\..\..\..\..\runtime` }
 func (*fakeRunWorkspace) Resolver() port.ScopedPathResolver { return fakePathResolver{} }
 func (w *fakeRunWorkspace) ReadFile(context.Context, string, int64) (port.WorkspaceRead, error) {
 	return port.WorkspaceRead{}, nil

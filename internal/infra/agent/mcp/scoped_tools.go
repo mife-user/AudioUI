@@ -89,6 +89,12 @@ func validateRunToolOptions(options Options) error {
 	if scope.ContextHash == "" || scope.AncestorHash == "" || scope.ParamsHash == "" {
 		return errors.New("MCP run scope is missing context hashes")
 	}
+	if scope.ExecutionSnapshot.Version != 0 {
+		snapshot := scope.ExecutionSnapshot
+		if snapshot.Validate() != nil || snapshot.ProjectID != scope.ProjectID || snapshot.TreeID != scope.TreeID || snapshot.NodeID != scope.NodeID || !slices.Equal(snapshot.ChainPath, scope.ChainPath) {
+			return errors.New("invalid MCP execution snapshot")
+		}
+	}
 	if options.RunTools == nil || options.RunLifecycle == nil || options.OnReply == nil {
 		return errors.New("MCP run tools, lifecycle, and reply callback are required")
 	}
@@ -118,7 +124,7 @@ func (s *Server) registerRunTools() {
 	sdkmcp.AddTool(s.sdk, &sdkmcp.Tool{Name: "read_artifact", Description: "Read an artifact referenced by a path ancestor in UTF-8 byte chunks up to 16 KiB."}, s.readRunArtifact)
 	s.sdk.AddTool(&sdkmcp.Tool{
 		Name:        "reply",
-		Description: "Send a message or submit a topics/script result for manual application. Structured payloads are retained even when their schema is invalid.",
+		Description: "Send a chat message or submit a structured result supported by the active workflow. Agent script result submission is unavailable.",
 		InputSchema: rawObjectSchema(map[string]any{
 			"node_id":    map[string]any{"type": "string"},
 			"kind":       map[string]any{"type": "string"},
@@ -174,7 +180,10 @@ func (s *Server) getRunNode(ctx context.Context, _ *sdkmcp.CallToolRequest, inpu
 func (s *Server) listNodeTypes(ctx context.Context, _ *sdkmcp.CallToolRequest, _ GetChainInput) (*sdkmcp.CallToolResult, ListNodeTypesOutput, error) {
 	output := ListNodeTypesOutput{Types: []NodeTypeInfo{
 		{Type: valueobject.NodeTypeTopic, Parameters: []string{"idea", "direction", "candidateCount"}, OutputKind: valueobject.OutputKindTopics},
+		{Type: valueobject.NodeTypeCandidate, Parameters: []string{"candidateSource"}, OutputKind: valueobject.OutputKindTopics},
 		{Type: valueobject.NodeTypePrompt, Parameters: []string{"instruction", "outputKind", "constraints"}, OutputKind: valueobject.OutputKindScript},
+		{Type: valueobject.NodeTypeAgent, Parameters: []string{}, OutputKind: valueobject.OutputKindScript},
+		{Type: valueobject.NodeTypeScript, Parameters: []string{"scriptVersions"}, OutputKind: valueobject.OutputKindScript},
 	}}
 	err := s.withActiveRun(ctx, func() error { return nil })
 	return nil, output, err
@@ -288,6 +297,12 @@ func (s *Server) replyRun(ctx context.Context, request *sdkmcp.CallToolRequest) 
 			return errors.New("UNSUPPORTED_UNTIL_M3")
 		default:
 			return errors.New("OUTPUT_KIND_INVALID")
+		}
+		if scope.ExecutionSnapshot.Version != 0 && valueobject.OutputKind(input.Kind) != scope.ExecutionSnapshot.OutputContract.Kind {
+			return errors.New("OUTPUT_KIND_MISMATCH")
+		}
+		if scope.ExecutionSnapshot.Version != 0 && scope.ExecutionSnapshot.PathNodes[len(scope.ExecutionSnapshot.PathNodes)-1].Type == valueobject.NodeTypeAgent {
+			return errors.New("OUTPUT_COMMIT_UNAVAILABLE")
 		}
 		pending, err := s.options.RunTools.CreateRunPending(ctx, scope, valueobject.OutputKind(input.Kind), input.Payload, input.RequestID)
 		if err != nil {

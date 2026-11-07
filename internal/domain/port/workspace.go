@@ -96,6 +96,7 @@ type RunWorkspaceReader interface {
 type RunWorkspace interface {
 	RunWorkspaceReader
 	CWD() string
+	RuntimeReadPath() string
 	Resolver() ScopedPathResolver
 }
 

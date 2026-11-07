@@ -98,6 +98,120 @@ func TestRunGraphAndNodeExposeOnlyPath(t *testing.T) {
 	}
 }
 
+func TestSnapshotRunToolsIgnoreLiveGraphAndUseFrozenArtifactAuthorization(t *testing.T) {
+	h := newPendingHarness(t, baseProject())
+	h.session.project.Nodes = append(h.session.project.Nodes, entity.Node{
+		ID: "n_output", Type: valueobject.NodeTypeScript, Title: "绑定输出", Parent: "n_b",
+	})
+	for i := range h.session.project.Nodes {
+		if h.session.project.Nodes[i].ID == "n_a" {
+			h.session.project.Nodes[i].Rounds = []entity.Round{{N: 1, Kind: valueobject.OutputKindScript, ArtifactID: "sha256:legacy-round"}}
+		}
+	}
+	topics := []byte(`{"topics":[{"title":"甲","angle":"角度甲","hook":"开头甲"},{"title":"乙","angle":"角度乙","hook":"开头乙"},{"title":"丙","angle":"角度丙","hook":"开头丙"}]}`)
+	artifact := putRunArtifact(t, h, valueobject.OutputKindTopics, "n_topic", topics)
+	setCandidateArtifact(&h.session.project, artifact.ID)
+	setNodeRounds(&h.session.project, "n_topic", entity.Round{N: 1, Kind: valueobject.OutputKindTopics, ArtifactID: artifact.ID})
+	graph, err := entity.NewGraph(&h.session.project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := graph.SnapshotForRun("n_b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope := port.RunScope{
+		RunID: "r_snapshot", ProjectID: "p_test", TreeID: "n_topic", NodeID: "n_b",
+		ChainID: "c_n_b", ChainPath: append([]string(nil), snapshot.ChainPath...),
+		ContextHash: "context", AncestorHash: "ancestor", ParamsHash: "params",
+		ExecutionSnapshot: snapshot,
+	}
+
+	for i := range h.session.project.Nodes {
+		switch h.session.project.Nodes[i].ID {
+		case "n_topic":
+			h.session.project.Nodes[i].Title = "实时选题标题"
+		case "n_candidate":
+			h.session.project.Nodes[i].CandidateSource.Index = 1
+		case "n_a":
+			h.session.project.Nodes[i].Params.Instruction = "实时提示词"
+		}
+	}
+	result, err := h.service.ReadRunGraph(context.Background(), scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Nodes) != len(scope.ChainPath) || result.Nodes[0].Title != "选题" || result.Nodes[1].CandidateSource == nil || result.Nodes[1].CandidateSource.Index != 0 {
+		t.Fatalf("run graph did not use frozen path: %+v", result)
+	}
+	if result.OutputBinding == nil || !result.OutputBinding.Bound || result.OutputBinding.NodeID != "n_output" || result.OutputBinding.BaselineVersion != 0 {
+		t.Fatalf("run graph omitted frozen output binding: %+v", result.OutputBinding)
+	}
+	node, err := h.service.ReadRunNode(context.Background(), scope, "n_a")
+	if err != nil || node.Params.Instruction != "A" || len(node.Rounds) != 0 {
+		t.Fatalf("run node did not use v2 snapshot fields: %+v err=%v", node, err)
+	}
+	view, err := h.service.ReadRunArtifact(context.Background(), scope, artifact.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(view.Data), `"title":"甲"`) || strings.Contains(string(view.Data), `"title":"乙"`) {
+		t.Fatalf("artifact view did not use frozen candidate selection: %s", view.Data)
+	}
+	if _, err := h.service.ReadRunArtifact(context.Background(), scope, "sha256:unreferenced"); !errors.Is(err, port.ErrChainScopeDenied) {
+		t.Fatalf("unreferenced snapshot artifact error = %v, want CHAIN_SCOPE_DENIED", err)
+	}
+}
+
+func TestSnapshotRunArtifactUsesExactScriptVersion(t *testing.T) {
+	h := newPendingHarness(t, baseProject())
+	topics := []byte(`{"topics":[{"title":"甲","angle":"角度甲","hook":"开头甲"},{"title":"乙","angle":"角度乙","hook":"开头乙"},{"title":"丙","angle":"角度丙","hook":"开头丙"}]}`)
+	topicArtifact := putRunArtifact(t, h, valueobject.OutputKindTopics, "n_topic", topics)
+	setCandidateArtifact(&h.session.project, topicArtifact.ID)
+	setNodeRounds(&h.session.project, "n_topic", entity.Round{N: 1, Kind: valueobject.OutputKindTopics, ArtifactID: topicArtifact.ID})
+	oldArtifact := putRunArtifact(t, h, valueobject.OutputKindScript, "n_script", []byte(`{"title":"旧版本","scenes":[{"narration":"旧旁白","duration":1}]}`))
+	latestArtifact := putRunArtifact(t, h, valueobject.OutputKindScript, "n_script", []byte(`{"title":"快照版本","scenes":[{"narration":"快照旁白","duration":2}]}`))
+	h.session.project.Nodes = append(h.session.project.Nodes,
+		entity.Node{
+			ID: "n_script", Type: valueobject.NodeTypeScript, Title: "脚本",
+			Parent: "n_b", ScriptVersions: []entity.ScriptVersion{
+				{N: 1, ArtifactID: oldArtifact.ID, RunID: "r_old"},
+				{N: 2, ArtifactID: latestArtifact.ID, RunID: "r_latest"},
+			},
+		},
+		entity.Node{ID: "n_prompt2", Type: valueobject.NodeTypePrompt, Title: "后续任务", Parent: "n_script", Params: entity.NodeParams{Instruction: "后续"}},
+		entity.Node{ID: "n_agent2", Type: valueobject.NodeTypeAgent, Title: "后续 Agent", Parent: "n_prompt2"},
+	)
+	graph, err := entity.NewGraph(&h.session.project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := graph.SnapshotForRun("n_agent2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope := port.RunScope{
+		RunID: "r_snapshot_script", ProjectID: "p_test", TreeID: "n_topic", NodeID: "n_agent2",
+		ChainID: "c_n_agent2", ChainPath: append([]string(nil), snapshot.ChainPath...),
+		ContextHash: "context", AncestorHash: "ancestor", ParamsHash: "params", ExecutionSnapshot: snapshot,
+	}
+	for i := range h.session.project.Nodes {
+		if h.session.project.Nodes[i].ID == "n_script" {
+			h.session.project.Nodes[i].ScriptVersions = nil
+		}
+	}
+	view, err := h.service.ReadRunArtifact(context.Background(), scope, latestArtifact.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.Kind != valueobject.OutputKindScript || !strings.Contains(string(view.Data), `"title":"快照版本"`) {
+		t.Fatalf("snapshot script view = %s (%s)", view.Data, view.Kind)
+	}
+	if _, err := h.service.ReadRunArtifact(context.Background(), scope, oldArtifact.ID); !errors.Is(err, port.ErrChainScopeDenied) {
+		t.Fatalf("unselected script version error = %v, want CHAIN_SCOPE_DENIED", err)
+	}
+}
+
 func TestReadRunArtifactFiltersTopicCandidateAndUsesRoundKind(t *testing.T) {
 	h := newPendingHarness(t, baseProject())
 	topics := []byte(`{"topics":[{"title":"甲","angle":"角度甲","hook":"开头甲"},{"title":"乙","angle":"角度乙","hook":"开头乙"},{"title":"丙","angle":"角度丙","hook":"开头丙"}]}`)

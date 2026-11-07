@@ -56,6 +56,38 @@ func TestRunGuardReadAndWriteScope(t *testing.T) {
 	}
 }
 
+func TestRunGuardAllowsReadOnlySharedRuntime(t *testing.T) {
+	tree, _ := runGuardFixture(t)
+	runtimeDir := filepath.Join(t.TempDir(), "runtime")
+	file := filepath.Join(runtimeDir, "fonts", "font.txt")
+	if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(file, []byte("font"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	guard, err := NewRunGuard(tree, "n_current", []string{"n_root", "n_parent", "n_current"}, runtimeDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	relative, err := filepath.Rel(tree, file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, input := range []string{relative, file} {
+		resolved, err := guard.ResolveRead(input)
+		if err != nil || filepath.Clean(resolved) != filepath.Clean(file) {
+			t.Fatalf("ResolveRead(%q) = %q, %v", input, resolved, err)
+		}
+	}
+	if _, err := guard.ResolveWrite(file); !errors.Is(err, ErrPathDenied) {
+		t.Fatalf("ResolveWrite(runtime) error = %v, want PATH_DENIED", err)
+	}
+	if _, err := guard.ResolveRead(filepath.Join(runtimeDir, "..", "outside.txt")); !errors.Is(err, ErrPathDenied) {
+		t.Fatalf("ResolveRead(outside runtime) error = %v, want PATH_DENIED", err)
+	}
+}
+
 func TestRunGuardRequiresActiveNodeAndValidPath(t *testing.T) {
 	tree := t.TempDir()
 	cases := []struct {

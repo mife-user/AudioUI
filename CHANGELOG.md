@@ -6,10 +6,13 @@
 
 ## [Unreleased]
 
-M2 图与提示词（M2-00～10 旧模型已验收；M2-11A 本地脚本目标设计已验收；M2-11B 工程格式与图领域模型已验收（2026-11-06）；M2-11C～13 未开始，完整闭环尚未实现）。
+M2 图与提示词（M2-00～10 旧模型已验收；M2-11A 本地脚本目标设计已验收；M2-11B 工程格式与图领域模型已验收（2026-11-06）；M2-11C 已验收（2026-11-07）；M2-11D～13 未完成，完整闭环尚未实现）。
 
 ### Added
 
+- M2-11C（用户于 2026-11-07 验收）：Agent 作为本地运行入口，发送快照冻结图路径、Candidate 来源、Prompt 任务/约束、Script 祖先版本及输出绑定基准；运行锁同时保护路径与指定输出，路径外兄弟仍可编辑。
+- M2-11C：Agent 上下文按快照读取单个候选和精确 Script 版本，不要求 Prompt 祖先存在旧式 applied round；MCP 图/产物查询使用快照授权，不回退实时工程图；run-scoped MCP 移除通用文件代理，本地内置文件读取限路径祖先与共享只读 `runtime/`，写入限当前节点 `steps/`。
+- M2-11C 门禁和未覆盖项见 `docs/dev/evidence/m2-11c.md`。Agent Script 结构化提交明确返回 `OUTPUT_COMMIT_UNAVAILABLE`；M2-11D 的原子建节点/追加版本事务、M2-12A 新模型工作台仍未实现。
 - M2-11B（用户于 2026-11-06 验收）：`project.json` 升为 v2，新增 candidate/agent/script 节点及 Candidate 来源、Script 版本引用；Go 图校验实施类型连接矩阵、Candidate 来源轮次与索引、Script 版本序列和 Agent 单直接输出约束。
 - M2-11B（用户于 2026-11-06 验收）：v1 工程明确返回 `UNSUPPORTED_VERSION`，旧工程仍出现在带版本/错误摘要的列表且不阻断有效工程新建、打开；M1 sessions 迁移直接创建 v2 工程。
 - M2-11B（用户于 2026-11-06 验收）：图命令拒绝普通创建 Candidate、改挂 Candidate 及旧 `parentCandidate` 输入；prompt/agent/script 运行入口明确返回 `RUN_ENTRY_UNAVAILABLE`。旧 UI/RPC 的 `ParentCandidate` 仅作过渡字段保留，v2 拒绝非空值且不落盘。门禁和未覆盖项见 `docs/dev/evidence/m2-11b.md`。

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"math"
+	"slices"
 	"strings"
 	"testing"
 
@@ -464,15 +465,60 @@ func TestEnsureExecutable(t *testing.T) {
 	}
 }
 
-func TestBeginRunRejectsUnwiredPromptAndAgentEntries(t *testing.T) {
+func TestBeginRunRejectsPromptAndAllowsAgentEntry(t *testing.T) {
 	h := newHarness(t, baseProject())
-	for _, nodeID := range []string{"n_a", "n_b"} {
-		if _, _, err := h.service.BeginRun(context.Background(), "r_unavailable", nodeID); !errors.Is(err, ErrRunEntryUnavailable) {
-			t.Fatalf("BeginRun(%s) error = %v, want RUN_ENTRY_UNAVAILABLE", nodeID, err)
+	if _, _, err := h.service.BeginRun(context.Background(), "r_prompt", "n_a"); !errors.Is(err, ErrRunEntryUnavailable) {
+		t.Fatalf("BeginRun(prompt) error = %v, want RUN_ENTRY_UNAVAILABLE", err)
+	}
+	_, snapshot, err := h.service.BeginRun(context.Background(), "r_agent", "n_b")
+	if err != nil {
+		t.Fatalf("BeginRun(agent) error = %v", err)
+	}
+	if snapshot.NodeID != "n_b" || !slices.Equal(snapshot.ChainPath, []string{"n_topic", "n_candidate", "n_a", "n_b"}) {
+		t.Fatalf("agent snapshot = %+v", snapshot)
+	}
+	if len(h.service.locks) != 1 {
+		t.Fatalf("agent run acquired %d locks, want 1", len(h.service.locks))
+	}
+	if err := h.service.ReleaseRunLock(context.Background(), "r_agent"); err != nil {
+		t.Fatal(err)
+	}
+	if locked := h.service.LockedNodeIDs(); len(locked) != 0 {
+		t.Fatalf("agent run left path locks: %+v", locked)
+	}
+}
+
+func TestBeginRunLocksBoundScriptOutputAndKeepsSiblingEditable(t *testing.T) {
+	project := baseProject()
+	project.Nodes = append(project.Nodes,
+		entity.Node{ID: "n_output", Type: valueobject.NodeTypeScript, Title: "输出", Parent: "n_b", Rounds: []entity.Round{}},
+		entity.Node{ID: "n_prompt_alt", Type: valueobject.NodeTypePrompt, Title: "另一任务", Parent: "n_candidate", Params: entity.NodeParams{Instruction: "另一任务"}},
+		entity.Node{ID: "n_agent_alt", Type: valueobject.NodeTypeAgent, Title: "另一 Agent", Parent: "n_prompt_alt"},
+	)
+	h := newHarness(t, project)
+	_, snapshot, err := h.service.BeginRun(context.Background(), "r_agent", "n_b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !snapshot.OutputBinding.Bound || snapshot.OutputBinding.NodeID != "n_output" || snapshot.OutputBinding.ParentNodeID != "n_b" {
+		t.Fatalf("output binding = %+v", snapshot.OutputBinding)
+	}
+	for _, id := range []string{"n_topic", "n_candidate", "n_a", "n_b", "n_output"} {
+		if !h.service.isNodeLocked(id) {
+			t.Errorf("run did not lock %s", id)
 		}
 	}
-	if len(h.service.locks) != 0 || len(*h.changes) != 0 {
-		t.Fatal("unavailable run entry acquired a lock")
+	if _, err := h.service.Connect(context.Background(), "n_agent_alt", "n_output", nil, true); !errors.Is(err, ErrRunningChainLocked) {
+		t.Fatalf("moving a bound output during run error = %v, want RUNNING_CHAIN_LOCKED", err)
+	}
+	if _, err := h.service.UpdateNodeParams(context.Background(), "n_c", "C", entity.NodeParams{Instruction: "兄弟可编辑"}); err != nil {
+		t.Fatalf("unrelated sibling edit was blocked: %v", err)
+	}
+	if err := h.service.ReleaseRunLock(context.Background(), "r_agent"); err != nil {
+		t.Fatal(err)
+	}
+	if h.service.isNodeLocked("n_output") {
+		t.Fatal("run lock release kept the bound output locked")
 	}
 }
 

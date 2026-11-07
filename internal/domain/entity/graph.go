@@ -65,6 +65,84 @@ func (g *Graph) Children(id string) []string {
 	return append([]string(nil), g.children[id]...)
 }
 
+func (g *Graph) SnapshotForRun(nodeID string) (RunExecutionSnapshot, error) {
+	target, ok := g.Node(nodeID)
+	if !ok {
+		return RunExecutionSnapshot{}, fmt.Errorf("%w: %s", ErrGraphNodeNotFound, nodeID)
+	}
+	path, err := g.PathToRoot(nodeID)
+	if err != nil {
+		return RunExecutionSnapshot{}, err
+	}
+	root, ok := g.Node(path[0])
+	if !ok || root.Type != valueobject.NodeTypeTopic {
+		return RunExecutionSnapshot{}, fmt.Errorf("%w: run path must start at a topic", ErrGraphInvalid)
+	}
+	kind := valueobject.OutputKindTopics
+	switch target.Type {
+	case valueobject.NodeTypeTopic:
+	case valueobject.NodeTypeAgent:
+		kind = valueobject.OutputKindScript
+	default:
+		return RunExecutionSnapshot{}, fmt.Errorf("%w: %s", ErrNodeConnectionInvalid, target.Type)
+	}
+
+	snapshot := RunExecutionSnapshot{
+		Version: 1, ProjectVersion: g.project.Version, ProjectID: g.project.ID,
+		ProjectRevision: g.project.Revision, TreeID: root.ID, NodeID: target.ID,
+		ChainPath: append([]string(nil), path...), PathNodes: make([]Node, 0, len(path)),
+		Artifacts:      []RunArtifactReference{},
+		OutputContract: RunOutputContract{Kind: kind, SchemaVersion: 1},
+	}
+	for i, id := range path {
+		node, _ := g.Node(id)
+		snapshot.PathNodes = append(snapshot.PathNodes, node.Clone())
+		if i == len(path)-1 {
+			continue
+		}
+		child, _ := g.Node(path[i+1])
+		switch {
+		case node.Type == valueobject.NodeTypeCandidate && node.CandidateSource != nil:
+			index := node.CandidateSource.Index
+			snapshot.Artifacts = append(snapshot.Artifacts, RunArtifactReference{
+				NodeID: node.ID, ArtifactID: node.CandidateSource.ArtifactID,
+				Kind: valueobject.OutputKindTopics, CandidateIndex: &index,
+			})
+		case node.Type == valueobject.NodeTypeScript && len(node.ScriptVersions) > 0:
+			latest := node.ScriptVersions[len(node.ScriptVersions)-1]
+			snapshot.Artifacts = append(snapshot.Artifacts, RunArtifactReference{
+				NodeID: node.ID, ArtifactID: latest.ArtifactID,
+				Kind: valueobject.OutputKindScript, Version: latest.N,
+			})
+		case g.project.Version < 2:
+			for _, round := range node.Rounds {
+				reference := RunArtifactReference{NodeID: node.ID, ArtifactID: round.ArtifactID, Kind: round.Kind, Version: round.N}
+				if round.Kind == valueobject.OutputKindTopics && child.ParentCandidate != nil {
+					index := *child.ParentCandidate
+					reference.CandidateIndex = &index
+				}
+				snapshot.Artifacts = append(snapshot.Artifacts, reference)
+			}
+		}
+	}
+	if target.Type == valueobject.NodeTypeAgent {
+		for _, childID := range g.Children(target.ID) {
+			child, _ := g.Node(childID)
+			if child.Type != valueobject.NodeTypeScript {
+				continue
+			}
+			snapshot.OutputBinding = RunOutputBinding{Bound: true, NodeID: child.ID, ParentNodeID: target.ID}
+			if len(child.ScriptVersions) > 0 {
+				latest := child.ScriptVersions[len(child.ScriptVersions)-1]
+				snapshot.OutputBinding.BaselineVersion = latest.N
+				snapshot.OutputBinding.BaselineArtifactID = latest.ArtifactID
+			}
+			break
+		}
+	}
+	return snapshot, nil
+}
+
 // Subtree returns root followed by every descendant in project node order.
 func (g *Graph) Subtree(root string) ([]string, error) {
 	if _, ok := g.nodes[root]; !ok {

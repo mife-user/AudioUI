@@ -17,13 +17,14 @@ var ErrWorkspaceScopeInvalid = errors.New("WORKSPACE_SCOPE_INVALID")
 // broader topic-tree boundary used by the cooperative Bash policy.
 type RunGuard struct {
 	tree      *Guard
+	runtime   *Guard
 	readRoots []string
 	writeRoot string
 	currentID string
 	chainPath []string
 }
 
-func NewRunGuard(treeDir, currentNodeID string, chainPath []string) (*RunGuard, error) {
+func NewRunGuard(treeDir, currentNodeID string, chainPath []string, sharedRuntimeDir ...string) (*RunGuard, error) {
 	if currentNodeID == "" || len(chainPath) == 0 {
 		return nil, fmt.Errorf("%w: active node and chain path are required", ErrWorkspaceScopeInvalid)
 	}
@@ -75,8 +76,23 @@ func NewRunGuard(treeDir, currentNodeID string, chainPath []string) (*RunGuard, 
 	for _, nodeID := range chainPath {
 		readRoots = append(readRoots, filepath.Join(treeAbs, "steps", nodeID))
 	}
+	var runtime *Guard
+	if len(sharedRuntimeDir) > 0 && sharedRuntimeDir[0] != "" {
+		runtimeAbs, absErr := filepath.Abs(sharedRuntimeDir[0])
+		if absErr != nil {
+			return nil, fmt.Errorf("%w: runtime path: %v", ErrWorkspaceScopeInvalid, absErr)
+		}
+		if err := rejectReparseAncestors(runtimeAbs); err != nil {
+			return nil, err
+		}
+		runtime, err = NewGuard(runtimeAbs, runtimeAbs)
+		if err != nil {
+			return nil, fmt.Errorf("%w: runtime path: %v", ErrWorkspaceScopeInvalid, err)
+		}
+	}
 	return &RunGuard{
 		tree:      base,
+		runtime:   runtime,
 		readRoots: readRoots,
 		writeRoot: filepath.Join(treeAbs, "steps", currentNodeID),
 		currentID: currentNodeID,
@@ -92,12 +108,26 @@ func (g *RunGuard) Resolve(input string) (string, error) {
 
 func (g *RunGuard) ResolveRead(input string) (string, error) {
 	resolved, err := g.tree.Resolve(input)
-	if err != nil {
-		return "", err
+	if err == nil {
+		for _, root := range g.readRoots {
+			if within(root, resolved) {
+				return resolved, nil
+			}
+		}
 	}
-	for _, root := range g.readRoots {
-		if within(root, resolved) {
-			return resolved, nil
+	if g.runtime != nil {
+		runtimePath := input
+		if !filepath.IsAbs(runtimePath) && filepath.VolumeName(runtimePath) == "" {
+			runtimePath = filepath.Join(g.tree.Workspace, runtimePath)
+		}
+		absolute, absErr := filepath.Abs(runtimePath)
+		if absErr == nil && within(g.runtime.Workspace, absolute) {
+			relative, relErr := filepath.Rel(g.runtime.Workspace, absolute)
+			if relErr == nil {
+				if resolved, resolveErr := g.runtime.Resolve(relative); resolveErr == nil {
+					return resolved, nil
+				}
+			}
 		}
 	}
 	return "", fmt.Errorf("%w: read is outside the active path", ErrPathDenied)

@@ -249,7 +249,7 @@
 
 ## ADR-027 目标设计：显式 Agent 节点与本地脚本输出闭环
 
-- **状态**：设计已验收（用户于 2026-11-06 确认；本地脚本子范围纳入 M2-11～13）；M2-11B 工程格式与图领域模型已于 2026-11-06 通过用户验收，完整本地脚本闭环尚未实现。M2-00～10 的旧模型与验收事实保留；不能把旧证据视为新目标通过。
+- **状态**：设计已验收（用户于 2026-11-06 确认；本地脚本子范围纳入 M2-11～13）；M2-11B 工程格式与图领域模型已于 2026-11-06 通过用户验收；M2-11C 发送快照、上下文与运行授权已于 2026-11-07 通过用户验收，完整本地脚本闭环尚未实现。M2-00～10 的旧模型与验收事实保留；不能把旧证据视为新目标通过。
 - **范围**：仅本地执行，复用现有 `topics` 与 `script` Schema。RM-019 云端执行和 RM-020 视频产物/渲染仍待评估，不由本 ADR 纳入。
 - **节点与连接**：节点类型为 `topic`、`candidate`、`prompt`、`agent`、`script`。唯一允许的父子类型为 `topic → candidate`（仅应用自动生成）、`candidate → prompt`、`prompt → agent`、`agent → script`、`script → prompt`；Candidate 与 Script 可各有多个 Prompt 子节点形成后续分支。单父、无环和全部图写入经 Go 命令层校验；前端不得独立裁定连接合法性。
 - **候选身份**：选题返回通过 `ValidateStructuredPayload(OutputKindTopics, ...)` 的 payload 后，应用在一个可恢复事务中保存不可变 `topics` artifact 并生成对应 candidate 节点。Candidate 绑定 `(artifactId, candidateIndex)`，索引为 0 基；不再使用 topic 端口或 `parentCandidate`。topic 生成候选后沿用已验收的内容/执行锁定规则；非法结果不生成候选。
@@ -259,7 +259,8 @@
 - **幂等与事务**：节点、父子关系、artifact、run 来源和去重身份作为一个可恢复事务提交；按运行身份、请求身份及 payload 指纹幂等。无 request ID 时同运行同内容也不得重复建节点；同运行不同内容/身份冲突拒绝。提交后索引/事件失败可恢复，不得半提交或假报成功；不删除可能共享的 CAS。
 - **发送快照**：运行冻结 topic root → Agent 路径、candidate 来源 artifact/index、prompt 任务/约束、输出绑定（或未绑定状态）、契约 kind/schema version 与授权的产物版本。改挂后的下一次运行重建上下文；旧运行和结果来源永不随实时图改写。运行内应用查询以冻结授权投影为准；活动期间保护运行路径和输出绑定，提交时仍复核身份与版本。
 - **工程格式**：新模型 `project.json` 使用版本 2。旧 v1 工程明确返回 `UNSUPPORTED_VERSION`，不静默迁移；不兼容工程不能阻止有效工程列表、新建或打开。M1 `sessions.json` 导入直接产出 v2 工程，原有备份/恢复规则保留。`bin` 中已指定旧工程的一次性清理只按 M2-11B 计划在关闭应用并复核路径后执行，不得实现成应用自动删数据；`bin` 外旧工程不删除、不自动迁移。
-- **错误码**：复用 `UNSUPPORTED_VERSION`、`SCHEMA_INVALID`、`OUTPUT_KIND_INVALID`、`TURN_NOT_ACTIVE`、`CHAIN_SCOPE_DENIED`、`NODE_LOCKED`、`BUSY`、`REQUEST_ID_CONFLICT`；新增目标模型需稳定区分 `NODE_CONNECTION_INVALID`、`OUTPUT_BINDING_CONFLICT`、`OUTPUT_VERSION_CONFLICT`、`RUN_RESULT_CONFLICT`。M2-11B 阶段中尚未接入执行的 prompt/agent/script 返回 `RUN_ENTRY_UNAVAILABLE`。错误均由 Go 命令/服务端产生，UI 按 code 展示。
+- **错误码**：复用 `UNSUPPORTED_VERSION`、`SCHEMA_INVALID`、`OUTPUT_KIND_INVALID`、`TURN_NOT_ACTIVE`、`CHAIN_SCOPE_DENIED`、`NODE_LOCKED`、`BUSY`、`REQUEST_ID_CONFLICT`；新增目标模型需稳定区分 `NODE_CONNECTION_INVALID`、`OUTPUT_BINDING_CONFLICT`、`OUTPUT_VERSION_CONFLICT`、`RUN_RESULT_CONFLICT`。M2-11B 验收时 prompt/agent/script 尚未接入运行入口；M2-11C 开放 Agent 运行，结构化 Script 提交尚不可用并返回 `OUTPUT_COMMIT_UNAVAILABLE`（留给 M2-11D）。错误均由 Go 命令/服务端产生，UI 按 code 展示。
+
 - **不变量**：单父森林、应用命令层写图、artifact 内容寻址不可变、路径隔离、全局单在途运行和本地绿色版边界保持。受限 `reply` 是应用侧命令入口，不授予 Agent 通用 `create_node`/`connect`/`update_params` 权限。
 - **待评估边界**：视频输出节点、scene DSL/前端代码选择与渲染导出属于 RM-020；云端适配、账户、素材上传、隔离、留存与计费属于 ADR-028/RM-019。任意生成代码不得在有应用凭据或本机权限的环境中直接执行。
 
