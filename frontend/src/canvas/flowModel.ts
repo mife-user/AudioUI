@@ -1,5 +1,6 @@
 import type { Edge, Node as FlowNode } from '@xyflow/react'
 import type { CandidateSource, Node, NodeParams, RunStartResult, WorkspaceSnapshot } from '../../bindings/audio-ui/internal/domain/entity'
+import { OutputKind, PendingStatus } from '../../bindings/audio-ui/internal/domain/valueobject'
 import type { TopicCandidateFixture } from './graphApi'
 
 export type ChildNodeType = 'prompt' | 'agent' | 'script'
@@ -18,6 +19,7 @@ export type CanvasNodeData = {
   projectId?: string
   runStatus?: string
   pendingCount?: number
+  pendingOutputCount?: number
   globalRunBusy?: boolean
   runSubmitting?: boolean
   onUpdateTopicParams?: (nodeId: string, title: string, params: NodeParams, projectId: string) => Promise<boolean | void>
@@ -101,6 +103,9 @@ export function nodeHandleLayoutKey(type: CanvasFlowNode['type'], data: CanvasNo
       hook: data.candidate?.hook ?? '',
     })
   }
+  if (type === 'script') {
+    return JSON.stringify({ type, hasParent: Boolean(data.node.parent), versions: data.node.scriptVersions ?? [] })
+  }
   return JSON.stringify({ type, hasParent: Boolean(data.node.parent) })
 }
 
@@ -172,9 +177,13 @@ export function buildFlowModel(
     if (!previous || startedAt >= previous.startedAt) latestRunByNode.set(run.nodeId, { status: run.status, startedAt })
   }
   const pendingCountByNode = new Map<string, number>()
+  const pendingOutputCountByScript = new Map<string, number>()
   for (const pending of snapshot.pending ?? []) {
-    if (pending.status !== 'pending' && pending.status !== 'invalid') continue
+    if (pending.status !== PendingStatus.PendingPending && pending.status !== PendingStatus.PendingInvalid) continue
     pendingCountByNode.set(pending.nodeId, (pendingCountByNode.get(pending.nodeId) ?? 0) + 1)
+    if (pending.kind !== OutputKind.OutputKindScript) continue
+    const output = scriptByAgent.get(pending.nodeId)
+    if (output) pendingOutputCountByScript.set(output.id, (pendingOutputCountByScript.get(output.id) ?? 0) + 1)
   }
   const globalRunBusy = Boolean(callbacks.runSubmittingNodeId)
     || (snapshot.runs ?? []).some((run) => run.status === 'starting' || run.status === 'running')
@@ -200,6 +209,7 @@ export function buildFlowModel(
         projectId,
         runStatus: latestRunByNode.get(node.id)?.status,
         pendingCount: pendingCountByNode.get(node.id) ?? 0,
+        pendingOutputCount: pendingOutputCountByScript.get(node.id) ?? 0,
         globalRunBusy,
         runSubmitting: callbacks.runSubmittingNodeId === node.id,
         onUpdateTopicParams: callbacks.onUpdateTopicParams,

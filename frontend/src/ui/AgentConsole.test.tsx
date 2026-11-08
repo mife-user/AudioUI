@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { OutputKind, PendingStatus, PermissionTier, RunStatus, TranscriptKind } from '../../bindings/audio-ui/internal/domain/valueobject'
-import type { PendingDetail, PendingSummary, RunSnapshot, WorkspaceRunSummary } from '../../bindings/audio-ui/internal/domain/entity'
+import type { Node, PendingDetail, PendingSummary, RunSnapshot, WorkspaceRunSummary } from '../../bindings/audio-ui/internal/domain/entity'
 import type { RunView } from '../stores/runStore'
 import { AgentConsole } from './AgentConsole'
 
@@ -60,6 +60,29 @@ const pendingSummary: PendingSummary = {
   summary: '3 个候选',
 }
 
+const scriptPendingSummary: PendingSummary = {
+  id: 'pending_script',
+  nodeId: 'n_agent',
+  runId: 'r_script_new',
+  chainId: 'c_n_agent',
+  kind: OutputKind.OutputKindScript,
+  status: PendingStatus.PendingPending,
+  summary: '追加到 v1',
+}
+
+const scriptNode: Node = {
+  id: 'n_script',
+  type: 'script' as Node['type'],
+  title: '旁白脚本',
+  parent: 'n_agent',
+  position: { x: 0, y: 0 },
+  params: {},
+  rounds: [],
+  scriptVersions: [{ n: 1, artifactId: 'sha256:script-v1', runId: 'r_script_old' }],
+  locked: false,
+  stale: false,
+}
+
 const topicsPayload = JSON.stringify({ topics: [
   { title: '候选甲', angle: '人物观察', hook: '凌晨出发' },
   { title: '候选乙', angle: '城市声音', hook: '末班车' },
@@ -84,10 +107,40 @@ function pendingDetail(status: PendingSummary['status'] = PendingStatus.PendingP
   }
 }
 
+function scriptPendingDetail(): PendingDetail {
+  const previous = pendingDetail().pending
+  return {
+    pending: {
+      ...previous,
+      id: scriptPendingSummary.id,
+      nodeId: scriptPendingSummary.nodeId,
+      runId: scriptPendingSummary.runId,
+      chainId: scriptPendingSummary.chainId,
+      kind: OutputKind.OutputKindScript,
+      status: PendingStatus.PendingPending,
+      summary: scriptPendingSummary.summary,
+      outputBinding: {
+        bound: true,
+        nodeId: scriptNode.id,
+        parentNodeId: 'n_agent',
+        baselineVersion: 1,
+        baselineArtifactId: 'sha256:script-v1',
+      },
+      outputSchemaVersion: 1,
+      resultNodeId: scriptNode.id,
+    },
+    rawPayload: encodePayload(JSON.stringify({
+      title: '旁白脚本修订版',
+      scenes: [{ narration: '从鼓点切分看节奏变化。', duration: 12 }],
+    })),
+  }
+}
+
 function renderConsole(overrides: Partial<React.ComponentProps<typeof AgentConsole>> = {}) {
   const props: React.ComponentProps<typeof AgentConsole> = {
     runs: [summary],
     projectId: 'p_demo',
+    nodes: [],
     pending: [],
     runViews: { [summary.id]: historyView },
     selectedRunId: summary.id,
@@ -249,5 +302,107 @@ describe('AgentConsole', () => {
     renderConsole({ collapsed: true })
     expect(screen.getByText('c_n_topic')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '展开控制台' })).toBeInTheDocument()
+  })
+
+  it('shows the bound Script target, frozen base version, original source, and new result preview', async () => {
+    renderConsole({
+      pending: [scriptPendingSummary],
+      nodes: [scriptNode],
+      onGetPending: vi.fn().mockResolvedValue(scriptPendingDetail()),
+    })
+    fireEvent.click(screen.getByRole('tab', { name: /待处理/ }))
+    fireEvent.click(screen.getByRole('button', { name: /n_agent/ }))
+
+    expect(await screen.findByText('旁白脚本修订版')).toBeInTheDocument()
+    expect(screen.getByText('目标 Script')).toBeInTheDocument()
+    expect(screen.getByText('v1')).toBeInTheDocument()
+    expect(screen.getByText('r_script_old')).toBeInTheDocument()
+    expect(screen.getByText('sha256:script-v1')).toBeInTheDocument()
+    expect(screen.getByText('r_script_new')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '确认追加' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '丢弃结果' })).toBeInTheDocument()
+  })
+
+  it('confirms a Script result through ApplyPending and never offers force on a version conflict', async () => {
+    const onApplyPending = vi.fn().mockRejectedValue(new Error('OUTPUT_VERSION_CONFLICT'))
+    renderConsole({
+      pending: [scriptPendingSummary],
+      nodes: [scriptNode],
+      onGetPending: vi.fn().mockResolvedValue(scriptPendingDetail()),
+      onApplyPending,
+    })
+    fireEvent.click(screen.getByRole('tab', { name: /待处理/ }))
+    fireEvent.click(screen.getByRole('button', { name: /n_agent/ }))
+    await screen.findByRole('button', { name: '确认追加' })
+
+    fireEvent.click(screen.getByRole('button', { name: '确认追加' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('确认追加失败：OUTPUT_VERSION_CONFLICT')
+    expect(onApplyPending).toHaveBeenCalledWith('pending_script', false, 'p_demo')
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '确认并强制应用' })).not.toBeInTheDocument()
+  })
+
+  it('shows an invalid Script reply as raw output without a confirmation action', async () => {
+    const invalid = scriptPendingDetail()
+    invalid.pending.status = PendingStatus.PendingInvalid
+    invalid.pending.error = 'SCHEMA_INVALID: script scenes are invalid'
+    renderConsole({
+      pending: [{ ...scriptPendingSummary, status: PendingStatus.PendingInvalid, error: invalid.pending.error }],
+      nodes: [scriptNode],
+      onGetPending: vi.fn().mockResolvedValue(invalid),
+    })
+    fireEvent.click(screen.getByRole('tab', { name: /待处理/ }))
+    fireEvent.click(screen.getByRole('button', { name: /n_agent/ }))
+
+    expect(await screen.findByText(/SCHEMA_INVALID: script scenes are invalid/)).toBeInTheDocument()
+    expect(screen.getByText(/查看原始输出/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '确认追加' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '丢弃结果' })).toBeInTheDocument()
+  })
+
+  it('discards a bound Script result without changing the displayed original version', async () => {
+    const onApplyPending = vi.fn().mockResolvedValue(undefined)
+    const onDiscardPending = vi.fn().mockResolvedValue(undefined)
+    renderConsole({
+      pending: [scriptPendingSummary],
+      nodes: [scriptNode],
+      onGetPending: vi.fn().mockResolvedValue(scriptPendingDetail()),
+      onApplyPending,
+      onDiscardPending,
+    })
+    fireEvent.click(screen.getByRole('tab', { name: /待处理/ }))
+    fireEvent.click(screen.getByRole('button', { name: /n_agent/ }))
+    await screen.findByText('r_script_old')
+    fireEvent.click(screen.getByRole('button', { name: '丢弃结果' }))
+
+    await waitFor(() => expect(onDiscardPending).toHaveBeenCalledWith('pending_script', 'p_demo'))
+    expect(onApplyPending).not.toHaveBeenCalled()
+    expect(screen.getByText('sha256:script-v1')).toBeInTheDocument()
+  })
+
+  it('prevents duplicate Script confirmation and retries only snapshot sync after a committed result', async () => {
+    let resolveApply!: () => void
+    const onApplyPending = vi.fn(() => new Promise<void>((resolve) => { resolveApply = resolve }))
+    const onRefreshWorkspace = vi.fn().mockRejectedValueOnce(new Error('快照读取失败')).mockResolvedValueOnce(undefined)
+    renderConsole({
+      pending: [scriptPendingSummary],
+      nodes: [scriptNode],
+      onGetPending: vi.fn().mockResolvedValue(scriptPendingDetail()),
+      onApplyPending,
+      onRefreshWorkspace,
+    })
+    fireEvent.click(screen.getByRole('tab', { name: /待处理/ }))
+    fireEvent.click(screen.getByRole('button', { name: /n_agent/ }))
+    await screen.findByRole('button', { name: '确认追加' })
+    const confirm = screen.getByRole('button', { name: '确认追加' })
+
+    fireEvent.click(confirm)
+    fireEvent.click(confirm)
+    expect(onApplyPending).toHaveBeenCalledOnce()
+    resolveApply()
+    expect(await screen.findByText(/操作已成功，但工程状态同步失败/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '重试同步' }))
+    await waitFor(() => expect(onRefreshWorkspace).toHaveBeenCalledTimes(2))
+    expect(onApplyPending).toHaveBeenCalledOnce()
   })
 })

@@ -106,6 +106,7 @@ describe('flowModel', () => {
       globalRunBusy: false,
       outputScript: script,
     })
+    expect(model.nodes.find((node) => node.id === script.id)?.data.pendingOutputCount).toBe(1)
   })
 
   it('uses the backend-provided leaf path for highlighting and includes an in-flight start path in the lock view', () => {
@@ -125,6 +126,24 @@ describe('flowModel', () => {
     expect(model.nodes.find((node) => node.id === agent.id)?.data.runningLocked).toBe(true)
     expect(model.nodes.find((node) => node.id === agent.id)?.data.globalRunBusy).toBe(true)
     expect(model.edges.find((edge) => edge.target === prompt.id)?.className).toBe('workspace-edge-highlighted')
+  })
+
+  it('changes Script handle measurement keys when immutable version history changes', () => {
+    const agent = makeNode('n_agent', 'agent', 'n_prompt')
+    const script = makeNode('n_script', 'script', agent.id, {
+      scriptVersions: [{ n: 1, artifactId: 'sha256:script-v1', runId: 'r_one' }],
+    })
+    const before = buildFlowModel(snapshot([agent, script]), vi.fn()).nodes.find((node) => node.id === script.id)
+    const after = buildFlowModel(snapshot([agent, {
+      ...script,
+      scriptVersions: [
+        ...(script.scriptVersions ?? []),
+        { n: 2, artifactId: 'sha256:script-v2', runId: 'r_two' },
+      ],
+    }]), vi.fn()).nodes.find((node) => node.id === script.id)
+    if (!before || !after) throw new Error('script flow node missing')
+
+    expect(nodeHandleLayoutKey(before.type, before.data)).not.toBe(nodeHandleLayoutKey(after.type, after.data))
   })
 
   it('reports subtree size and root identity for v2 candidate branches', () => {

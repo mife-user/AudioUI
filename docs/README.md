@@ -1,6 +1,6 @@
 # 文档索引
 
-> M2-11～13 已选择 RM-018 的本地脚本子范围；M2-11A 设计、M2-11B 工程格式/图领域模型与 M2-11C 发送快照均已验收；M2-11D 已验收（2026-11-07），完整产品闭环尚未实现。M2-00～10 旧模型验收事实保留；RM-019 云端与 RM-020 视频仍待评估。
+> M2-11～13 已选择 RM-018 的本地脚本子范围；M2-11A 设计、M2-11B 工程格式/图领域模型与 M2-11C 发送快照均已验收；M2-11D 已验收（2026-11-07），M2-12A 已验收（2026-11-08），M2-12B 已于 2026-11-08 通过用户验收（真实浏览器实测未执行），完整产品闭环尚未实现。M2-00～10 旧模型验收事实保留；RM-019 云端与 RM-020 视频仍待评估。
 
 | 文档 | 读者 | 状态 | 说明 |
 |---|---|---|---|
@@ -17,6 +17,7 @@
 | [design/m2-topic-closure-demo.html](design/m2-topic-closure-demo.html) | 设计 / 前端 | 演示 | 选题运行、待应用、候选分支及改挂的本地交互示例 |
 | [design/target-agent-flow-demo.html](design/target-agent-flow-demo.html) | 产品 / 设计 / 开发 | 历史目标演示 | 较早的目标方向草案，含云端/视频示意；不代表当前 M2-11～13 范围 |
 | [design/m2-11-13-local-flow-demo.html](design/m2-11-13-local-flow-demo.html) | 产品 / 设计 / 开发 | M2-11A 设计验收演示 | 本地候选→提示词→Agent→`script` 输出模拟交互；设计已验收，不是产品实现 |
+| [design/m2-12b-output-chain-demo.html](design/m2-12b-output-chain-demo.html) | 产品 / 设计 / 开发 | M2-12B 交互演示 | 已有脚本结果确认/冲突/丢弃及叶子链切换的静态模拟 |
 | [design/canvas-edge-008-diagnosis.html](design/canvas-edge-008-diagnosis.html) | 开发 / 测试 | 诊断示意 | React Flow 动态候选端口、测量缓存与错误 008 的时序说明 |
 | [design/canvas-drag-measurement-diagnosis.html](design/canvas-drag-measurement-diagnosis.html) | 开发 / 测试 | 诊断示意 | 拖动时节点测量状态丢失及修复思路的独立交互示意 |
 | [dev/process.md](dev/process.md) | 开发 / 产品 | 草案 | 阶段、工作分解、门禁、变更控制 |
@@ -42,6 +43,8 @@
 | [dev/evidence/m2-10c.md](dev/evidence/m2-10c.md) | 产品 / 测试 | 证据 | M2-10C 页面验收已由用户确认；附件截图未归档到仓库 |
 | [dev/evidence/m2-11c.md](dev/evidence/m2-11c.md) | 产品 / 测试 | 证据 | M2-11C 发送快照、上下文与运行授权（用户已验收） |
 | [dev/evidence/m2-11d.md](dev/evidence/m2-11d.md) | 产品 / 测试 | 自检与验收证据 | M2-11D 受限 reply、原子结果事务与恢复自检；不代表 M2-13 完整验收 |
+| [dev/evidence/m2-12a.md](dev/evidence/m2-12a.md) | 产品 / 测试 | 自检与验收证据 | M2-12A 新模型工作台与 Agent 运行入口 |
+| [dev/evidence/m2-12b.md](dev/evidence/m2-12b.md) | 产品 / 测试 | 自检与验收证据 | M2-12B Script 确认、叶子链快捷栏与未覆盖的浏览器实测 |
 | [agent-protocol.md](agent-protocol.md) | 开发 | 草案 | MCP 工具、能力位、权限、会话 |
 | [acceptance.md](acceptance.md) | 产品 / 测试 | 草案 | 验收标准与发布门禁 |
 | [decisions.md](decisions.md) | 开发 | 草案 | 架构决策记录 |

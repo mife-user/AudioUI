@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AudioUI · M2-12B 脚本确认与叶子链演示</title>
+  <style>
+    :root{color-scheme:dark;--bg:#0a0e11;--elev:#0c1216;--panel:#101a1f;--panel2:#0b1216;--border:#1e2a30;--strong:#2a3f48;--text:#dfe7ea;--dim:#9fb2b9;--muted:#6f828a;--accent:#5ad1e6;--accent-soft:rgba(90,209,230,.09);--ok:#6fd3a4;--ok-soft:rgba(111,211,164,.1);--warn:#d8b27a;--warn-soft:rgba(216,178,122,.1);--danger:#d98a8a;--danger-soft:rgba(217,138,138,.1);--edge:#3d6b78;--radius:9px;--small:5px;--s1:4px;--s2:8px;--s3:12px;--s4:16px}
+    *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:13px/1.5 Inter,"Noto Sans SC","Microsoft YaHei",sans-serif}button{font:inherit;color:inherit;cursor:pointer}button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}header{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:14px 20px;background:var(--elev);border-bottom:1px solid var(--border)}.brand{font-weight:700;letter-spacing:.12em}.brand b{color:var(--accent)}.badge{padding:3px 8px;border:1px solid var(--strong);border-radius:999px;color:var(--dim);font-size:10px}.local{color:var(--ok)}main{max-width:1400px;margin:auto;padding:22px}.intro{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;margin-bottom:16px}.intro h1{margin:0 0 4px;font-size:20px}.intro p{margin:0;color:var(--dim)}.layout{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:14px}.panel{min-width:0;border:1px solid var(--border);border-radius:var(--radius);background:var(--panel)}.panel-head{display:flex;justify-content:space-between;gap:10px;padding:13px 15px;border-bottom:1px solid var(--border)}.panel-head h2,.panel h2{margin:0;font-size:13px}.panel-head p,.panel>p{margin:3px 0 0;color:var(--muted);font-size:10.5px}.canvas{min-height:470px;display:flex;flex-direction:column;justify-content:space-between;padding:20px;background-image:radial-gradient(var(--border) 1px,transparent 1px);background-size:22px 22px}.flow{display:grid;grid-template-columns:repeat(5,minmax(110px,1fr));gap:9px;align-items:center}.node{min-height:122px;padding:11px;border:1px solid var(--strong);border-radius:var(--radius);background:var(--panel);box-shadow:0 8px 20px rgba(0,0,0,.12)}.node.selected{border-color:var(--accent)}.kind{color:var(--accent);font:10px Consolas,monospace;letter-spacing:.1em}.node h3{margin:8px 0 5px;font-size:11px}.node p{margin:0;color:var(--dim);font-size:10px}.node small{display:block;margin-top:8px;color:var(--muted);font:9px Consolas,monospace;overflow-wrap:anywhere}.arrow{align-self:center;color:var(--edge);text-align:center}.quickbar{display:flex;align-items:stretch;gap:8px;margin-top:24px;padding:8px;border:1px solid var(--strong);border-radius:var(--radius);background:rgba(12,18,22,.95)}.quickbar-toggle{min-width:54px;display:flex;flex-direction:column;justify-content:center;gap:2px;padding:0 8px;border:0;border-right:1px solid var(--border);background:transparent;color:var(--muted);font-size:9px;text-align:center}.quickbar-toggle strong{color:var(--dim);font:9px Consolas,monospace}.quickbar-toggle small{font-size:8px}.quickbar.is-collapsed{min-height:42px;align-items:center}.quickbar.is-collapsed .quickbar-toggle{min-width:0;flex:1;flex-direction:row;align-items:center;gap:8px;border:0;text-align:left}.quickbar.is-collapsed .quickbar-toggle small{margin-left:auto}.chains{display:flex;gap:7px;overflow:auto;min-width:0}.chain{min-width:155px;flex:1;padding:7px 9px;border:1px solid var(--border);border-radius:var(--small);background:var(--panel2);text-align:left}.chain[aria-pressed=true]{border-color:var(--accent);background:var(--accent-soft)}.chain strong,.chain span{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.chain strong{font-size:10px}.chain span{color:var(--muted);font-size:9px}.chain .running{color:var(--ok)}.chain .pending{color:var(--warn)}.quickbar-new{flex:none;padding:0 8px;border:1px solid var(--strong);border-radius:var(--small);background:var(--panel2);color:var(--dim);font-size:9px;white-space:nowrap}.side{display:grid;align-content:start;gap:12px}.side .panel{padding:13px}.binding{display:grid;gap:6px;margin:10px 0;padding:9px;border-radius:var(--small);background:var(--panel2)}.binding div{display:grid;grid-template-columns:90px minmax(0,1fr);gap:8px;font:9px Consolas,monospace;overflow-wrap:anywhere}.binding dt{color:var(--muted)}.binding dd{margin:0;color:var(--dim)}.result{padding:10px;border:1px solid rgba(216,178,122,.45);border-radius:var(--small);background:var(--warn-soft)}.result h3{margin:0 0 7px;font-size:11px}.result ol{max-height:110px;overflow:auto;margin:0;padding-left:20px;color:var(--dim);font-size:10px}.actions{display:flex;gap:7px;flex-wrap:wrap;margin-top:10px}.actions button{min-height:30px;padding:4px 9px;border:1px solid var(--strong);border-radius:var(--small);background:var(--panel2);font-size:10px}.actions .confirm{border-color:var(--ok);background:var(--ok-soft);color:var(--ok)}.actions .discard{border-color:var(--danger);background:var(--danger-soft);color:var(--danger)}.error,.notice{margin-top:8px;padding:8px;border-radius:var(--small);font-size:10px}.error{border:1px solid var(--danger);background:var(--danger-soft);color:var(--danger)}.notice{border:1px solid var(--border);background:var(--panel2);color:var(--dim)}.versions{display:grid;gap:6px;margin:9px 0 0;padding:0;list-style:none}.versions li{padding:7px 8px;border-radius:var(--small);background:var(--panel2);font-size:9px;color:var(--dim);overflow-wrap:anywhere}.versions strong,.versions span{display:block}.versions strong{color:var(--text)}.versions code{font-family:Consolas,monospace;color:var(--muted)}footer{margin-top:14px;color:var(--muted);font-size:10px}
+    @media(max-width:980px){main{padding:14px}.layout{grid-template-columns:1fr}.side{grid-template-columns:repeat(2,minmax(0,1fr))}.flow{min-width:760px}.canvas{overflow:auto}.side .panel:last-child{grid-column:1/-1}}
+    @media(max-width:620px){header{align-items:flex-start;flex-direction:column}.intro{flex-direction:column}.canvas{padding:12px}.quickbar-toggle{display:none}.chain{min-width:130px}.side{grid-template-columns:1fr}.side .panel:last-child{grid-column:auto}}
+    @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;transition:none!important;animation:none!important}}
+  </style>
+</head>
+<body>
+  <header><div class="brand"><b>AUDIO</b>UI <span class="badge">M2-12B 交互演示</span></div><div class="badge local">本地静态模拟 · 不连接工程</div></header>
+  <main>
+    <section class="intro"><div><h1>已有脚本结果确认与叶子链切换</h1><p>新结果绑定 Agent 的输出与冻结基准版本；叶子链状态直接来自工作台快照。</p></div><span class="badge">不调用 Agent / 不写磁盘 / 不联网</span></section>
+    <div class="layout">
+      <section class="panel">
+        <div class="panel-head"><div><h2>本地脚本工作流</h2><p>选择叶子链只切换当前节点；运行与待处理状态取自模拟快照。</p></div><span class="badge">共享提示词前缀 · 3 条叶子链</span></div>
+        <div class="canvas">
+          <div class="flow" aria-label="脚本工作流示意">
+            <article class="node"><span class="kind">CANDIDATE</span><h3>候选：节奏解析</h3><p>来源固定 · 可建立多个分支</p></article><div class="arrow">→</div>
+            <article class="node selected"><span class="kind">PROMPT</span><h3 id="path-prompt">共同提示词</h3><p>共享路径前缀</p></article><div class="arrow">→</div>
+            <article class="node"><span class="kind">AGENT / SCRIPT</span><h3 id="path-tail">Agent 乙 → 旁白脚本</h3><p id="path-state">结果待确认 · 输出基准 v1</p></article>
+          </div>
+          <nav class="quickbar" aria-label="叶子链快捷栏"><button class="quickbar-toggle" id="chain-toggle" type="button" aria-expanded="true" aria-controls="chains"><span>叶子链</span><strong>3 条 · 1 工作 · 1 待处理</strong><small>收起</small></button><div class="chains" id="chains">
+            <button class="chain" type="button" data-chain="a" aria-pressed="false"><strong>段落梳理</strong><span>候选 → 提示词 → Agent 甲</span><span class="running">工作中</span></button>
+            <button class="chain" type="button" data-chain="b" aria-pressed="true"><strong>旁白脚本</strong><span>候选 → 提示词 → Agent 乙 → Script</span><span class="pending">待处理</span></button>
+            <button class="chain" type="button" data-chain="c" aria-pressed="false"><strong>标题备选</strong><span>候选 → 提示词 → Agent 丙</span><span>空闲</span></button>
+          </div><button class="quickbar-new" id="new-chain" type="button">＋ 新链路</button></nav>
+        </div>
+      </section>
+      <aside class="side" aria-label="脚本待处理与版本">
+        <section class="panel"><h2>脚本追加待确认</h2><p>确认时服务端重新核验输出绑定与冻结版本；冲突时不能强制覆盖。</p>
+          <dl class="binding"><div><dt>目标 Script</dt><dd>旁白脚本 · n_script</dd></div><div><dt>冻结基准</dt><dd id="base-version">v1</dd></div><div><dt>原版本来源</dt><dd>r_script_old</dd></div><div><dt>原 Artifact</dt><dd>sha256:script-v1</dd></div><div><dt>新结果来源</dt><dd>r_script_new</dd></div><div><dt>输出契约</dt><dd>script@1</dd></div></dl>
+          <div class="result" id="result"><h3>旁白脚本修订版</h3><ol><li>从鼓点切分看节奏变化。 · 12 秒</li><li>加入转场与结尾提示。 · 10 秒</li></ol></div>
+          <div class="actions"><button class="confirm" id="confirm" type="button">确认追加</button><button class="discard" id="discard" type="button">丢弃结果</button><button id="simulate-conflict" type="button">模拟版本冲突</button></div>
+          <div class="error" id="error" role="alert" hidden></div><div class="notice" id="notice" role="status" aria-live="polite">待确认结果不会改写已有版本。</div>
+        </section>
+        <section class="panel"><h2>不可变版本历史</h2><p>版本按来源运行与内容寻址 artifact 追溯。</p><ol class="versions" id="versions"><li><strong>v1 · 原始脚本</strong><span>运行 <code>r_script_old</code></span><span>Artifact <code>sha256:script-v1</code></span></li></ol></section>
+      </aside>
+    </div>
+    <footer>固定示例，仅演示 M2-12B 的界面状态，不代表实际工程操作或用户验收。</footer>
+  </main>
+  <script>
+    (() => {
+      const chains = [...document.querySelectorAll('[data-chain]')]
+      const quickbar = document.querySelector('.quickbar')
+      const chainToggle = document.getElementById('chain-toggle')
+      const chainList = document.getElementById('chains')
+      const pathTail = document.getElementById('path-tail')
+      const pathState = document.getElementById('path-state')
+      const baseVersion = document.getElementById('base-version')
+      const error = document.getElementById('error')
+      const notice = document.getElementById('notice')
+      const versions = document.getElementById('versions')
+      const state = { selected: 'b', currentVersion: 1, baseline: 1, pending: true, conflict: false }
+      function render() {
+        for (const button of chains) button.setAttribute('aria-pressed', String(button.dataset.chain === state.selected))
+        pathTail.textContent = state.selected === 'a' ? 'Agent 甲' : state.selected === 'c' ? 'Agent 丙' : 'Agent 乙 → 旁白脚本'
+        pathState.textContent = state.selected === 'b' ? (state.pending ? `结果待确认 · 输出基准 v${state.baseline}` : `当前版本 v${state.currentVersion}`) : '视图已切换 · 不占用运行槽'
+        baseVersion.textContent = `v${state.baseline}`
+        error.hidden = !state.conflict
+        error.textContent = state.conflict ? `OUTPUT_VERSION_CONFLICT：待确认结果基于 v${state.baseline}，当前已是 v${state.currentVersion}；未覆盖或追加。` : ''
+        document.getElementById('confirm').disabled = !state.pending || state.selected !== 'b'
+        document.getElementById('discard').disabled = !state.pending || state.selected !== 'b'
+        if (!state.pending) notice.textContent = '结果已处理；已有版本与来源仍保留。'
+      }
+      chainToggle.addEventListener('click', () => {
+        const expanded = chainToggle.getAttribute('aria-expanded') === 'true'
+        chainToggle.setAttribute('aria-expanded', String(!expanded))
+        chainToggle.querySelector('small').textContent = expanded ? '展开' : '收起'
+        chainList.hidden = expanded
+        quickbar.classList.toggle('is-collapsed', expanded)
+      })
+      document.getElementById('new-chain').addEventListener('click', () => {
+        notice.textContent = '产品中此操作通过 Go 命令新建选题根节点；本静态演示不写入工程。'
+      })
+      chains.forEach((button) => button.addEventListener('click', () => { state.selected = button.dataset.chain; render() }))
+      document.getElementById('confirm').addEventListener('click', () => {
+        if (!state.pending || state.selected !== 'b') return
+        if (state.baseline !== state.currentVersion) { state.conflict = true; render(); return }
+        state.currentVersion += 1
+        state.pending = false
+        const item = document.createElement('li')
+        item.innerHTML = `<strong>v${state.currentVersion} · 旁白脚本修订版</strong><span>运行 <code>r_script_new</code></span><span>Artifact <code>sha256:script-v2</code></span>`
+        versions.prepend(item)
+        render()
+      })
+      document.getElementById('discard').addEventListener('click', () => { state.pending = false; state.conflict = false; render() })
+      document.getElementById('simulate-conflict').addEventListener('click', () => {
+        if (!state.pending) return
+        state.currentVersion += 1
+        const item = document.createElement('li')
+        item.innerHTML = `<strong>v${state.currentVersion} · 并发来源</strong><span>运行 <code>r_external</code></span><span>Artifact <code>sha256:external</code></span>`
+        versions.prepend(item)
+        notice.textContent = '基准版本已改变；再次确认会被服务端拒绝。'
+        render()
+      })
+      render()
+    })()
+  </script>
+</body>
+</html>

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { PendingStatus, RunStatus } from '../../bindings/audio-ui/internal/domain/valueobject'
-import type { PendingDetail, PendingSummary, WorkspaceRunSummary } from '../../bindings/audio-ui/internal/domain/entity'
+import { PendingStatus, OutputKind, RunStatus } from '../../bindings/audio-ui/internal/domain/valueobject'
+import type { Node, PendingDetail, PendingSummary, WorkspaceRunSummary } from '../../bindings/audio-ui/internal/domain/entity'
 import type { PermissionDecision, PermissionRequest, QuestionRequest } from '../api/runs'
 import type { RunView } from '../stores/runStore'
 import { PermissionCard } from './PermissionCard'
@@ -13,6 +13,7 @@ import { PendingArtifactCard } from './PendingArtifactCard'
 type Props = {
   runs: WorkspaceRunSummary[]
   projectId: string | null
+  nodes: Node[]
   pending: PendingSummary[]
   runViews: Record<string, RunView>
   selectedRunId: string | null
@@ -88,6 +89,7 @@ function isPendingHashConflict(message: string): boolean {
 export function AgentConsole({
   runs,
   projectId,
+  nodes,
   pending,
   runViews,
   selectedRunId,
@@ -124,6 +126,12 @@ export function AgentConsole({
   const currentProjectId = useRef(projectId)
   currentProjectId.current = projectId
   const selectedPending = pendingItems.find((item) => item.id === selectedPendingId)
+  const selectedPendingDetail = pendingDetail?.pending.id === selectedPendingId ? pendingDetail : null
+  const isBoundScriptPending = selectedPendingDetail?.pending.kind === OutputKind.OutputKindScript
+    && Boolean(selectedPendingDetail.pending.outputBinding?.bound)
+  const selectedOutputNodeId = selectedPendingDetail?.pending.resultNodeId
+    || selectedPendingDetail?.pending.outputBinding?.nodeId
+  const selectedOutputNode = selectedOutputNodeId ? nodes.find((node) => node.id === selectedOutputNodeId) : undefined
 
   useEffect(() => {
     pendingGeneration.current += 1
@@ -201,11 +209,12 @@ export function AgentConsole({
     } catch (failure) {
       if (currentProjectId.current !== ownerProjectId) return
       const message = messageOf(failure)
-      if (action === 'apply' && !force && isPendingHashConflict(message)) {
+      if (action === 'apply' && !force && !isBoundScriptPending && isPendingHashConflict(message)) {
         setForceConfirmationId(id)
         setPendingActionError('')
       } else {
-        setPendingActionError(`${action === 'apply' ? '应用' : '丢弃'}失败：${message}`)
+        const actionLabel = action === 'apply' ? isBoundScriptPending ? '确认追加' : '应用' : '丢弃'
+        setPendingActionError(`${actionLabel}失败：${message}`)
       }
     } finally {
       if (currentProjectId.current === ownerProjectId) {
@@ -308,6 +317,7 @@ export function AgentConsole({
                   <PendingArtifactCard
                     summary={selectedPending}
                     detail={pendingDetail?.pending.id === selectedPending.id ? pendingDetail : null}
+                    outputNode={selectedOutputNode}
                     loading={pendingLoading}
                     loadError={pendingLoadError}
                     actionError={pendingActionError}

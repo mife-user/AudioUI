@@ -18,6 +18,7 @@ type MockFlowProps = {
   onConnect: (connection: Connection) => void
   onNodeClick: (event: MouseEvent, node: CanvasFlowNode) => void
   onNodeDoubleClick: NodeMouseHandler<CanvasFlowNode>
+  children?: PropsWithChildren['children']
 }
 
 const flowMocks = vi.hoisted(() => ({ fitView: vi.fn(), setViewport: vi.fn() }))
@@ -95,6 +96,7 @@ vi.mock('@xyflow/react', async () => {
           if (node) props.onNodesChange([{ id: node.id, type: 'position', position: { x: 420, y: 160 }, dragging: false }])
         },
       }, 'simulate-drag'),
+      props.children,
     )
   }
   return {
@@ -336,6 +338,29 @@ describe('WorkspaceCanvas', () => {
     rerender(<WorkspaceCanvas snapshot={nextProject} onSelectNode={vi.fn().mockResolvedValue(undefined)} api={api} />)
     await vi.advanceTimersByTimeAsync(240)
     expect(api.moveNode).not.toHaveBeenCalled()
+  })
+
+  it('selects a backend leaf chain through SelectNode without graph mutation or run start', async () => {
+    const api = makeAPI()
+    const onSelectNode = vi.fn().mockResolvedValue(undefined)
+    const onGraphMutation = vi.fn()
+    const onStartRun = vi.fn()
+    render(
+      <WorkspaceCanvas
+        snapshot={makeSnapshot()}
+        onSelectNode={onSelectNode}
+        onGraphMutation={onGraphMutation}
+        onStartRun={onStartRun}
+        api={api}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '选择叶子链 测试链，空闲' }))
+    await waitFor(() => expect(onSelectNode).toHaveBeenCalledWith('n_agent'))
+    expect(onGraphMutation).not.toHaveBeenCalled()
+    expect(onStartRun).not.toHaveBeenCalled()
+    expect(api.addNode).not.toHaveBeenCalled()
+    expect(api.connect).not.toHaveBeenCalled()
   })
 
   it('persists selection and rolls it back when SelectNode fails', async () => {

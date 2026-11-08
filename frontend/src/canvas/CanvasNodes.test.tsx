@@ -159,15 +159,22 @@ describe('M2-12A canvas nodes', () => {
     expect(onStartRun).not.toHaveBeenCalled()
   })
 
-  it('renders the immutable Script version and allows creating a downstream prompt', () => {
+  it('renders immutable Script version history and pending output status', () => {
     const script = node('n_script', 'script', 'n_agent', {
-      scriptVersions: [{ n: 1, artifactId: 'sha256:script-v1', runId: 'r_one' }],
+      scriptVersions: [
+        { n: 1, artifactId: 'sha256:script-v1', runId: 'r_one' },
+        { n: 2, artifactId: 'sha256:script-v2', runId: 'r_two' },
+      ],
     })
     const onAddChild = vi.fn()
-    render(<ScriptNode {...nodeProps(script, nodeData(script, { onAddChild }))} />)
+    render(<ScriptNode {...nodeProps(script, nodeData(script, { onAddChild, pendingOutputCount: 1 }))} />)
 
-    expect(screen.getByText('1 个不可变版本 · 最新 v1')).toBeInTheDocument()
+    expect(screen.getByText('2 个不可变版本 · 最新 v2')).toBeInTheDocument()
+    expect(screen.getAllByText('r_two')).toHaveLength(2)
+    expect(screen.getByText('1 个结果待处理，可在运行控制台查看。')).toBeInTheDocument()
+    fireEvent.click(screen.getByText('版本历史 · 2'))
     expect(screen.getByText('r_one')).toBeInTheDocument()
+    expect(screen.getByText('sha256:script-v1')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '从 n_script 新增提示词' }))
     expect(onAddChild).toHaveBeenCalledWith('n_script', 'prompt')
   })

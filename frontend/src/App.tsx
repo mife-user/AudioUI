@@ -149,6 +149,7 @@ function App() {
         <AgentConsole
           runs={runSummaries}
           projectId={workspaceSnapshot?.project?.id ?? null}
+          nodes={workspaceSnapshot?.nodes ?? []}
           pending={workspaceSnapshot?.pending ?? []}
           runViews={runViews}
           selectedRunId={selectedRunId}

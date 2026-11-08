@@ -1,4 +1,4 @@
-import { act, fireEvent, render, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type { ReactElement } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { OutputKind, PendingStatus, RunStatus } from '../../bindings/audio-ui/internal/domain/valueobject'
@@ -154,6 +154,37 @@ describe('WorkspaceCanvas with real React Flow', () => {
     await waitFor(() => expect(onSelectNode).toHaveBeenCalledWith('n_prompt'))
     fireEvent.keyDown(topicWrapper, { key: ' ', code: 'Space' })
     await waitFor(() => expect(onSelectNode).toHaveBeenLastCalledWith('n_topic'))
+  })
+
+  it('keeps the QuickBar and Script edge stable when selecting a chain and appending a version', async () => {
+    const snapshot = makeSnapshot()
+    const script = snapshot.nodes?.find((node) => node.id === 'n_script')
+    if (!script) throw new Error('script missing from fixture')
+    script.scriptVersions = [{ n: 1, artifactId: 'sha256:script-v1', runId: 'r_v1' }]
+    const onSelectNode = vi.fn().mockResolvedValue(undefined)
+    const api = makeAPI()
+    const { container, rerender } = render(
+      <WorkspaceCanvas snapshot={snapshot} onSelectNode={onSelectNode} api={api} candidateFixtures={{ n_topic: [{ index: 0, title: '候选一' }] }} />,
+    )
+
+    await waitFor(() => expect(container.querySelectorAll('.react-flow__edge-path')).toHaveLength(4))
+    fireEvent.click(screen.getByRole('button', { name: '选择叶子链 测试链，空闲' }))
+    expect(onSelectNode).toHaveBeenCalledWith('n_script')
+
+    const nextSnapshot: WorkspaceSnapshot = {
+      ...snapshot,
+      project: { ...snapshot.project!, revision: 5, activeNodeId: 'n_script' },
+      nodes: snapshot.nodes?.map((node) => node.id === script.id
+        ? { ...node, scriptVersions: [...(node.scriptVersions ?? []), { n: 2, artifactId: 'sha256:script-v2', runId: 'r_v2' }] }
+        : node) ?? [],
+    }
+    rerender(
+      <WorkspaceCanvas snapshot={nextSnapshot} onSelectNode={onSelectNode} api={api} candidateFixtures={{ n_topic: [{ index: 0, title: '候选一' }] }} />,
+    )
+
+    await waitFor(() => expect(container.querySelectorAll('.react-flow__edge-path')).toHaveLength(4))
+    expect(screen.getByText('2 个不可变版本 · 最新 v2')).toBeInTheDocument()
+    expect(container.querySelector('.canvas-message-error')?.textContent ?? '').not.toMatch(/渲染错误 (008|015)/)
   })
 
   it('keeps all edges visible when selecting a node rebuilds the controlled snapshot', async () => {

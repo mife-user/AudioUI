@@ -20,6 +20,7 @@ import { allocateNodePosition } from './nodePosition'
 import { buildFlowEdges, buildFlowModel, inputHandleId, nodeMap, outputHandleId, subtreeSize, topicRootId, type CanvasFlowNode, type ChildNodeType } from './flowModel'
 import { preserveCanvasNodeViewState } from './nodeState'
 import { CandidateNode } from './CandidateNode'
+import { ChainQuickBar } from './ChainQuickBar'
 import { AgentNode } from './AgentNode'
 import { ScriptNode } from './ScriptNode'
 import { PromptNode } from './PromptNode'
@@ -522,6 +523,14 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, api, candidateFix
   }, [onSelectNode, projectId, schedulePositionSave, snapshot.project?.activeNodeId])
 
   const selectedNode = nodes.find((node) => node.selected)?.data.node
+  const selectChain = useCallback((tailNodeId: string) => {
+    setError('')
+    setNotice('')
+    if (snapshot.project?.activeNodeId === tailNodeId) return
+    void onSelectNode(tailNodeId).catch((failure) => {
+      setError(`保存链路选择失败：${errorMessage(failure)}`)
+    })
+  }, [onSelectNode, snapshot.project?.activeNodeId])
   const byId = useMemo(() => nodeMap(graphNodes), [graphNodes])
   const connectionTargets = graphNodes.filter((node) => inputHandleId(node) && node.type !== 'candidate' && node.id !== selectedNode?.id)
   const edges = useMemo(() => buildFlowEdges(nodes, measuredHandleLayouts), [nodes, measuredHandleLayouts])
@@ -764,6 +773,16 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, api, candidateFix
             <span><i className="legend-mark path-mark" />选中路径</span>
             <span><i className="legend-mark lock-mark" />运行锁</span>
             <span>滚轮缩放 · 拖动画布平移 · 双击节点聚焦</span>
+          </Panel>
+          <Panel position="bottom-center" className="canvas-quickbar-panel">
+            <ChainQuickBar
+              chains={snapshot.chains ?? []}
+              nodes={graphNodes}
+              activeNodeId={snapshot.project?.activeNodeId ?? ''}
+              onSelectNode={selectChain}
+              onNewChain={() => void addTopic()}
+              newChainDisabled={mutationBlocked}
+            />
           </Panel>
         </ReactFlow>
       </div>
