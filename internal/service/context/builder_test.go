@@ -216,7 +216,7 @@ func TestSnapshotContextUsesFrozenCandidateTaskScriptAndOutputBinding(t *testing
 	if body.OutputBinding == nil || !body.OutputBinding.Bound || body.OutputBinding.NodeID != "n_output" || body.OutputBinding.BaselineVersion != 1 || body.OutputBinding.BaselineArtifactID != baselineID {
 		t.Fatalf("output binding = %+v", body.OutputBinding)
 	}
-	if body.OutputContract == nil || body.OutputContract.Kind != valueobject.OutputKindScript || body.OutputContract.SchemaVersion != 1 || !strings.Contains(result.InitialPrompt, "script@1") || !strings.Contains(result.InitialPrompt, "结构化 Script 提交当前不可用") {
+	if body.OutputContract == nil || body.OutputContract.Kind != valueobject.OutputKindScript || body.OutputContract.SchemaVersion != 1 || !strings.Contains(result.InitialPrompt, "script@1") || !strings.Contains(result.InitialPrompt, "创建待确认结果") || !strings.Contains(result.InitialPrompt, "追加新版本") {
 		t.Fatalf("output contract = %+v", body.OutputContract)
 	}
 	if len(body.Path) != len(snapshot.ChainPath)-1 || !strings.Contains(string(body.Path[1].Payload), "候选乙") || body.Path[1].CandidateNumber == nil || *body.Path[1].CandidateNumber != 2 || !strings.Contains(string(body.Path[4].Payload), "不可变祖先正文") {

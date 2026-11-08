@@ -75,11 +75,12 @@ func NewBuilder(artifacts port.ArtifactStoreProvider) *Builder {
 }
 
 type targetSection struct {
-	TreeID     string                 `json:"treeId"`
-	ChainPath  []string               `json:"chainPath"`
-	NodeID     string                 `json:"nodeId"`
-	NodeType   valueobject.NodeType   `json:"nodeType"`
-	OutputKind valueobject.OutputKind `json:"outputKind"`
+	TreeID         string                 `json:"treeId"`
+	ChainPath      []string               `json:"chainPath"`
+	NodeID         string                 `json:"nodeId"`
+	NodeType       valueobject.NodeType   `json:"nodeType"`
+	OutputKind     valueobject.OutputKind `json:"outputKind"`
+	ProjectVersion int                    `json:"-"`
 }
 
 type workspaceSection struct {
@@ -250,6 +251,17 @@ func (b *Builder) resolveLegacy(ctx context.Context, input Input, includeWorkspa
 	if err != nil {
 		return resolvedInput{}, err
 	}
+	if project.Version >= valueobject.ProjectFileVersion {
+		if err := graph.Validate(); err != nil {
+			return resolvedInput{}, err
+		}
+		snapshot, err := graph.SnapshotForRun(input.NodeID)
+		if err != nil {
+			return resolvedInput{}, err
+		}
+		input.Snapshot = snapshot
+		return b.resolveSnapshot(ctx, input, includeWorkspace)
+	}
 	if err := graph.ValidateForest(); err != nil {
 		return resolvedInput{}, err
 	}
@@ -320,7 +332,7 @@ func (b *Builder) resolveLegacy(ctx context.Context, input Input, includeWorkspa
 		workspace = workspaceSection{CWD: "trees/" + root.ID + "/", Overlay: overlay, Files: files.Files, Truncated: files.Truncated}
 	}
 	return resolvedInput{
-		target:       targetSection{TreeID: root.ID, ChainPath: append([]string(nil), chainPath...), NodeID: target.ID, NodeType: target.Type, OutputKind: kind},
+		target:       targetSection{TreeID: root.ID, ChainPath: append([]string(nil), chainPath...), NodeID: target.ID, NodeType: target.Type, OutputKind: kind, ProjectVersion: project.Version},
 		params:       target.Params,
 		targetParams: target.Params,
 		ancestors:    ancestors,
@@ -487,7 +499,7 @@ func (b *Builder) resolveSnapshot(ctx context.Context, input Input, includeWorks
 	return resolvedInput{
 		target: targetSection{
 			TreeID: snapshot.TreeID, ChainPath: append([]string(nil), snapshot.ChainPath...),
-			NodeID: target.ID, NodeType: target.Type, OutputKind: kind,
+			NodeID: target.ID, NodeType: target.Type, OutputKind: kind, ProjectVersion: snapshot.ProjectVersion,
 		},
 		params: params, targetParams: target.Params, taskNodeID: taskNodeID,
 		outputBinding: outputBinding, outputContract: outputContract,
@@ -684,31 +696,45 @@ func inputHashes(input resolvedInput) (valueobject.ContextHashes, error) {
 }
 
 func outputContract(target targetSection, binding *entity.RunOutputBinding) []string {
-	if target.NodeType != valueobject.NodeTypeAgent {
+	if target.NodeType == valueobject.NodeTypeTopic && target.ProjectVersion >= valueobject.ProjectFileVersion {
 		contract := []string{
 			"只根据当前路径与任务工作；禁止直接修改工程图。",
 			"工作区文件仅提供逻辑路径与大小，不自动注入文件内容；二进制资源仅通过路径引用。",
-			"祖先产物的摘录或引用可用 read_artifact 按块读取（每次不超过 16 KiB）；topic 只返回当前路径所选候选。",
-			"有歧义时调用 ask_user；结构化输出使用 reply，payload 不超过 256 KiB。",
-			fmt.Sprintf("reply 的 node_id 必须是 %s，kind 必须是 %s；产物须经用户应用。", target.NodeID, target.OutputKind),
+			"有歧义时调用 ask_user；使用 reply(kind=topics)提交选题结果。",
+			"合法 topics reply 由应用自动生成全部 Candidate 节点并锁定 Topic；不需要人工应用。",
+			fmt.Sprintf("reply 的 node_id 必须是 %s，kind 必须是 %s。", target.NodeID, target.OutputKind),
 		}
-		if target.OutputKind == valueobject.OutputKindTopics {
-			return append(contract, `topics payload: {"topics":[{"title":"...","angle":"...","hook":"..."}]}；候选为 3–10 条。`)
+		return append(contract, `topics payload: {"topics":[{"title":"...","angle":"...","hook":"..."}]}；候选为 3–10 条。`)
+	}
+	if target.NodeType == valueobject.NodeTypeAgent {
+		contract := []string{
+			"只根据当前路径与任务工作；禁止直接修改工程图。",
+			"工作区文件仅提供逻辑路径与大小，不自动注入文件内容；二进制资源仅通过路径引用。",
+			"祖先产物的摘录或引用可用 read_artifact 按块读取（每次不超过 16 KiB）；候选、提示词任务与脚本版本均按发送快照读取。",
+			"有歧义时调用 ask_user；结构化脚本结果必须通过 reply 提交。",
+			"输出契约固定为 script@1。",
+			fmt.Sprintf("reply 的 node_id 必须是 %s，kind 必须是 %s；输出 Script 节点以发送时绑定为准，不能自行指定。", target.NodeID, target.OutputKind),
+		}
+		switch {
+		case binding == nil || !binding.Bound:
+			contract = append(contract, "当前没有绑定 Script 输出节点；合法 reply 会自动创建直接 Script 节点并写入首个不可变版本，不需要人工确认。")
+		case binding.BaselineVersion == 0:
+			contract = append(contract, fmt.Sprintf("输出绑定到空 Script 节点 %s；合法 reply 会自动写入首个不可变版本，不需要人工确认。", binding.NodeID))
+		default:
+			contract = append(contract, fmt.Sprintf("输出绑定到已有版本的 Script 节点 %s，基准版本为 %d；reply 会创建待确认结果，用户确认后追加新版本，不覆盖旧版本；取消不改变旧版本。", binding.NodeID, binding.BaselineVersion))
 		}
 		return append(contract, `script payload: {"title":"...","scenes":[{"narration":"...","duration":0}]}；至少一个场景。`)
 	}
+
 	contract := []string{
 		"只根据当前路径与任务工作；禁止直接修改工程图。",
 		"工作区文件仅提供逻辑路径与大小，不自动注入文件内容；二进制资源仅通过路径引用。",
-		"祖先产物的摘录或引用可用 read_artifact 按块读取（每次不超过 16 KiB）；候选、提示词任务与脚本版本均按发送快照读取。",
-		"有歧义时调用 ask_user；reply 可用于聊天消息，结构化 Script 提交当前不可用。",
-		"输出契约固定为 script@1。",
-		fmt.Sprintf("reply 的 node_id 必须是 %s，kind 必须是 %s；输出 Script 节点以发送时绑定为准，不能自行指定。", target.NodeID, target.OutputKind),
+		"祖先产物的摘录或引用可用 read_artifact 按块读取（每次不超过 16 KiB）；topic 只返回当前路径所选候选。",
+		"有歧义时调用 ask_user；结构化输出使用 reply，payload 不超过 256 KiB。",
+		fmt.Sprintf("reply 的 node_id 必须是 %s，kind 必须是 %s；产物须经用户应用。", target.NodeID, target.OutputKind),
 	}
-	if binding != nil && binding.Bound {
-		contract = append(contract, fmt.Sprintf("输出绑定到 Script 节点 %s，基准版本为 %d；不得覆盖既有版本。", binding.NodeID, binding.BaselineVersion))
-	} else {
-		contract = append(contract, "当前没有绑定 Script 输出节点；不得直接修改工程图。")
+	if target.OutputKind == valueobject.OutputKindTopics {
+		return append(contract, `topics payload: {"topics":[{"title":"...","angle":"...","hook":"..."}]}；候选为 3–10 条。`)
 	}
 	return append(contract, `script payload: {"title":"...","scenes":[{"narration":"...","duration":0}]}；至少一个场景。`)
 }
