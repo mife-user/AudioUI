@@ -55,30 +55,37 @@ class LayoutResizeObserver implements ResizeObserver {
   }
 }
 
-function makeNode(id: string, type: 'topic' | 'prompt', parent = '', parentCandidate?: number): Node {
+function makeNode(id: string, type: string, parent = '', overrides: Partial<Node> = {}): Node {
   return {
     id,
     type: type as Node['type'],
     title: id,
     parent,
-    parentCandidate,
     position: { x: 40, y: 60 },
     params: {},
     rounds: [],
     locked: false,
     stale: false,
+    ...overrides,
   }
 }
 
 function makeSnapshot(): WorkspaceSnapshot {
-  const topic = makeNode('n_topic', 'topic')
-  const prompt = makeNode('n_prompt', 'prompt', topic.id, 0)
+  const topic = makeNode('n_topic', 'topic', '', {
+    rounds: [{ n: 1, kind: OutputKind.OutputKindTopics, artifactId: 'sha256:topics', pendingId: 'pending_topics', runId: 'r_topics' }],
+  })
+  const candidate = makeNode('n_candidate', 'candidate', topic.id, {
+    candidateSource: { topicNodeId: topic.id, artifactId: 'sha256:topics', index: 0 },
+  })
+  const prompt = makeNode('n_prompt', 'prompt', candidate.id, { params: { instruction: '写一段说明。' } })
+  const agent = makeNode('n_agent', 'agent', prompt.id)
+  const script = makeNode('n_script', 'script', agent.id)
   return {
     project: { id: 'p_real_flow', name: '真实画布测试', revision: 4, activeNodeId: topic.id },
-    nodes: [topic, prompt],
+    nodes: [topic, candidate, prompt, agent, script],
     pending: [],
     runs: [],
-    chains: [{ id: `c_${prompt.id}`, tailNodeId: prompt.id, path: [topic.id, prompt.id], label: '测试链', status: 'idle' }],
+    chains: [{ id: `c_${script.id}`, tailNodeId: script.id, path: [topic.id, candidate.id, prompt.id, agent.id, script.id], label: '测试链', status: 'idle' }],
     lockedNodeIds: [],
   }
 }
@@ -121,52 +128,44 @@ describe('WorkspaceCanvas with real React Flow', () => {
     vi.unstubAllGlobals()
   })
 
-  it('renders measured node wrappers, candidate handles and SVG edges, and selects through the keyboard', async () => {
+  it('renders measured handles and edges across Topic, Candidate, Prompt, Agent and Script', async () => {
     const onSelectNode = vi.fn().mockResolvedValue(undefined)
     const { container } = render(
       <WorkspaceCanvas
         snapshot={makeSnapshot()}
         onSelectNode={onSelectNode}
         api={makeAPI()}
-        candidateFixtures={{ n_topic: [{ title: '候选一' }, { title: '候选二' }] }}
+        candidateFixtures={{ n_topic: [{ index: 0, title: '候选一', angle: '方向一', hook: '开场一' }] }}
       />,
     )
 
-    const topicWrapper = await waitFor(() => {
-      const node = container.querySelector<HTMLElement>('.react-flow__node[data-id="n_topic"]')
-      if (!node) throw new Error('topic wrapper not rendered')
-      expect(node).toHaveStyle({ visibility: 'visible' })
-      return node
+    await waitFor(() => {
+      const nodes = ['n_topic', 'n_candidate', 'n_prompt', 'n_agent', 'n_script']
+      nodes.forEach((id) => expect(container.querySelector(`.react-flow__node[data-id="${id}"]`)).toBeVisible())
     })
-    const promptWrapper = await waitFor(() => {
-      const node = container.querySelector<HTMLElement>('.react-flow__node[data-id="n_prompt"]')
-      if (!node) throw new Error('prompt wrapper not rendered')
-      return node
-    })
-    expect(topicWrapper.querySelectorAll('.react-flow__handle')).toHaveLength(2)
-    expect(topicWrapper.querySelector('[data-handleid="candidate-0"]')).toHaveAttribute('aria-label', '候选 1：候选一 输出端口')
-    expect(topicWrapper.querySelector('[data-handleid="candidate-1"]')).toHaveAttribute('aria-label', '候选 2：候选二 输出端口')
-    await waitFor(() => expect(container.querySelector('.react-flow__edge-path')).toBeInTheDocument())
+    expect(container.querySelector('[data-id="n_topic"] [data-handleid="topic-candidate-0"]')).toBeInTheDocument()
+    expect(container.querySelector('[data-id="n_candidate"] [data-handleid="candidate-output"]')).toBeInTheDocument()
+    await waitFor(() => expect(container.querySelectorAll('.react-flow__edge-path')).toHaveLength(4))
 
-    fireEvent.keyDown(promptWrapper!, { key: 'Enter', code: 'Enter' })
+    const promptWrapper = container.querySelector<HTMLElement>('.react-flow__node[data-id="n_prompt"]')
+    const topicWrapper = container.querySelector<HTMLElement>('.react-flow__node[data-id="n_topic"]')
+    if (!promptWrapper || !topicWrapper) throw new Error('canvas nodes missing from fixture')
+    fireEvent.keyDown(promptWrapper, { key: 'Enter', code: 'Enter' })
     await waitFor(() => expect(onSelectNode).toHaveBeenCalledWith('n_prompt'))
     fireEvent.keyDown(topicWrapper, { key: ' ', code: 'Space' })
     await waitFor(() => expect(onSelectNode).toHaveBeenLastCalledWith('n_topic'))
   })
 
-  it('keeps rendered handles and edges when node selection rebuilds the controlled snapshot', async () => {
+  it('keeps all edges visible when selecting a node rebuilds the controlled snapshot', async () => {
     const snapshot = makeSnapshot()
     const api = makeAPI()
     let rerender: (ui: ReactElement) => void = () => undefined
     const onSelectNode = vi.fn(async (id: string) => {
-      const selected = {
-        ...snapshot,
-        project: { ...snapshot.project!, activeNodeId: id },
-      }
-      rerender(<WorkspaceCanvas snapshot={selected} onSelectNode={onSelectNode} api={api} candidateFixtures={{ n_topic: [{ title: '候选一' }] }} />)
+      const selected = { ...snapshot, project: { ...snapshot.project!, activeNodeId: id } }
+      rerender(<WorkspaceCanvas snapshot={selected} onSelectNode={onSelectNode} api={api} candidateFixtures={{ n_topic: [{ index: 0, title: '候选一' }] }} />)
     })
     const view = render(
-      <WorkspaceCanvas snapshot={snapshot} onSelectNode={onSelectNode} api={api} candidateFixtures={{ n_topic: [{ title: '候选一' }] }} />,
+      <WorkspaceCanvas snapshot={snapshot} onSelectNode={onSelectNode} api={api} candidateFixtures={{ n_topic: [{ index: 0, title: '候选一' }] }} />,
     )
     rerender = view.rerender
 
@@ -176,12 +175,12 @@ describe('WorkspaceCanvas with real React Flow', () => {
       expect(node).toHaveStyle({ visibility: 'visible' })
       return node
     })
-    await waitFor(() => expect(view.container.querySelector('.react-flow__edge-path')).toBeInTheDocument())
+    await waitFor(() => expect(view.container.querySelectorAll('.react-flow__edge-path')).toHaveLength(4))
 
     fireEvent.keyDown(promptWrapper, { key: 'Enter', code: 'Enter' })
     await waitFor(() => expect(onSelectNode).toHaveBeenCalledWith('n_prompt'))
     await waitFor(() => expect(promptWrapper).toHaveClass('selected'))
-    await waitFor(() => expect(view.container.querySelector('.react-flow__edge-path')).toBeInTheDocument())
+    await waitFor(() => expect(view.container.querySelectorAll('.react-flow__edge-path')).toHaveLength(4))
 
     fireEvent.keyDown(promptWrapper, { key: 'ArrowRight', code: 'ArrowRight' })
     await waitFor(() => expect(api.moveNode).toHaveBeenCalledWith('n_prompt', expect.any(Number), 60, 'p_real_flow'), { timeout: 2000 })
@@ -189,85 +188,56 @@ describe('WorkspaceCanvas with real React Flow', () => {
     expect(view.container.querySelector('.canvas-message-error')?.textContent ?? '').not.toMatch(/渲染错误 (008|015)/)
   })
 
-  it('waits for newly loaded candidate ports before drawing persisted edges', async () => {
+  it('loads the immutable Candidate content after the graph snapshot and preserves the edge layout', async () => {
     let resolveCandidates!: (candidates: Awaited<ReturnType<GraphAPI['getTopicCandidates']>>) => void
     const api = makeAPI()
     vi.mocked(api.getTopicCandidates).mockReturnValue(new Promise((resolve) => { resolveCandidates = resolve }))
-    const snapshot = makeSnapshot()
-    const topic = snapshot.nodes?.find((node) => node.id === 'n_topic')
-    if (!topic) throw new Error('topic missing from fixture')
-    topic.rounds = [{ n: 1, kind: OutputKind.OutputKindTopics, artifactId: 'sha256:applied', pendingId: 'pending_topics', runId: 'r_topics' }]
-    const { container, rerender } = render(<WorkspaceCanvas snapshot={snapshot} onSelectNode={vi.fn().mockResolvedValue(undefined)} api={api} />)
+    const { container } = render(<WorkspaceCanvas snapshot={makeSnapshot()} onSelectNode={vi.fn().mockResolvedValue(undefined)} api={api} />)
 
-    await waitFor(() => expect(container.querySelector('[data-handleid="topic-connection-anchor"]')).toBeInTheDocument())
-    await waitFor(() => expect(container.querySelector('.react-flow__edge-path')).toBeInTheDocument())
+    await waitFor(() => expect(container.querySelector('[data-handleid="topic-candidate-0"]')).toBeInTheDocument())
+    await waitFor(() => expect(container.querySelectorAll('.react-flow__edge-path')).toHaveLength(4))
     expect(container.querySelector('.canvas-message-error')?.textContent ?? '').not.toContain('渲染错误 008')
 
     await act(async () => {
-      resolveCandidates([{ index: 0, title: '候选一', angle: '方向一', hook: '钩子一' }])
+      resolveCandidates([{ index: 0, title: '候选一', angle: '方向一', hook: '开场一' }])
       await Promise.resolve()
     })
-    await waitFor(() => expect(container.querySelector('[data-handleid="candidate-0"]')).toBeInTheDocument())
-    await waitFor(() => expect(container.querySelector('.react-flow__edge-path')).toBeInTheDocument())
-    expect(container.querySelector('.canvas-message-error')?.textContent ?? '').not.toContain('渲染错误 008')
-    expect(container.querySelector('[data-id="edge-n_topic-n_prompt"] .react-flow__edge-path')).toBeInTheDocument()
-
-    const refreshed = makeSnapshot()
-    refreshed.project = { ...refreshed.project!, revision: 5 }
-    const refreshedTopic = refreshed.nodes?.find((node) => node.id === 'n_topic')
-    if (!refreshedTopic) throw new Error('refreshed topic missing from fixture')
-    refreshedTopic.rounds = [{ n: 1, kind: OutputKind.OutputKindTopics, artifactId: 'sha256:applied', pendingId: 'pending_topics', runId: 'r_topics' }]
-    rerender(<WorkspaceCanvas snapshot={refreshed} onSelectNode={vi.fn().mockResolvedValue(undefined)} api={api} />)
-    await waitFor(() => expect(container.querySelector('[data-handleid="candidate-0"]')).toBeInTheDocument())
-    expect(api.getTopicCandidates).toHaveBeenCalledTimes(1)
-    await waitFor(() => expect(container.querySelector('[data-id="edge-n_topic-n_prompt"] .react-flow__edge-path')).toBeInTheDocument())
-    expect(container.querySelector('.canvas-message-error')?.textContent ?? '').not.toContain('渲染错误 008')
+    await waitFor(() => expect(container.querySelector('.candidate-node')).toHaveTextContent('方向一'))
+    await waitFor(() => expect(container.querySelectorAll('.react-flow__edge-path')).toHaveLength(4))
+    expect(container.querySelector('.canvas-message-error')?.textContent ?? '').not.toMatch(/渲染错误 (008|015)/)
   })
 
-  it('reads applied candidates after the workspace refresh and uses stable indexes as handles', async () => {
+  it('uses CandidateSource indexes rather than response positions', async () => {
     const api = makeAPI()
     vi.mocked(api.getTopicCandidates).mockResolvedValue([
-      { index: 2, title: '候选三', angle: '方向三', hook: '钩子三' },
-      { index: 0, title: '候选一', angle: '方向一', hook: '钩子一' },
+      { index: 2, title: '候选三', angle: '方向三', hook: '开场三' },
+      { index: 0, title: '候选一', angle: '方向一', hook: '开场一' },
     ])
-    const initial = makeSnapshot()
-    const { container, rerender } = render(<WorkspaceCanvas snapshot={initial} onSelectNode={vi.fn().mockResolvedValue(undefined)} api={api} />)
-    expect(api.getTopicCandidates).not.toHaveBeenCalled()
-
     const snapshot = makeSnapshot()
-    snapshot.project = { ...snapshot.project!, revision: 5 }
-    const topic = snapshot.nodes?.find((node) => node.id === 'n_topic')
-    if (!topic) throw new Error('topic missing from fixture')
-    topic.rounds = [{ n: 1, kind: OutputKind.OutputKindTopics, artifactId: 'sha256:applied', pendingId: 'pending_topics', runId: 'r_topics' }]
-    rerender(<WorkspaceCanvas snapshot={snapshot} onSelectNode={vi.fn().mockResolvedValue(undefined)} api={api} />)
-
-    await waitFor(() => expect(container.querySelector('[data-handleid="candidate-2"]')).toBeInTheDocument())
-    expect(container.querySelector('[data-handleid="candidate-0"]')).toHaveAttribute('aria-label', '候选 1：候选一 输出端口')
-    expect(api.getTopicCandidates).toHaveBeenCalledWith('n_topic', 'p_real_flow')
-  })
-
-  it('shows candidate read errors and leaves the output port disabled', async () => {
-    const snapshot = makeSnapshot()
-    const topic = snapshot.nodes?.find((node) => node.id === 'n_topic')
-    if (!topic) throw new Error('topic missing from fixture')
-    topic.rounds = [{ n: 1, kind: OutputKind.OutputKindTopics, artifactId: 'sha256:broken', pendingId: 'pending_topics', runId: 'r_topics' }]
-    const api = makeAPI()
-    vi.mocked(api.getTopicCandidates).mockRejectedValue(new Error('CANDIDATE_INVALID'))
+    const candidate = snapshot.nodes?.find((node) => node.id === 'n_candidate')
+    if (!candidate) throw new Error('candidate missing from fixture')
+    candidate.candidateSource = { topicNodeId: 'n_topic', artifactId: 'sha256:topics', index: 2 }
     const { container } = render(<WorkspaceCanvas snapshot={snapshot} onSelectNode={vi.fn().mockResolvedValue(undefined)} api={api} />)
 
+    await waitFor(() => expect(container.querySelector('.candidate-node')).toHaveTextContent('候选三'))
+    expect(api.getTopicCandidates).toHaveBeenCalledWith('n_topic', 'p_real_flow')
+    expect(container.querySelector('[data-id="n_topic"] [data-handleid="topic-candidate-2"]')).toBeInTheDocument()
+  })
+
+  it('shows candidate read errors without hiding the authoritative graph edge', async () => {
+    const api = makeAPI()
+    vi.mocked(api.getTopicCandidates).mockRejectedValue(new Error('CANDIDATE_INVALID'))
+    const { container } = render(<WorkspaceCanvas snapshot={makeSnapshot()} onSelectNode={vi.fn().mockResolvedValue(undefined)} api={api} />)
+
     await waitFor(() => expect(container.querySelector('.topic-candidate-error')).toHaveTextContent('CANDIDATE_INVALID'))
-    expect(container.querySelector('[data-handleid^="candidate-"]')).not.toBeInTheDocument()
+    await waitFor(() => expect(container.querySelectorAll('.react-flow__edge-path')).toHaveLength(4))
   })
 
   it('ignores candidate results that arrive after the project changes', async () => {
     let resolveOld!: (candidates: Awaited<ReturnType<GraphAPI['getTopicCandidates']>>) => void
-    const oldCandidates = new Promise<Awaited<ReturnType<GraphAPI['getTopicCandidates']>>>((resolve) => { resolveOld = resolve })
     const api = makeAPI()
-    vi.mocked(api.getTopicCandidates).mockReturnValueOnce(oldCandidates).mockResolvedValueOnce([])
+    vi.mocked(api.getTopicCandidates).mockReturnValueOnce(new Promise((resolve) => { resolveOld = resolve }))
     const first = makeSnapshot()
-    const topic = first.nodes?.find((node) => node.id === 'n_topic')
-    if (!topic) throw new Error('topic missing from fixture')
-    topic.rounds = [{ n: 1, kind: OutputKind.OutputKindTopics, artifactId: 'sha256:applied', pendingId: 'pending_topics', runId: 'r_topics' }]
     const { container, rerender } = render(<WorkspaceCanvas snapshot={first} onSelectNode={vi.fn().mockResolvedValue(undefined)} api={api} />)
     const second: WorkspaceSnapshot = {
       ...first,
@@ -277,26 +247,45 @@ describe('WorkspaceCanvas with real React Flow', () => {
     await waitFor(() => expect(api.getTopicCandidates).toHaveBeenCalledWith('n_topic', 'p_next'))
     resolveOld([{ index: 0, title: '旧工程候选', angle: '旧方向', hook: '旧钩子' }])
 
-    await waitFor(() => expect(container.querySelector('[data-handleid^="candidate-"]')).not.toBeInTheDocument())
-    expect(container.textContent).not.toContain('旧工程候选')
+    await waitFor(() => expect(container.querySelector('.candidate-node')).not.toHaveTextContent('旧工程候选'))
   })
 
-  it('shows the latest run failure without hiding an older pending result', async () => {
+  it('blocks Agent start until path Prompt edits persist', async () => {
+    const api = makeAPI()
+    vi.mocked(api.updateNodeParams).mockRejectedValueOnce(new Error('disk full'))
+    const onStartRun = vi.fn().mockResolvedValue({})
+    const { container } = render(
+      <WorkspaceCanvas snapshot={makeSnapshot()} onSelectNode={vi.fn().mockResolvedValue(undefined)} onStartRun={onStartRun} api={api} />,
+    )
+    const task = container.querySelector<HTMLTextAreaElement>('#prompt-instruction-n_prompt')
+    const runButton = container.querySelector<HTMLButtonElement>('.agent-run-button')
+    if (!task || !runButton) throw new Error('prompt or Agent controls missing from fixture')
+
+    fireEvent.change(task, { target: { value: '保存失败时禁止发送。' } })
+    fireEvent.click(runButton)
+    await waitFor(() => expect(api.updateNodeParams).toHaveBeenCalledOnce())
+    await waitFor(() => expect(container.querySelector('.topic-save-error')).toHaveTextContent('disk full'))
+
+    expect(task).toHaveValue('保存失败时禁止发送。')
+    expect(onStartRun).not.toHaveBeenCalled()
+    expect(container.querySelector('.agent-run-error')).toHaveTextContent('RUN_START_FAILED: disk full')
+  })
+
+  it('shows the latest Agent failure while preserving a separate pending result count', async () => {
     const snapshot = makeSnapshot()
     snapshot.runs = [{
-      id: 'r_failed', nodeId: 'n_topic', status: RunStatus.RunFailed,
-      chainId: 'c_n_topic', chainPath: ['n_topic'], estimatedTokens: 100,
+      id: 'r_failed', nodeId: 'n_agent', status: RunStatus.RunFailed,
+      chainId: 'c_n_agent', chainPath: ['n_topic', 'n_candidate', 'n_prompt', 'n_agent'], estimatedTokens: 100,
       startedAt: '2026-11-05T00:00:00Z',
     }]
     snapshot.pending = [{
-      id: 'pending_one', nodeId: 'n_topic', runId: 'r_previous', chainId: 'c_n_topic',
-      kind: OutputKind.OutputKindTopics, status: PendingStatus.PendingPending,
+      id: 'pending_one', nodeId: 'n_agent', runId: 'r_previous', chainId: 'c_n_agent',
+      kind: OutputKind.OutputKindScript, status: PendingStatus.PendingPending,
     }]
     const { container } = render(
-      <WorkspaceCanvas snapshot={snapshot} onSelectNode={vi.fn().mockResolvedValue(undefined)} api={makeAPI()} />,
+      <WorkspaceCanvas snapshot={snapshot} onSelectNode={vi.fn().mockResolvedValue(undefined)} api={makeAPI()} candidateFixtures={{ n_topic: [{ index: 0, title: '候选一' }] }} />,
     )
 
-    await waitFor(() => expect(container.querySelector('.react-flow__node[data-id="n_topic"] .canvas-node-status'))
-      .toHaveTextContent('运行失败 · 待处理 1'))
+    await waitFor(() => expect(container.querySelector('.react-flow__node[data-id="n_agent"] .canvas-node-status')).toHaveTextContent('运行失败 · 待处理 1'))
   })
 })

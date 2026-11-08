@@ -1,10 +1,12 @@
 import type { Node, Position } from '../../bindings/audio-ui/internal/domain/entity'
 
 const GAP = 36
-// Include the topic form, pending hint, and multi-line error states in collision bounds.
 const CARD_SIZE = {
   topic: { width: 320, height: 480 },
-  prompt: { width: 276, height: 220 },
+  candidate: { width: 276, height: 235 },
+  prompt: { width: 276, height: 360 },
+  agent: { width: 276, height: 220 },
+  script: { width: 276, height: 230 },
 } as const
 
 type NodeKind = keyof typeof CARD_SIZE
@@ -23,7 +25,7 @@ function offsetsThrough(ringCount: number): Offset[] {
 }
 
 function overlaps(position: Position, candidateSize: (typeof CARD_SIZE)[NodeKind], node: Node): boolean {
-  const existingSize = node.type === 'topic' ? CARD_SIZE.topic : CARD_SIZE.prompt
+  const existingSize = CARD_SIZE[node.type as NodeKind]
   return position.x < node.position.x + existingSize.width + GAP
     && position.x + candidateSize.width + GAP > node.position.x
     && position.y < node.position.y + existingSize.height + GAP

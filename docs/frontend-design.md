@@ -2,9 +2,9 @@
 
 | 项 | 内容 |
 |---|---|
-| 版本 | 0.2.6 |
-| 状态 | 待评审（M2-11A 本地脚本工作流设计稿；M2-00～10 旧模型保持已验收事实） |
-| 更新 | 2026-11-06 |
+| 版本 | 0.2.7 |
+| 状态 | 待评审（M2-11A 设计已验收；M2-12A 实现已于 2026-11-08 通过用户验收） |
+| 更新 | 2026-11-08 |
 | 作者 | 待填 |
 | 评审 | 待填 |
 | 设计依据 | [`design/style-directions.html`](design/style-directions.html) |
@@ -29,12 +29,13 @@
 | 0.2.4 | 2026-11-05 | M2-10A：选题参数编辑、防抖保存与保存前启动；启动/终态/结构化错误状态和待处理摘要；更新 HTML 交互演示 |
 | 0.2.5 | 2026-11-05 | M2-10B：待处理产物按需读取与预览、应用/丢弃和哈希冲突确认；应用后的 topic 候选由已应用轮次驱动端口 |
 | 0.2.6 | 2026-11-06 | M2-11A 评审稿：本地候选节点→提示词→Agent→script 输出；无输出自动创建、已有版本确认追加；云端/视频不在本阶段 |
+| 0.2.7 | 2026-11-08 | M2-12A 实现记录：五类快照节点、Prompt 参数保存与 Agent 运行入口；用户确认验收完成 |
 
 ---
 
 ## 1. Overview
 
-> **M2-11～13 目标交互（设计已验收，未实现）**：本地候选节点、只构建任务的提示词、独立 Agent 节点与 `script` 输出版本，见 [4.8](#48-m2-11-13-本地脚本工作流设计已验收) 和[单文件演示](design/m2-11-13-local-flow-demo.html)。云端与视频仍待评估。4.7 及之前说明 M2-00～10 旧模型和已验收行为，不代表新目标已交付。
+> **M2-11～13 目标交互（设计已验收；M2-12A 已验收）**：本地候选节点、只构建任务的提示词、独立 Agent 节点与 `script` 输出版本，见 [4.8](#48-m2-11-13-本地脚本工作流设计已验收) 和[单文件演示](design/m2-11-13-local-flow-demo.html)。云端与视频仍待评估。4.7 及之前说明 M2-00～10 旧模型和已验收行为，不代表新目标已交付。
 
 AudioUI 是一个桌面端节点图工作台。前端承担三件事：
 
@@ -446,6 +447,8 @@ M1 没有画布/提示词节点，先做一条链路的会话页；M2 画布落�
 
 [单文件交互演示](design/m2-11-13-local-flow-demo.html)使用固定模拟数据，不连接 Agent、不访问或修改工程文件、不联网。此设计稿已于 2026-11-06 由用户验收；演示不是产品实现或产品功能验收证据。M2-00～10 既有界面和验收仍是旧模型基线。
 
+**M2-12A 实现状态（已于 2026-11-08 通过用户验收）**：Topic/Candidate/Prompt/Agent/Script 节点已按快照接入；Prompt 只编辑任务与约束并在 Agent 启动前保存，Agent 提供运行入口和输出契约摘要，Script 展示当前不可变版本。此会话未执行真实浏览器交互，也未记录截图/viewport；实现与自检范围见[自检证据](dev/evidence/m2-12a.md)。M2-12B 的已有版本确认/历史与叶子链快捷栏仍未实现。
+
 ```text
 Topic ──应用校验 topics──> Candidate A ──> Prompt ──> Agent ──> Script（零/一个直接输出）
                     └──> Candidate B ──> Prompt                 │
@@ -487,10 +490,11 @@ Topic ──应用校验 topics──> Candidate A ──> Prompt ──> Agent 
 | `RunList` | 按运行分组的记录 | empty/running/complete/interrupted | `--panel-2` `--muted` |
 | `ConsoleTabs` | 对话/待处理分页 | conversation/pending | `--accent-soft` `--border` |
 | `ProjectSwitcher` | 工程列表/新建/打开 | closed/open/loading/error | `--bg-elev` `--accent` |
-| `TopicNode` | M2-00～10 旧选题参数、候选端口与运行状态 | starting/running/pending/applied/locked/error | `--panel` `--accent` |
-| `TopicParameters` | 选题标题/想法/方向/候选数、保存态、旧流程运行入口 | saved/dirty/saving/save-error/sync-pending/invalid/starting/run-error/disabled | `--panel-2` `--accent` `--danger` |
+| `TopicNode` | M2-10A 选题参数与运行入口；M2-12A 展示快照生成的 Candidate 子节点、读取状态与锁定状态 | starting/running/pending/applied/locked/error | `--panel` `--accent` |
+| `TopicParameters` | 选题标题/想法/方向/候选数、保存态与运行入口 | saved/dirty/saving/save-error/sync-pending/invalid/starting/run-error/disabled | `--panel-2` `--accent` `--danger` |
 | `CandidateNode` | 展示由有效 topics 结果生成的候选与固定来源 | default/selected/locked/stale/error | `--panel` `--accent` `--warn` |
-| `PromptNode` | 保存任务与约束，不提供运行入口 | draft/saved/dirty/saving/save-error/locked/error | `--panel` `--accent` `--danger` |
+| `PromptNode` | 编辑任务与约束，不提供运行入口；连接后可创建 Agent | draft/saved/dirty/saving/save-error/locked/error | `--panel` `--accent` `--danger` |
+| `PromptParameters` | Prompt 任务与约束、320ms 保存、失败保留/重试及 Agent 启动前 flush | saved/dirty/saving/save-error/sync-pending/invalid/disabled | `--panel-2` `--accent` `--danger` |
 | `AgentNode` | 本地运行入口、输出绑定与运行状态 | idle/starting/running/succeeded/failed/interrupted/busy/error | `--panel` `--accent` `--ok` `--danger` |
 | `ScriptNode` | 展示脚本当前版本、来源及待确认结果 | empty/ready/pending/conflict/invalid/error | `--panel` `--warn` `--danger` |
 | `ScriptVersionList` | 展示不可变脚本版本与来源运行 | empty/ready/selected | `--panel-2` `--muted` |

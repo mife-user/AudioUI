@@ -17,12 +17,21 @@ import type { GraphMutationReceipt, Node, NodeParams, RunStartResult, WorkspaceS
 import { startRun as startRunAPI } from '../api/runs'
 import { graphAPI, type GraphAPI, type TopicCandidateFixture } from './graphApi'
 import { allocateNodePosition } from './nodePosition'
-import { buildFlowEdges, buildFlowModel, candidateAt, nodeMap, subtreeSize, topicRootId, type CanvasFlowNode } from './flowModel'
+import { buildFlowEdges, buildFlowModel, inputHandleId, nodeMap, outputHandleId, subtreeSize, topicRootId, type CanvasFlowNode, type ChildNodeType } from './flowModel'
 import { preserveCanvasNodeViewState } from './nodeState'
+import { CandidateNode } from './CandidateNode'
+import { AgentNode } from './AgentNode'
+import { ScriptNode } from './ScriptNode'
 import { PromptNode } from './PromptNode'
 import { TopicNode } from './TopicNode'
 
-const nodeTypes = { topic: TopicNode, prompt: PromptNode }
+const nodeTypes = {
+  topic: TopicNode,
+  candidate: CandidateNode,
+  prompt: PromptNode,
+  agent: AgentNode,
+  script: ScriptNode,
+}
 const MOVE_DEBOUNCE_MS = 240
 const EMPTY_HANDLE_LAYOUTS: Record<string, string> = {}
 
@@ -82,9 +91,7 @@ type ConnectIntent = {
   projectId: string
   parentId: string
   childId: string
-  candidate: number | null
   oldParentId: string
-  oldCandidate: number | null
   subtreeCount: number
   movesTree: boolean
 }
@@ -94,12 +101,6 @@ function errorMessage(error: unknown): string {
   if (typeof error === 'string') return error
   if (error && typeof error === 'object' && 'message' in error) return String((error as { message: unknown }).message)
   return String(error)
-}
-
-function candidateFromHandle(handleId: string | null | undefined, parent: Node): number | null {
-  if (parent.type !== 'topic') return null
-  const match = /^candidate-(\d+)$/.exec(handleId ?? '')
-  return match ? Number(match[1]) : null
 }
 
 function candidateQueryKey(nodes: Node[] | undefined): string {
@@ -133,6 +134,13 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, api, candidateFix
       if (byNode[nodeId] === layoutKey) return current
       return { projectId: ownerProjectId, byNode: { ...byNode, [nodeId]: layoutKey } }
     })
+  }, [])
+  const registerPromptFlush = useCallback((nodeId: string, ownerProjectId: string, flush: () => Promise<boolean>) => {
+    const entry = { projectId: ownerProjectId, flush }
+    promptFlushers.current.set(nodeId, entry)
+    return () => {
+      if (promptFlushers.current.get(nodeId) === entry) promptFlushers.current.delete(nodeId)
+    }
   }, [])
   const measuredHandleLayouts = measuredHandleState.projectId === projectId
     ? measuredHandleState.byNode
@@ -180,11 +188,11 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, api, candidateFix
   const [pendingFocusNodeId, setPendingFocusNodeId] = useState('')
   const [confirmIntent, setConfirmIntent] = useState<ConnectIntent | null>(null)
   const [connectionTarget, setConnectionTarget] = useState('')
-  const [candidateSelection, setCandidateSelection] = useState('0')
   const createInFlight = useRef(false)
   const connectInFlight = useRef(false)
   const runStartInFlight = useRef(false)
   const runRequestSequence = useRef(0)
+  const promptFlushers = useRef(new Map<string, { projectId: string; flush: () => Promise<boolean> }>())
   const hasActiveRun = (snapshot.runs ?? []).some((run) => run.status === 'starting' || run.status === 'running')
   const globalRunBusy = hasActiveRun || Boolean(runSubmittingNodeId)
   const globalRunBusyRef = useRef(globalRunBusy)
@@ -293,18 +301,50 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, api, candidateFix
     moveTimers.current.set(key, timer)
   }, [api, projectId, syncMutation])
 
-  const addChild = useCallback((parentId: string, candidate: number | null) => {
+  const createNode = useCallback(async (type: ChildNodeType, parentId: string, position: Node['position']) => {
+    if (mutationBlockedRef.current || createInFlight.current) return
+    createInFlight.current = true
+    const requestId = ++createRequestId.current
+    const label = type === 'prompt' ? '提示词' : type === 'agent' ? 'Agent' : 'Script'
+    setBusy(true)
+    setError('')
+    setNotice('')
+    try {
+      const receipt = await api.addNode({
+        projectId,
+        type,
+        title: type === 'prompt' ? '新提示词' : type === 'agent' ? '新 Agent' : '新脚本',
+        parent: parentId,
+        parentCandidate: null,
+        position,
+        params: {},
+      })
+      if (currentProjectId.current !== projectId || receipt.projectId !== projectId) return
+      await syncMutation(receipt, label, receipt.nodeId)
+    } catch (failure) {
+      if (currentProjectId.current !== projectId) return
+      setNotice('')
+      setError(`创建${label}失败：${errorMessage(failure)}`)
+    } finally {
+      if (createRequestId.current === requestId) {
+        createInFlight.current = false
+        setBusy(false)
+      }
+    }
+  }, [api, projectId, syncMutation])
+
+  const addChild = useCallback((parentId: string, type: ChildNodeType) => {
     if (mutationBlockedRef.current) return
     const parent = graphNodes.find((node) => node.id === parentId)
     if (!parent) return
     const position = allocateNodePosition(graphNodes, {
       x: parent.position.x + 380,
-      y: parent.position.y + (candidate ?? 0) * 155,
-    })
-    void addPrompt({ parentId, candidate, position })
-  }, [api, graphNodes, projectId, syncMutation])
+      y: parent.position.y,
+    }, type)
+    void createNode(type, parentId, position)
+  }, [createNode, graphNodes])
 
-  const saveTopicParams = useCallback(async (nodeId: string, title: string, params: NodeParams, ownerProjectId: string) => {
+  const saveNodeParams = useCallback(async (nodeId: string, title: string, params: NodeParams, ownerProjectId: string) => {
     if (currentProjectId.current !== ownerProjectId) throw new Error('PROJECT_CHANGED: 工程已切换，未保存旧工程参数。')
     setParamsSaveCount((count) => count + 1)
     try {
@@ -317,7 +357,7 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, api, candidateFix
     }
   }, [api, syncMutation])
 
-  const startTopicRun = useCallback(async (nodeId: string, ownerProjectId: string): Promise<RunStartResult> => {
+  const startNodeRun = useCallback(async (nodeId: string, ownerProjectId: string): Promise<RunStartResult> => {
     if (currentProjectId.current !== ownerProjectId) {
       return { error: { code: 'PROJECT_CHANGED', message: '工程已切换，未启动运行。' } }
     }
@@ -332,6 +372,22 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, api, candidateFix
     const requestId = ++runRequestSequence.current
     setRunSubmittingNodeId(nodeId)
     try {
+      const chain = (snapshot.chains ?? []).find((item) => item.path?.includes(nodeId))
+      for (const pathNodeId of chain?.path ?? []) {
+        const pathNode = graphNodes.find((node) => node.id === pathNodeId)
+        if (pathNode?.type !== 'prompt') continue
+        const registered = promptFlushers.current.get(pathNodeId)
+        if (!registered || registered.projectId !== ownerProjectId) continue
+        if (!await registered.flush()) {
+          return { error: { code: 'WORKSPACE_SYNC_STALE', message: '提示词已提交，等待工程快照同步后再启动。' } }
+        }
+      }
+      if (currentProjectId.current !== ownerProjectId) {
+        return { error: { code: 'PROJECT_CHANGED', message: '工程已切换，未启动运行。' } }
+      }
+      if (runStartBlockedRef.current) {
+        return { error: { code: 'WORKSPACE_SYNC_STALE', message: '请先完成当前工程操作与快照同步。' } }
+      }
       return await (onStartRun ?? startRunAPI)(nodeId, ownerProjectId)
     } catch (failure) {
       return { error: { code: 'RUN_START_FAILED', message: errorMessage(failure) } }
@@ -341,18 +397,20 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, api, candidateFix
         setRunSubmittingNodeId('')
       }
     }
-  }, [onStartRun, projectId])
+  }, [graphNodes, onStartRun, projectId, snapshot.chains])
 
   const model = useMemo(
     () => buildFlowModel(snapshot, addChild, candidateMap, mutationBlocked, {
       runSubmittingNodeId,
       candidateErrors,
       candidateLoading,
-      onUpdateTopicParams: saveTopicParams,
-      onStartTopicRun: startTopicRun,
+      onUpdateTopicParams: saveNodeParams,
+      onUpdateNodeParams: saveNodeParams,
+      onStartRun: startNodeRun,
+      onRegisterPromptFlush: registerPromptFlush,
       onNodeHandlesMeasured,
     }),
-    [snapshot, addChild, candidateMap, candidateErrors, candidateLoading, mutationBlocked, runSubmittingNodeId, saveTopicParams, startTopicRun, onNodeHandlesMeasured],
+    [snapshot, addChild, candidateMap, candidateErrors, candidateLoading, mutationBlocked, runSubmittingNodeId, saveNodeParams, startNodeRun, registerPromptFlush, onNodeHandlesMeasured],
   )
 
   useEffect(() => {
@@ -389,7 +447,6 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, api, candidateFix
     initialFit.current = { projectId, shouldFit: Boolean(projectId && snapshotNodeCount.current), done: false }
     if (projectId) void flowRef.current.setViewport({ x: 0, y: 0, zoom: 1 }, { duration: 0 })
     setConnectionTarget('')
-    setCandidateSelection('0')
     for (const [key, timer] of moveTimers.current) {
       if (key.startsWith(`${projectId}:`)) continue
       window.clearTimeout(timer)
@@ -466,15 +523,8 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, api, candidateFix
 
   const selectedNode = nodes.find((node) => node.selected)?.data.node
   const byId = useMemo(() => nodeMap(graphNodes), [graphNodes])
-  const connectionTargets = graphNodes.filter((node) => node.type === 'prompt' && node.id !== selectedNode?.id)
-  const selectedCandidates = selectedNode?.type === 'topic'
-    ? candidateMap[selectedNode.id] ?? []
-    : []
+  const connectionTargets = graphNodes.filter((node) => inputHandleId(node) && node.type !== 'candidate' && node.id !== selectedNode?.id)
   const edges = useMemo(() => buildFlowEdges(nodes, measuredHandleLayouts), [nodes, measuredHandleLayouts])
-
-  useEffect(() => {
-    setCandidateSelection('0')
-  }, [selectedNode?.id])
 
   useEffect(() => {
     if (confirmIntent) confirmCancelRef.current?.focus()
@@ -496,35 +546,9 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, api, candidateFix
     })
   }
 
-  async function addPrompt(input: { parentId?: string; candidate?: number | null; position: { x: number; y: number } }) {
-    if (mutationBlockedRef.current || createInFlight.current) return
-    createInFlight.current = true
-    const requestId = ++createRequestId.current
-    setBusy(true)
-    setError('')
-    setNotice('')
-    try {
-      const receipt = await api.addNode({
-        projectId,
-        type: 'prompt',
-        title: '新提示词',
-        parent: input.parentId ?? '',
-        parentCandidate: input.candidate ?? null,
-        position: allocateNodePosition(graphNodes, input.position),
-        params: {},
-      })
-      if (currentProjectId.current !== projectId || receipt.projectId !== projectId) return
-      await syncMutation(receipt, input.parentId ? '提示词' : '草稿提示词', receipt.nodeId)
-    } catch (failure) {
-      if (currentProjectId.current !== projectId) return
-      setNotice('')
-      setError(`创建提示词失败：${errorMessage(failure)}`)
-    } finally {
-      if (createRequestId.current === requestId) {
-        createInFlight.current = false
-        setBusy(false)
-      }
-    }
+  function addDraftPrompt() {
+    const position = allocateNodePosition(graphNodes, canvasPosition(), 'prompt')
+    void createNode('prompt', '', position)
   }
 
   async function addTopic() {
@@ -570,17 +594,13 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, api, candidateFix
     if (!connection.source || !connection.target || connection.source === connection.target) return false
     const parent = byId.get(connection.source)
     const child = byId.get(connection.target)
-    if (!parent || !child || child.type !== 'prompt' || parent.type !== 'topic' && !parent.parent) return false
+    if (!parent || !child || !connection.sourceHandle || !connection.targetHandle) return false
     if (model.nodes.find((node) => node.id === parent.id)?.data.runningLocked) return false
     if (model.nodes.find((node) => node.id === child.id)?.data.runningLocked) return false
-    if (parent.type === 'topic') {
-      const candidate = candidateFromHandle(connection.sourceHandle, parent)
-      return candidate !== null && Boolean(candidateAt(candidateMap[parent.id], candidate))
-    }
-    return connection.sourceHandle === 'prompt-output'
+    return true
   }
 
-  async function submitConnection(parentId: string, childId: string, candidate: number | null, replace: boolean) {
+  async function submitConnection(parentId: string, childId: string, replace: boolean) {
     if (connectInFlight.current || mutationBlockedRef.current) return
     connectInFlight.current = true
     setConnectSubmitting(true)
@@ -588,7 +608,7 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, api, candidateFix
     setError('')
     setNotice('')
     try {
-      const receipt = await api.connect(parentId, childId, candidate, replace, ownerProjectId)
+      const receipt = await api.connect(parentId, childId, null, replace, ownerProjectId)
       if (currentProjectId.current !== ownerProjectId || receipt.projectId !== ownerProjectId) return
       if (replace) dismissConfirmation(true)
       await syncMutation(receipt, '连接')
@@ -605,9 +625,7 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, api, candidateFix
           projectId: ownerProjectId,
           parentId,
           childId,
-          candidate,
           oldParentId: oldParent?.id ?? '',
-          oldCandidate: child?.parentCandidate ?? null,
           subtreeCount: subtreeSize(graphNodes, childId),
           movesTree: Boolean(oldRoot && newRoot && oldRoot !== newRoot),
         })
@@ -627,11 +645,8 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, api, candidateFix
       if (!mutationBlocked) setError('连接目标不合法，工程图未修改。')
       return
     }
-    const parent = byId.get(connection.source)
-    if (!parent) return
-    const candidate = candidateFromHandle(connection.sourceHandle, parent)
-    void submitConnection(connection.source, connection.target, candidate, false)
-  }, [byId, candidateMap, model, mutationBlocked, projectId, snapshot])
+    void submitConnection(connection.source, connection.target, false)
+  }, [model, mutationBlocked, projectId, snapshot])
 
   const onNodeClick: NodeMouseHandler<CanvasFlowNode> = () => {
     setError('')
@@ -642,25 +657,24 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, api, candidateFix
     if (mutationBlocked || !selectedNode || !connectionTarget) return
     const selectedFlowNode = nodes.find((node) => node.id === selectedNode.id)
     if (!selectedFlowNode || selectedFlowNode.data.runningLocked) return
-    const candidate = selectedNode.type === 'topic'
-      ? Number(candidateSelection)
-      : null
-    const resolvedCandidate = Number.isInteger(candidate) ? candidate : null
-    if (selectedNode.type === 'topic' && resolvedCandidate === null) {
-      setError('请先选择一个可用的候选输出端口。')
-      return
-    }
-    const sourceHandle = selectedNode.type === 'topic' ? `candidate-${resolvedCandidate}` : 'prompt-output'
-    if (!validConnection({ source: selectedNode.id, sourceHandle, target: connectionTarget, targetHandle: 'prompt-input' })) {
+    const target = byId.get(connectionTarget)
+    const sourceHandle = outputHandleId(selectedNode)
+    const targetHandle = target ? inputHandleId(target) : null
+    if (!sourceHandle || !targetHandle || !validConnection({
+      source: selectedNode.id,
+      sourceHandle,
+      target: connectionTarget,
+      targetHandle,
+    })) {
       setError('连接目标不合法或位于运行锁路径中，工程图未修改。')
       return
     }
-    await submitConnection(selectedNode.id, connectionTarget, resolvedCandidate, false)
+    await submitConnection(selectedNode.id, connectionTarget, false)
   }
 
   const selectedCanParent = selectedNode
+    && Boolean(outputHandleId(selectedNode))
     && !model.nodes.find((node) => node.id === selectedNode.id)?.data.runningLocked
-    && (selectedNode.type === 'prompt' && Boolean(selectedNode.parent) || selectedNode.type === 'topic' && selectedCandidates.length > 0)
 
   return (
     <section
@@ -678,28 +692,20 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, api, candidateFix
         <button type="button" className="canvas-toolbar-btn" onClick={addTopic} disabled={mutationBlocked}>
           ＋ 新选题
         </button>
-        <button type="button" className="canvas-toolbar-btn" onClick={() => void addPrompt({ position: canvasPosition() })} disabled={mutationBlocked}>
+        <button type="button" className="canvas-toolbar-btn" onClick={addDraftPrompt} disabled={mutationBlocked}>
           ＋ 草稿提示词
         </button>
         {selectedCanParent && connectionTargets.length ? (
           <div className="canvas-keyboard-connect">
             <label htmlFor="connection-target">连接 / 改挂</label>
             <select id="connection-target" value={connectionTarget} onChange={(event) => setConnectionTarget(event.currentTarget.value)}>
-              <option value="">选择提示词目标</option>
+              <option value="">选择节点目标</option>
               {connectionTargets.map((target) => (
                 <option key={target.id} value={target.id} disabled={(snapshot.lockedNodeIds ?? []).includes(target.id)}>
                   {target.title}{target.parent ? ' · 改挂' : ' · 草稿'}
                 </option>
               ))}
             </select>
-            {selectedNode?.type === 'topic' && selectedCandidates.length ? (
-              <select value={candidateSelection} onChange={(event) => setCandidateSelection(event.currentTarget.value)} aria-label="选择候选输出端口">
-                {selectedCandidates.map((candidate, index) => {
-                  const candidateIndex = candidate.index ?? index
-                  return <option key={`${selectedNode.id}-${candidateIndex}`} value={candidateIndex}>候选 {candidateIndex + 1} · {candidate.title}</option>
-                })}
-              </select>
-            ) : null}
             <button type="button" className="canvas-toolbar-btn" onClick={() => void connectSelectedTarget()} disabled={mutationBlocked || !connectionTarget}>
               将目标连接到选中节点
             </button>
@@ -790,12 +796,11 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, api, candidateFix
           }}>
             <h2 id="reparent-title">确认改挂节点</h2>
             <p>
-              将 <strong>{byId.get(confirmIntent.childId)?.title ?? confirmIntent.childId}</strong> 改挂到 <strong>{byId.get(confirmIntent.parentId)?.title ?? confirmIntent.parentId}</strong>
-              {confirmIntent.candidate !== null ? ` 的候选 ${confirmIntent.candidate + 1}` : ''}。
+              将 <strong>{byId.get(confirmIntent.childId)?.title ?? confirmIntent.childId}</strong> 改挂到 <strong>{byId.get(confirmIntent.parentId)?.title ?? confirmIntent.parentId}</strong>。
             </p>
             <ul>
               <li>受影响子树：{confirmIntent.subtreeCount} 个节点，改挂后将标记为过期。</li>
-              {confirmIntent.oldParentId ? <li>原上游：{byId.get(confirmIntent.oldParentId)?.title ?? confirmIntent.oldParentId}{confirmIntent.oldCandidate !== null ? ` · 候选 ${confirmIntent.oldCandidate + 1}` : ''}。</li> : null}
+              {confirmIntent.oldParentId ? <li>原上游：{byId.get(confirmIntent.oldParentId)?.title ?? confirmIntent.oldParentId}。</li> : null}
               <li>现有内容仍基于旧上游上下文，改挂不会自动重跑。</li>
               {confirmIntent.movesTree ? <li>这是跨 topic 树改挂，服务端会迁移子树工作区 steps；失败时不会提交连线。</li> : <li>工作区 steps 不迁移；运行锁和图约束仍由服务端校验。</li>}
             </ul>
@@ -805,7 +810,7 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, api, candidateFix
                 type="button"
                 className="canvas-toolbar-btn canvas-confirm-primary"
                 disabled={confirmIntent.projectId !== projectId || connectSubmitting || Boolean(pendingSync)}
-                onClick={() => void submitConnection(confirmIntent.parentId, confirmIntent.childId, confirmIntent.candidate, true)}
+                onClick={() => void submitConnection(confirmIntent.parentId, confirmIntent.childId, true)}
               >
                 {connectSubmitting ? '提交中…' : '确认改挂'}
               </button>

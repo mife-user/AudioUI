@@ -1,15 +1,19 @@
 import type { Edge, Node as FlowNode } from '@xyflow/react'
-import type { Node, NodeParams, RunStartResult, WorkspaceSnapshot } from '../../bindings/audio-ui/internal/domain/entity'
+import type { CandidateSource, Node, NodeParams, RunStartResult, WorkspaceSnapshot } from '../../bindings/audio-ui/internal/domain/entity'
 import type { TopicCandidateFixture } from './graphApi'
+
+export type ChildNodeType = 'prompt' | 'agent' | 'script'
 
 export type CanvasNodeData = {
   node: Node
   runningLocked: boolean
   pathHighlighted: boolean
-  hasUnmappedChildren: boolean
+  topicCandidateIndexes: number[]
   candidates: TopicCandidateFixture[]
+  candidate?: TopicCandidateFixture
   candidateError?: string
   candidateLoading?: boolean
+  outputScript?: Node
   mutationsDisabled: boolean
   projectId?: string
   runStatus?: string
@@ -17,12 +21,14 @@ export type CanvasNodeData = {
   globalRunBusy?: boolean
   runSubmitting?: boolean
   onUpdateTopicParams?: (nodeId: string, title: string, params: NodeParams, projectId: string) => Promise<boolean | void>
-  onStartTopicRun?: (nodeId: string, projectId: string) => Promise<RunStartResult>
+  onUpdateNodeParams?: (nodeId: string, title: string, params: NodeParams, projectId: string) => Promise<boolean | void>
+  onStartRun?: (nodeId: string, projectId: string) => Promise<RunStartResult>
+  onRegisterPromptFlush?: (nodeId: string, projectId: string, flush: () => Promise<boolean>) => () => void
   onNodeHandlesMeasured?: (nodeId: string, layoutKey: string, projectId: string) => void
-  onAddChild: (nodeId: string, candidate: number | null) => void
+  onAddChild: (nodeId: string, type: ChildNodeType) => void
 }
 
-export type CanvasFlowNode = FlowNode<CanvasNodeData, 'topic' | 'prompt'>
+export type CanvasFlowNode = FlowNode<CanvasNodeData, 'topic' | 'candidate' | 'prompt' | 'agent' | 'script'>
 
 export function deriveHighlightedPath(snapshot: WorkspaceSnapshot): Set<string> {
   const activeNodeId = snapshot.project?.activeNodeId
@@ -32,12 +38,14 @@ export function deriveHighlightedPath(snapshot: WorkspaceSnapshot): Set<string> 
   return new Set([activeNodeId])
 }
 
-type TopicCallbacks = {
+type CanvasCallbacks = {
   runSubmittingNodeId?: string
   candidateErrors?: Record<string, string>
   candidateLoading?: Record<string, boolean>
   onUpdateTopicParams?: CanvasNodeData['onUpdateTopicParams']
-  onStartTopicRun?: CanvasNodeData['onStartTopicRun']
+  onUpdateNodeParams?: CanvasNodeData['onUpdateNodeParams']
+  onStartRun?: CanvasNodeData['onStartRun']
+  onRegisterPromptFlush?: CanvasNodeData['onRegisterPromptFlush']
   onNodeHandlesMeasured?: CanvasNodeData['onNodeHandlesMeasured']
 }
 
@@ -46,22 +54,54 @@ export function candidateAt(candidates: TopicCandidateFixture[] | undefined, ind
   return candidates?.find((candidate, position) => (candidate.index ?? position) === index)
 }
 
+export function inputHandleId(node: Node): string | null {
+  switch (node.type) {
+    case 'candidate': return 'candidate-input'
+    case 'prompt': return 'prompt-input'
+    case 'agent': return 'agent-input'
+    case 'script': return 'script-input'
+    default: return null
+  }
+}
+
+export function outputHandleId(node: Node): string | null {
+  switch (node.type) {
+    case 'candidate': return 'candidate-output'
+    case 'prompt': return node.parent ? 'prompt-output' : null
+    case 'agent': return node.parent ? 'agent-output' : null
+    case 'script': return node.parent ? 'script-output' : null
+    default: return null
+  }
+}
+
+function edgeSourceHandle(parent: Node, child: Node): string | null {
+  if (parent.type === 'topic') {
+    if (child.type !== 'candidate' || !child.candidateSource) return null
+    return `topic-candidate-${child.candidateSource.index}`
+  }
+  return outputHandleId(parent)
+}
+
 export function nodeHandleLayoutKey(type: CanvasFlowNode['type'], data: CanvasNodeData): string {
   if (type === 'topic') {
     return JSON.stringify({
       type,
-      candidates: data.candidates.map((candidate, position) => ({
-        index: candidate.index ?? position,
-        title: candidate.title,
-        angle: candidate.angle ?? '',
-        hook: candidate.hook ?? '',
-      })),
-      hasUnmappedChildren: data.hasUnmappedChildren,
-      candidateError: data.candidateError ?? '',
-      candidateLoading: Boolean(data.candidateLoading),
+      candidates: data.topicCandidateIndexes.map((index) => {
+        const candidate = candidateAt(data.candidates, index)
+        return { index, title: candidate?.title ?? '', angle: candidate?.angle ?? '', hook: candidate?.hook ?? '' }
+      }),
     })
   }
-  return JSON.stringify({ type, hasOutput: Boolean(data.node.parent) })
+  if (type === 'candidate') {
+    return JSON.stringify({
+      type,
+      sourceIndex: data.node.candidateSource?.index,
+      title: data.candidate?.title ?? data.node.title,
+      angle: data.candidate?.angle ?? '',
+      hook: data.candidate?.hook ?? '',
+    })
+  }
+  return JSON.stringify({ type, hasParent: Boolean(data.node.parent) })
 }
 
 export function buildFlowEdges(
@@ -74,11 +114,9 @@ export function buildFlowEdges(
     if (!child.parent) return []
     const parentFlowNode = byId.get(child.parent)
     if (!parentFlowNode) return []
-    const sourceHandle = parentFlowNode.type === 'topic'
-      ? candidateAt(parentFlowNode.data.candidates, child.parentCandidate)
-        ? `candidate-${child.parentCandidate}`
-        : 'topic-connection-anchor'
-      : 'prompt-output'
+    const sourceHandle = edgeSourceHandle(parentFlowNode.data.node, child)
+    const targetHandle = inputHandleId(child)
+    if (!sourceHandle || !targetHandle) return []
     if (measuredHandleLayouts && (
       measuredHandleLayouts[parentFlowNode.id] !== nodeHandleLayoutKey(parentFlowNode.type, parentFlowNode.data)
       || measuredHandleLayouts[childFlowNode.id] !== nodeHandleLayoutKey(childFlowNode.type, childFlowNode.data)
@@ -89,7 +127,7 @@ export function buildFlowEdges(
       source: parentFlowNode.id,
       sourceHandle,
       target: childFlowNode.id,
-      targetHandle: 'prompt-input',
+      targetHandle,
       type: 'smoothstep',
       selectable: false,
       focusable: false,
@@ -104,12 +142,29 @@ export function buildFlowModel(
   onAddChild: CanvasNodeData['onAddChild'],
   candidateFixtures: Record<string, TopicCandidateFixture[]> = {},
   mutationsDisabled = false,
-  topicCallbacks: TopicCallbacks = {},
+  callbacks: CanvasCallbacks = {},
 ): { nodes: CanvasFlowNode[]; edges: Edge[] } {
   const locked = new Set(snapshot.lockedNodeIds ?? [])
+  const submittingNodeId = callbacks.runSubmittingNodeId
+  const submittingPath = submittingNodeId
+    ? (snapshot.chains ?? []).find((chain) => chain.path?.includes(submittingNodeId))?.path ?? []
+    : []
+  for (const nodeId of submittingPath) locked.add(nodeId)
   const highlighted = deriveHighlightedPath(snapshot)
   const projectNodes = snapshot.nodes ?? []
   const projectId = snapshot.project?.id ?? ''
+  const candidateIndexesByTopic = new Map<string, number[]>()
+  const scriptByAgent = new Map<string, Node>()
+  for (const node of projectNodes) {
+    if (node.type === 'candidate' && node.parent && node.candidateSource?.topicNodeId === node.parent) {
+      const indexes = candidateIndexesByTopic.get(node.parent) ?? []
+      indexes.push(node.candidateSource.index)
+      candidateIndexesByTopic.set(node.parent, indexes)
+    }
+    if (node.type === 'script' && node.parent) scriptByAgent.set(node.parent, node)
+  }
+  for (const indexes of candidateIndexesByTopic.values()) indexes.sort((left, right) => left - right)
+
   const latestRunByNode = new Map<string, { status: string; startedAt: string }>()
   for (const run of snapshot.runs ?? []) {
     const previous = latestRunByNode.get(run.nodeId)
@@ -121,37 +176,43 @@ export function buildFlowModel(
     if (pending.status !== 'pending' && pending.status !== 'invalid') continue
     pendingCountByNode.set(pending.nodeId, (pendingCountByNode.get(pending.nodeId) ?? 0) + 1)
   }
-  const globalRunBusy = Boolean(topicCallbacks.runSubmittingNodeId)
+  const globalRunBusy = Boolean(callbacks.runSubmittingNodeId)
     || (snapshot.runs ?? []).some((run) => run.status === 'starting' || run.status === 'running')
-  const nodes: CanvasFlowNode[] = projectNodes.map((node) => ({
-    id: node.id,
-    type: node.type as CanvasFlowNode['type'],
-    position: { x: node.position.x, y: node.position.y },
-    selected: node.id === snapshot.project?.activeNodeId,
-    data: {
-      node,
-      runningLocked: locked.has(node.id),
-      pathHighlighted: highlighted.has(node.id),
-      hasUnmappedChildren: projectNodes.some((child) => child.parent === node.id
-        && !candidateAt(candidateFixtures[node.id], child.parentCandidate)),
-      candidates: candidateFixtures[node.id] ?? [],
-      candidateError: topicCallbacks.candidateErrors?.[node.id],
-      candidateLoading: topicCallbacks.candidateLoading?.[node.id] ?? false,
-      mutationsDisabled,
-      projectId,
-      runStatus: latestRunByNode.get(node.id)?.status,
-      pendingCount: pendingCountByNode.get(node.id) ?? 0,
-      globalRunBusy,
-      runSubmitting: topicCallbacks.runSubmittingNodeId === node.id,
-      onUpdateTopicParams: topicCallbacks.onUpdateTopicParams,
-      onStartTopicRun: topicCallbacks.onStartTopicRun,
-      onNodeHandlesMeasured: topicCallbacks.onNodeHandlesMeasured,
-      onAddChild,
-    },
-  }))
+  const nodes: CanvasFlowNode[] = projectNodes.map((node) => {
+    const source: CandidateSource | null | undefined = node.candidateSource
+    const candidateTopicId = source?.topicNodeId ?? ''
+    return {
+      id: node.id,
+      type: node.type as CanvasFlowNode['type'],
+      position: { x: node.position.x, y: node.position.y },
+      selected: node.id === snapshot.project?.activeNodeId,
+      data: {
+        node,
+        runningLocked: locked.has(node.id),
+        pathHighlighted: highlighted.has(node.id),
+        topicCandidateIndexes: candidateIndexesByTopic.get(node.id) ?? [],
+        candidates: candidateFixtures[node.id] ?? [],
+        candidate: source ? candidateAt(candidateFixtures[candidateTopicId], source.index) : undefined,
+        candidateError: candidateTopicId ? callbacks.candidateErrors?.[candidateTopicId] : callbacks.candidateErrors?.[node.id],
+        candidateLoading: candidateTopicId ? callbacks.candidateLoading?.[candidateTopicId] : callbacks.candidateLoading?.[node.id] ?? false,
+        outputScript: node.type === 'agent' ? scriptByAgent.get(node.id) : undefined,
+        mutationsDisabled,
+        projectId,
+        runStatus: latestRunByNode.get(node.id)?.status,
+        pendingCount: pendingCountByNode.get(node.id) ?? 0,
+        globalRunBusy,
+        runSubmitting: callbacks.runSubmittingNodeId === node.id,
+        onUpdateTopicParams: callbacks.onUpdateTopicParams,
+        onUpdateNodeParams: callbacks.onUpdateNodeParams,
+        onStartRun: callbacks.onStartRun,
+        onRegisterPromptFlush: callbacks.onRegisterPromptFlush,
+        onNodeHandlesMeasured: callbacks.onNodeHandlesMeasured,
+        onAddChild,
+      },
+    }
+  })
 
   const edges = buildFlowEdges(nodes)
-
   return { nodes, edges }
 }
 

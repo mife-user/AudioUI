@@ -6,13 +6,15 @@
 
 ## [Unreleased]
 
-M2 图与提示词（M2-00～10 旧模型已验收；M2-11A 本地脚本目标设计已验收；M2-11B 工程格式与图领域模型已验收（2026-11-06）；M2-11C 已验收（2026-11-07）；M2-11D 已验收（2026-11-07）；M2-12A～13 未完成，完整闭环尚未实现）。
+M2 图与提示词（M2-00～10 旧模型已验收；M2-11A 本地脚本目标设计已验收；M2-11B 工程格式与图领域模型已验收（2026-11-06）；M2-11C 已验收（2026-11-07）；M2-11D 已验收（2026-11-07）；M2-12A 已于 2026-11-08 通过用户验收；M2-12B～13 未完成，完整闭环尚未实现）。
 
 ### Added
 
 - M2-11C（用户于 2026-11-07 验收）：Agent 作为本地运行入口，发送快照冻结图路径、Candidate 来源、Prompt 任务/约束、Script 祖先版本及输出绑定基准；运行锁同时保护路径与指定输出，路径外兄弟仍可编辑。
 - M2-11C：Agent 上下文按快照读取单个候选和精确 Script 版本，不要求 Prompt 祖先存在旧式 applied round；MCP 图/产物查询使用快照授权，不回退实时工程图；run-scoped MCP 移除通用文件代理，本地内置文件读取限路径祖先与共享只读 `runtime/`，写入限当前节点 `steps/`。
-- M2-11C 门禁和未覆盖项见 `docs/dev/evidence/m2-11c.md`。在 M2-11C 验收范围内，Agent Script 结构化提交返回 `OUTPUT_COMMIT_UNAVAILABLE`；M2-11D 后续开放了受限提交，M2-12A 新模型工作台仍未实现。
+- M2-12A：交付五类新模型画布节点，Candidate/Script 内容按工程快照呈现；Prompt 任务与约束保存并在 Agent 运行前 flush；仅 Agent 提供本地运行入口，并显示输出绑定、路径锁与 BUSY。加载/错误中的候选读取不再隐藏已存在的权威边。实现及未覆盖项见 `docs/dev/evidence/m2-12a.md`；用户于 2026-11-08 确认验收完成。
+- M2-12A：新增 Prompt 保存失败屏障、Agent 锁/BUSY、非法连接、工程切换迟到候选响应、键盘操作与真实 React Flow DOM 回归；不代表 M2-13 完整链路或真实 CLI 验收通过。
+- M2-11C 门禁和未覆盖项见 `docs/dev/evidence/m2-11c.md`。在 M2-11C 验收范围内，Agent Script 结构化提交返回 `OUTPUT_COMMIT_UNAVAILABLE`；M2-11D 后续开放了受限提交，M2-12A 已于 2026-11-08 通过用户验收。
 - M2-11D（已于 2026-11-07 通过用户验收）：有效 topics reply 原子保存不可变 artifact、Topic round 与全部 Candidate；Agent Script 无绑定/空绑定自动写入，已有版本建立待确认结果并在基准仍匹配时追加；无效 payload 保留原文，重放幂等，版本冲突不能由 force 绕过。
 - M2-11D：扩展 pending 事务记录和已提交恢复，校验持久化 Candidate/Script 与结果回执关联；MCP reply 保留活动运行租约并区分自动提交与真正 pending。组件自检及未覆盖项见 `docs/dev/evidence/m2-11d.md`；M2-13 端到端、GUI/真实 CLI 尚未验收。
 - M2-11B（用户于 2026-11-06 验收）：`project.json` 升为 v2，新增 candidate/agent/script 节点及 Candidate 来源、Script 版本引用；Go 图校验实施类型连接矩阵、Candidate 来源轮次与索引、Script 版本序列和 Agent 单直接输出约束。

@@ -31,7 +31,7 @@ function flowNode(
       node: graphNode(id, type),
       runningLocked: false,
       pathHighlighted: false,
-      hasUnmappedChildren: false,
+      topicCandidateIndexes: [],
       candidates: [],
       mutationsDisabled: false,
       projectId,
