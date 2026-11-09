@@ -22,9 +22,11 @@ type Props = {
   node: Node
   projectId: string
   disabled: boolean
+  runBlocked?: boolean
   globalRunBusy: boolean
   onSave: (nodeId: string, title: string, params: NodeParams, projectId: string) => Promise<boolean | void>
   onRun: (nodeId: string, projectId: string) => Promise<RunStartResult>
+  onRegisterFlush?: (nodeId: string, projectId: string, flush: () => Promise<boolean>) => () => void
 }
 
 function draftFromNode(node: Node): TopicDraft {
@@ -74,7 +76,7 @@ function localStartFailure(error: unknown): RunStartError {
   return { code: 'RUN_START_FAILED', message: errorMessage(error) }
 }
 
-export function TopicParameters({ node, projectId, disabled, globalRunBusy, onSave, onRun }: Props) {
+export function TopicParameters({ node, projectId, disabled, runBlocked = false, globalRunBusy, onSave, onRun, onRegisterFlush }: Props) {
   const initialDraft = draftFromNode(node)
   const [draft, setDraft] = useState<TopicDraft>(initialDraft)
   const [saveState, setSaveState] = useState<SaveState>(() => needsInitialSave(node) ? 'dirty' : 'saved')
@@ -89,6 +91,7 @@ export function TopicParameters({ node, projectId, disabled, globalRunBusy, onSa
   const activeSave = useRef<{ version: number; promise: Promise<void> } | null>(null)
   const syncPendingRef = useRef(false)
   const saveTimer = useRef<number | null>(null)
+  const composing = useRef(false)
   const startInFlight = useRef(false)
   const identity = useRef({ projectId, nodeId: node.id })
   const currentProjectId = useRef(projectId)
@@ -96,11 +99,14 @@ export function TopicParameters({ node, projectId, disabled, globalRunBusy, onSa
   const isRunBusy = useRef(globalRunBusy)
   const saveCallback = useRef(onSave)
   const runCallback = useRef(onRun)
+  const registerCallback = useRef(onRegisterFlush)
+  const flushCallback = useRef<() => Promise<boolean>>(async () => true)
   currentProjectId.current = projectId
   currentNodeId.current = node.id
   isRunBusy.current = globalRunBusy
   saveCallback.current = onSave
   runCallback.current = onRun
+  registerCallback.current = onRegisterFlush
 
   const validation = validateDraft(draft)
   const errors = hasErrors(validation)
@@ -151,7 +157,7 @@ export function TopicParameters({ node, projectId, disabled, globalRunBusy, onSa
     return operation
   }
 
-  async function flushSave(): Promise<void> {
+  async function flushSave(): Promise<boolean> {
     clearSaveTimer()
     while (savedVersion.current < editVersion.current) {
       if (currentProjectId.current !== projectId || currentNodeId.current !== node.id) {
@@ -162,8 +168,9 @@ export function TopicParameters({ node, projectId, disabled, globalRunBusy, onSa
       const currentErrors = validateDraft(value)
       if (hasErrors(currentErrors)) throw new Error(currentErrors.title || currentErrors.candidateCount)
       await saveVersion(version, value)
-      if (version === editVersion.current && savedVersion.current >= version) return
+      if (version === editVersion.current && savedVersion.current >= version) break
     }
+    return true
   }
 
   function updateField(field: keyof TopicDraft, value: string) {
@@ -175,7 +182,7 @@ export function TopicParameters({ node, projectId, disabled, globalRunBusy, onSa
     setSaveError('')
     setRunFailure(null)
     clearSaveTimer()
-    if (hasErrors(validateDraft(next))) return
+    if (composing.current || hasErrors(validateDraft(next))) return
 
     const version = editVersion.current
     saveTimer.current = window.setTimeout(() => {
@@ -183,6 +190,18 @@ export function TopicParameters({ node, projectId, disabled, globalRunBusy, onSa
       void saveVersion(version, next).catch(() => undefined)
     }, PARAM_SAVE_DEBOUNCE_MS)
   }
+
+  function startComposition() {
+    composing.current = true
+    clearSaveTimer()
+  }
+
+  function finishComposition(field: keyof TopicDraft, value: string) {
+    composing.current = false
+    updateField(field, value)
+  }
+
+  flushCallback.current = flushSave
 
   async function retrySave() {
     try {
@@ -193,7 +212,7 @@ export function TopicParameters({ node, projectId, disabled, globalRunBusy, onSa
   }
 
   async function startRun() {
-    if (startInFlight.current || disabled || globalRunBusy || errors || saveState === 'error') return
+    if (startInFlight.current || disabled || runBlocked || globalRunBusy || errors || saveState === 'error') return
     startInFlight.current = true
     setStarting(true)
     setRunFailure(null)
@@ -230,10 +249,16 @@ export function TopicParameters({ node, projectId, disabled, globalRunBusy, onSa
   }
 
   useEffect(() => {
+    const unregister = registerCallback.current?.(node.id, projectId, () => flushCallback.current())
+    return () => unregister?.()
+  }, [node.id, projectId])
+
+  useEffect(() => {
     const identityChanged = identity.current.projectId !== projectId || identity.current.nodeId !== node.id
     if (identityChanged) {
       identity.current = { projectId, nodeId: node.id }
       clearSaveTimer()
+      composing.current = false
       const next = draftFromNode(node)
       const needsSave = needsInitialSave(node)
       latestDraft.current = next
@@ -270,7 +295,7 @@ export function TopicParameters({ node, projectId, disabled, globalRunBusy, onSa
 
   useEffect(() => () => clearSaveTimer(), [])
 
-  const runDisabled = disabled || globalRunBusy || starting || errors || saveState === 'error' || syncPending
+  const runDisabled = disabled || runBlocked || globalRunBusy || starting || errors || saveState === 'error' || syncPending
   const saveStatusText = syncPending
     ? '已提交，等待快照同步…'
     : saveState === 'saving'
@@ -295,6 +320,8 @@ export function TopicParameters({ node, projectId, disabled, globalRunBusy, onSa
           disabled={disabled || starting}
           aria-invalid={Boolean(validation.title)}
           aria-describedby={validation.title ? titleErrorId : undefined}
+          onCompositionStart={startComposition}
+          onCompositionEnd={(event) => finishComposition('title', event.currentTarget.value)}
           onChange={(event) => updateField('title', event.currentTarget.value)}
         />
         {validation.title ? <span className="topic-field-error" id={titleErrorId}>{validation.title}</span> : null}
@@ -307,6 +334,8 @@ export function TopicParameters({ node, projectId, disabled, globalRunBusy, onSa
           rows={3}
           value={draft.idea}
           disabled={disabled || starting}
+          onCompositionStart={startComposition}
+          onCompositionEnd={(event) => finishComposition('idea', event.currentTarget.value)}
           onChange={(event) => updateField('idea', event.currentTarget.value)}
         />
       </label>
@@ -318,6 +347,8 @@ export function TopicParameters({ node, projectId, disabled, globalRunBusy, onSa
           type="text"
           value={draft.direction}
           disabled={disabled || starting}
+          onCompositionStart={startComposition}
+          onCompositionEnd={(event) => finishComposition('direction', event.currentTarget.value)}
           onChange={(event) => updateField('direction', event.currentTarget.value)}
         />
       </label>

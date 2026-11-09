@@ -55,6 +55,33 @@ describe('PromptParameters', () => {
     expect(screen.getByRole('status')).toHaveTextContent('已保存')
   })
 
+  it('waits for input composition to finish before saving the final Prompt draft', async () => {
+    vi.useFakeTimers()
+    try {
+      const onSave = vi.fn<SaveParams>().mockResolvedValue(true)
+      renderPrompt(onSave)
+      const task = screen.getByRole('textbox', { name: '任务' })
+      const finalValue = '中文输入😀\n第二行'
+
+      fireEvent.compositionStart(task)
+      fireEvent.change(task, { target: { value: finalValue } })
+      await act(async () => { await vi.advanceTimersByTimeAsync(400) })
+      expect(onSave).not.toHaveBeenCalled()
+
+      fireEvent.compositionEnd(task, { data: finalValue })
+      await act(async () => { await vi.advanceTimersByTimeAsync(320) })
+      expect(onSave).toHaveBeenCalledOnce()
+      expect(onSave).toHaveBeenCalledWith(
+        'n_prompt',
+        '脚本任务',
+        { instruction: finalValue, constraints: { scenes: 3, duration: 90 } },
+        'p_test',
+      )
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('retains edits and reports a failed save so the run cannot use stale parameters', async () => {
     const onSave = vi.fn<SaveParams>()
       .mockRejectedValueOnce(new Error('disk full'))

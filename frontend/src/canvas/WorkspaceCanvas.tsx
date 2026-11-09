@@ -50,6 +50,7 @@ type Props = {
   snapshot: WorkspaceSnapshot
   onSelectNode: (id: string) => Promise<void>
   onGraphMutation?: (receipt: GraphMutationReceipt) => void | Promise<void>
+  onRegisterDraftFlush?: (flush: (projectId: string) => Promise<boolean>) => () => void
   api?: GraphAPI
   candidateFixtures?: Record<string, TopicCandidateFixture[]>
   onStartRun?: (nodeId: string, projectId: string) => Promise<RunStartResult>
@@ -88,6 +89,11 @@ type MeasuredHandleState = {
   byNode: Record<string, string>
 }
 
+type RegisteredFlush = {
+  projectId: string
+  flush: () => Promise<boolean>
+}
+
 type ConnectIntent = {
   projectId: string
   parentId: string
@@ -119,7 +125,7 @@ function candidateQueryKey(nodes: Node[] | undefined): string {
   return JSON.stringify(queries)
 }
 
-function CanvasBody({ snapshot, onSelectNode, onGraphMutation, api, candidateFixtures, onStartRun }: Props & { api: GraphAPI }) {
+function CanvasBody({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFlush, api, candidateFixtures, onStartRun }: Props & { api: GraphAPI }) {
   const projectId = snapshot.project?.id ?? ''
   const graphNodes = snapshot.nodes ?? []
   const [candidateState, setCandidateState] = useState<CandidateReadState>({ projectId: '', entries: {} })
@@ -141,6 +147,13 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, api, candidateFix
     promptFlushers.current.set(nodeId, entry)
     return () => {
       if (promptFlushers.current.get(nodeId) === entry) promptFlushers.current.delete(nodeId)
+    }
+  }, [])
+  const registerTopicFlush = useCallback((nodeId: string, ownerProjectId: string, flush: () => Promise<boolean>) => {
+    const entry = { projectId: ownerProjectId, flush }
+    topicFlushers.current.set(nodeId, entry)
+    return () => {
+      if (topicFlushers.current.get(nodeId) === entry) topicFlushers.current.delete(nodeId)
     }
   }, [])
   const measuredHandleLayouts = measuredHandleState.projectId === projectId
@@ -186,6 +199,15 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, api, candidateFix
   const [paramsSaveCount, setParamsSaveCount] = useState(0)
   const [runSubmittingNodeId, setRunSubmittingNodeId] = useState('')
   const [pendingSync, setPendingSync] = useState<PendingSync | null>(null)
+  const pendingSyncRef = useRef<PendingSync | null>(null)
+  const lastSyncedRevision = useRef({ projectId, revision: snapshot.project?.revision ?? 0 })
+  const syncMutationRef = useRef<(receipt: GraphMutationReceipt, label: string, focusNodeId?: string) => Promise<boolean>>(async () => false)
+  if (lastSyncedRevision.current.projectId !== projectId) {
+    lastSyncedRevision.current = { projectId, revision: snapshot.project?.revision ?? 0 }
+  } else if ((snapshot.project?.revision ?? 0) > lastSyncedRevision.current.revision) {
+    lastSyncedRevision.current = { projectId, revision: snapshot.project?.revision ?? 0 }
+  }
+  const paramsSaveQueue = useRef(Promise.resolve())
   const [pendingFocusNodeId, setPendingFocusNodeId] = useState('')
   const [confirmIntent, setConfirmIntent] = useState<ConnectIntent | null>(null)
   const [connectionTarget, setConnectionTarget] = useState('')
@@ -193,18 +215,43 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, api, candidateFix
   const connectInFlight = useRef(false)
   const runStartInFlight = useRef(false)
   const runRequestSequence = useRef(0)
-  const promptFlushers = useRef(new Map<string, { projectId: string; flush: () => Promise<boolean> }>())
+  const promptFlushers = useRef(new Map<string, RegisteredFlush>())
+  const topicFlushers = useRef(new Map<string, RegisteredFlush>())
   const hasActiveRun = (snapshot.runs ?? []).some((run) => run.status === 'starting' || run.status === 'running')
   const globalRunBusy = hasActiveRun || Boolean(runSubmittingNodeId)
   const globalRunBusyRef = useRef(globalRunBusy)
   globalRunBusyRef.current = globalRunBusy
-  const mutationBlocked = busy || connectSubmitting || paramsSaveCount > 0 || pendingSync !== null
+  const paramsEditingDisabled = busy || connectSubmitting || pendingSync !== null
+  const mutationBlocked = paramsEditingDisabled || paramsSaveCount > 0
   const mutationBlockedRef = useRef(mutationBlocked)
   mutationBlockedRef.current = mutationBlocked
   const runStartBlockedRef = useRef(busy || connectSubmitting || pendingSync !== null)
   runStartBlockedRef.current = busy || connectSubmitting || pendingSync !== null
   const confirmCancelRef = useRef<HTMLButtonElement>(null)
   const confirmReturnFocus = useRef<HTMLElement | null>(null)
+
+  const flushWorkspaceDrafts = useCallback(async (ownerProjectId: string) => {
+    if (currentProjectId.current !== ownerProjectId) throw new Error('PROJECT_CHANGED: 工程已切换，未保存旧工程草稿。')
+    if (busy || connectSubmitting) throw new Error('当前工程操作仍在提交，请等待完成后再切换。')
+
+    const retryPendingSync = async () => {
+      const pending = pendingSyncRef.current
+      if (!pending || pending.receipt.projectId !== ownerProjectId) return true
+      return await syncMutationRef.current(pending.receipt, pending.label, pending.focusNodeId)
+    }
+
+    if (!await retryPendingSync()) return false
+    for (const node of graphNodes) {
+      const registry = node.type === 'prompt' ? promptFlushers.current : node.type === 'topic' ? topicFlushers.current : null
+      const registered = registry?.get(node.id)
+      if (!registered || registered.projectId !== ownerProjectId) continue
+      if (!await registered.flush()) return false
+    }
+    if (currentProjectId.current !== ownerProjectId) return false
+    return await retryPendingSync()
+  }, [busy, connectSubmitting, graphNodes])
+
+  useEffect(() => onRegisterDraftFlush?.(flushWorkspaceDrafts), [flushWorkspaceDrafts, onRegisterDraftFlush])
 
   useEffect(() => {
     if (candidateFixtures !== undefined) {
@@ -251,22 +298,44 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, api, candidateFix
 
   const syncMutation = useCallback(async (receipt: GraphMutationReceipt, label: string, focusNodeId?: string) => {
     setNotice(`${label}已提交，正在同步工程图。`)
-    setError('')
     try {
       await onGraphMutation?.(receipt)
       if (currentProjectId.current !== receipt.projectId) return false
+      const current = lastSyncedRevision.current
+      const revision = current.projectId === receipt.projectId ? Math.max(current.revision, receipt.projectRevision) : receipt.projectRevision
+      lastSyncedRevision.current = { projectId: receipt.projectId, revision }
+      const pending = pendingSyncRef.current
+      if (pending?.receipt.projectId === receipt.projectId && pending.receipt.projectRevision > revision) return true
+      pendingSyncRef.current = null
       setPendingSync(null)
+      setError('')
       setNotice(`${label}已同步。`)
       if (focusNodeId) setPendingFocusNodeId(focusNodeId)
       return true
     } catch (failure) {
       if (currentProjectId.current !== receipt.projectId) return false
+      const current = lastSyncedRevision.current
+      if (current.projectId === receipt.projectId && current.revision >= receipt.projectRevision) {
+        const pending = pendingSyncRef.current
+        if (pending?.receipt.projectId === receipt.projectId && pending.receipt.projectRevision <= current.revision) {
+          pendingSyncRef.current = null
+          setPendingSync(null)
+          setError('')
+          setNotice(`${label}已同步。`)
+        }
+        return true
+      }
+      const existing = pendingSyncRef.current
+      if (existing?.receipt.projectId === receipt.projectId && existing.receipt.projectRevision > receipt.projectRevision) return false
       setNotice('')
-      setPendingSync({ receipt, label, focusNodeId })
+      const pending = { receipt, label, focusNodeId }
+      pendingSyncRef.current = pending
+      setPendingSync(pending)
       setError(`${label}已保存，但画布同步失败：${errorMessage(failure)}。请重试同步，不要重复创建。`)
       return false
     }
   }, [onGraphMutation])
+  syncMutationRef.current = syncMutation
 
   const schedulePositionSave = useCallback((nodeId: string, position: PendingPosition) => {
     if (!projectId || currentProjectId.current !== projectId) return
@@ -348,13 +417,21 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, api, candidateFix
   const saveNodeParams = useCallback(async (nodeId: string, title: string, params: NodeParams, ownerProjectId: string) => {
     if (currentProjectId.current !== ownerProjectId) throw new Error('PROJECT_CHANGED: 工程已切换，未保存旧工程参数。')
     setParamsSaveCount((count) => count + 1)
-    try {
+    const operation = paramsSaveQueue.current.catch(() => undefined).then(async () => {
+      if (currentProjectId.current !== ownerProjectId) throw new Error('PROJECT_CHANGED: 工程已切换，未保存旧工程参数。')
+      if (pendingSyncRef.current?.receipt.projectId === ownerProjectId) {
+        throw new Error('WORKSPACE_SYNC_STALE: 请先重试工程快照同步，再保存参数。')
+      }
       const receipt = await api.updateNodeParams(nodeId, title, params, ownerProjectId)
       if (receipt.projectId !== ownerProjectId) throw new Error('PROJECT_CHANGED: 参数保存回执所属工程不一致。')
       if (currentProjectId.current !== ownerProjectId) return false
-      return await syncMutation(receipt, '选题参数')
+      return await syncMutation(receipt, '节点参数')
+    })
+    paramsSaveQueue.current = operation.then(() => undefined, () => undefined)
+    try {
+      return await operation
     } finally {
-      setParamsSaveCount((count) => Math.max(0, count - 1))
+      if (currentProjectId.current === ownerProjectId) setParamsSaveCount((count) => Math.max(0, count - 1))
     }
   }, [api, syncMutation])
 
@@ -374,7 +451,10 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, api, candidateFix
     setRunSubmittingNodeId(nodeId)
     try {
       const chain = (snapshot.chains ?? []).find((item) => item.path?.includes(nodeId))
-      for (const pathNodeId of chain?.path ?? []) {
+      const chainPath = chain?.path ?? []
+      const targetIndex = chainPath.indexOf(nodeId)
+      const runPath = targetIndex < 0 ? [] : chainPath.slice(0, targetIndex + 1)
+      for (const pathNodeId of runPath) {
         const pathNode = graphNodes.find((node) => node.id === pathNodeId)
         if (pathNode?.type !== 'prompt') continue
         const registered = promptFlushers.current.get(pathNodeId)
@@ -386,7 +466,7 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, api, candidateFix
       if (currentProjectId.current !== ownerProjectId) {
         return { error: { code: 'PROJECT_CHANGED', message: '工程已切换，未启动运行。' } }
       }
-      if (runStartBlockedRef.current) {
+      if (pendingSyncRef.current?.receipt.projectId === ownerProjectId || runStartBlockedRef.current) {
         return { error: { code: 'WORKSPACE_SYNC_STALE', message: '请先完成当前工程操作与快照同步。' } }
       }
       return await (onStartRun ?? startRunAPI)(nodeId, ownerProjectId)
@@ -402,6 +482,7 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, api, candidateFix
 
   const model = useMemo(
     () => buildFlowModel(snapshot, addChild, candidateMap, mutationBlocked, {
+      paramsEditingDisabled,
       runSubmittingNodeId,
       candidateErrors,
       candidateLoading,
@@ -409,9 +490,10 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, api, candidateFix
       onUpdateNodeParams: saveNodeParams,
       onStartRun: startNodeRun,
       onRegisterPromptFlush: registerPromptFlush,
+      onRegisterTopicFlush: registerTopicFlush,
       onNodeHandlesMeasured,
     }),
-    [snapshot, addChild, candidateMap, candidateErrors, candidateLoading, mutationBlocked, runSubmittingNodeId, saveNodeParams, startNodeRun, registerPromptFlush, onNodeHandlesMeasured],
+    [snapshot, addChild, candidateMap, candidateErrors, candidateLoading, mutationBlocked, paramsEditingDisabled, runSubmittingNodeId, saveNodeParams, startNodeRun, registerPromptFlush, registerTopicFlush, onNodeHandlesMeasured],
   )
 
   useEffect(() => {
@@ -434,6 +516,8 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, api, candidateFix
     confirmReturnFocus.current = null
     setError('')
     setNotice('')
+    pendingSyncRef.current = null
+    paramsSaveQueue.current = Promise.resolve()
     setPendingSync(null)
     setPendingFocusNodeId('')
     setBusy(false)
@@ -841,10 +925,10 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, api, candidateFix
   )
 }
 
-export function WorkspaceCanvas({ snapshot, onSelectNode, onGraphMutation, api = graphAPI, candidateFixtures, onStartRun = startRunAPI }: Props) {
+export function WorkspaceCanvas({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFlush, api = graphAPI, candidateFixtures, onStartRun = startRunAPI }: Props) {
   return (
     <ReactFlowProvider>
-      <CanvasBody snapshot={snapshot} onSelectNode={onSelectNode} onGraphMutation={onGraphMutation} api={api} candidateFixtures={candidateFixtures} onStartRun={onStartRun} />
+      <CanvasBody snapshot={snapshot} onSelectNode={onSelectNode} onGraphMutation={onGraphMutation} onRegisterDraftFlush={onRegisterDraftFlush} api={api} candidateFixtures={candidateFixtures} onStartRun={onStartRun} />
     </ReactFlowProvider>
   )
 }

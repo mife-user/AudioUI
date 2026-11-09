@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import type { Node, NodeParams, RunStartResult } from '../../bindings/audio-ui/internal/domain/entity'
 import { TopicParameters } from './TopicParameters'
@@ -71,6 +71,32 @@ describe('TopicParameters', () => {
     ))
     expect(screen.getByRole('status')).toHaveTextContent('已保存')
     expect(onRun).not.toHaveBeenCalled()
+  })
+
+  it('waits for input composition to finish before saving the final topic draft', async () => {
+    vi.useFakeTimers()
+    try {
+      const { onSave } = renderTopic()
+      const idea = screen.getByRole('textbox', { name: '想法' })
+      const finalValue = '中文输入😀\n第二行'
+
+      fireEvent.compositionStart(idea)
+      fireEvent.change(idea, { target: { value: finalValue } })
+      await act(async () => { await vi.advanceTimersByTimeAsync(400) })
+      expect(onSave).not.toHaveBeenCalled()
+
+      fireEvent.compositionEnd(idea, { data: finalValue })
+      await act(async () => { await vi.advanceTimersByTimeAsync(320) })
+      expect(onSave).toHaveBeenCalledOnce()
+      expect(onSave).toHaveBeenCalledWith(
+        'n_topic',
+        '选题标题',
+        { idea: finalValue, direction: '人物观察', candidateCount: 3 },
+        'p_test',
+      )
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('waits for pending parameter persistence before starting a run', async () => {

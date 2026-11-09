@@ -56,10 +56,12 @@ export const TopicNode = memo(function TopicNode({ id, data }: NodeProps<CanvasF
         <TopicParameters
           node={node}
           projectId={projectId ?? ''}
-          disabled={runningLocked || node.locked || mutationsDisabled}
+          disabled={runningLocked || node.locked || (data.paramsEditingDisabled ?? mutationsDisabled)}
+          runBlocked={mutationsDisabled}
           globalRunBusy={globalRunBusy ?? false}
           onSave={onUpdateTopicParams ?? (async () => undefined)}
           onRun={onStartRun ?? (async () => ({}))}
+          onRegisterFlush={data.onRegisterTopicFlush}
         />
         {pendingCount > 0 ? (
           <p className="canvas-node-hint topic-pending-hint" role="status">有待处理的选题结果，请在控制台查看。</p>

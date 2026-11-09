@@ -16,6 +16,7 @@ export type CanvasNodeData = {
   candidateLoading?: boolean
   outputScript?: Node
   mutationsDisabled: boolean
+  paramsEditingDisabled?: boolean
   projectId?: string
   runStatus?: string
   pendingCount?: number
@@ -26,6 +27,7 @@ export type CanvasNodeData = {
   onUpdateNodeParams?: (nodeId: string, title: string, params: NodeParams, projectId: string) => Promise<boolean | void>
   onStartRun?: (nodeId: string, projectId: string) => Promise<RunStartResult>
   onRegisterPromptFlush?: (nodeId: string, projectId: string, flush: () => Promise<boolean>) => () => void
+  onRegisterTopicFlush?: (nodeId: string, projectId: string, flush: () => Promise<boolean>) => () => void
   onNodeHandlesMeasured?: (nodeId: string, layoutKey: string, projectId: string) => void
   onAddChild: (nodeId: string, type: ChildNodeType) => void
 }
@@ -41,6 +43,7 @@ export function deriveHighlightedPath(snapshot: WorkspaceSnapshot): Set<string> 
 }
 
 type CanvasCallbacks = {
+  paramsEditingDisabled?: boolean
   runSubmittingNodeId?: string
   candidateErrors?: Record<string, string>
   candidateLoading?: Record<string, boolean>
@@ -48,6 +51,7 @@ type CanvasCallbacks = {
   onUpdateNodeParams?: CanvasNodeData['onUpdateNodeParams']
   onStartRun?: CanvasNodeData['onStartRun']
   onRegisterPromptFlush?: CanvasNodeData['onRegisterPromptFlush']
+  onRegisterTopicFlush?: CanvasNodeData['onRegisterTopicFlush']
   onNodeHandlesMeasured?: CanvasNodeData['onNodeHandlesMeasured']
 }
 
@@ -154,7 +158,8 @@ export function buildFlowModel(
   const submittingPath = submittingNodeId
     ? (snapshot.chains ?? []).find((chain) => chain.path?.includes(submittingNodeId))?.path ?? []
     : []
-  for (const nodeId of submittingPath) locked.add(nodeId)
+  const submittingIndex = submittingNodeId ? submittingPath.indexOf(submittingNodeId) : -1
+  for (const nodeId of submittingIndex < 0 ? [] : submittingPath.slice(0, submittingIndex + 1)) locked.add(nodeId)
   const highlighted = deriveHighlightedPath(snapshot)
   const projectNodes = snapshot.nodes ?? []
   const projectId = snapshot.project?.id ?? ''
@@ -169,6 +174,10 @@ export function buildFlowModel(
     if (node.type === 'script' && node.parent) scriptByAgent.set(node.parent, node)
   }
   for (const indexes of candidateIndexesByTopic.values()) indexes.sort((left, right) => left - right)
+  if (projectNodes.find((node) => node.id === submittingNodeId)?.type === 'agent') {
+    const outputScript = scriptByAgent.get(submittingNodeId ?? '')
+    if (outputScript) locked.add(outputScript.id)
+  }
 
   const latestRunByNode = new Map<string, { status: string; startedAt: string }>()
   for (const run of snapshot.runs ?? []) {
@@ -206,6 +215,7 @@ export function buildFlowModel(
         candidateLoading: candidateTopicId ? callbacks.candidateLoading?.[candidateTopicId] : callbacks.candidateLoading?.[node.id] ?? false,
         outputScript: node.type === 'agent' ? scriptByAgent.get(node.id) : undefined,
         mutationsDisabled,
+        paramsEditingDisabled: callbacks.paramsEditingDisabled ?? mutationsDisabled,
         projectId,
         runStatus: latestRunByNode.get(node.id)?.status,
         pendingCount: pendingCountByNode.get(node.id) ?? 0,
@@ -216,6 +226,7 @@ export function buildFlowModel(
         onUpdateNodeParams: callbacks.onUpdateNodeParams,
         onStartRun: callbacks.onStartRun,
         onRegisterPromptFlush: callbacks.onRegisterPromptFlush,
+        onRegisterTopicFlush: callbacks.onRegisterTopicFlush,
         onNodeHandlesMeasured: callbacks.onNodeHandlesMeasured,
         onAddChild,
       },

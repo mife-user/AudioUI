@@ -65,6 +65,7 @@ export function PromptParameters({ node, projectId, disabled, onSave, onRegister
   const activeSave = useRef<{ version: number; promise: Promise<void> } | null>(null)
   const saveTimer = useRef<number | null>(null)
   const syncPending = useRef(false)
+  const composing = useRef(false)
   const identity = useRef({ projectId, nodeId: node.id })
   const currentProjectId = useRef(projectId)
   const currentNodeId = useRef(node.id)
@@ -134,7 +135,7 @@ export function PromptParameters({ node, projectId, disabled, onSave, onRegister
       if (error) throw new Error(error)
       await saveVersion(version, value)
     }
-    return !syncPending.current
+    return true
   }
 
   flushCallback.current = flushSave
@@ -147,13 +148,23 @@ export function PromptParameters({ node, projectId, disabled, onSave, onRegister
     setSaveState('dirty')
     setSaveError('')
     clearSaveTimer()
-    if (draftError(next)) return
+    if (composing.current || draftError(next)) return
 
     const version = editVersion.current
     saveTimer.current = window.setTimeout(() => {
       saveTimer.current = null
       void saveVersion(version, next).catch(() => undefined)
     }, PARAM_SAVE_DEBOUNCE_MS)
+  }
+
+  function startComposition() {
+    composing.current = true
+    clearSaveTimer()
+  }
+
+  function finishComposition(field: keyof PromptDraft, value: string) {
+    composing.current = false
+    updateField(field, value)
   }
 
   async function retrySave() {
@@ -175,6 +186,7 @@ export function PromptParameters({ node, projectId, disabled, onSave, onRegister
     if (identityChanged) {
       identity.current = { projectId, nodeId: node.id }
       clearSaveTimer()
+      composing.current = false
       const next = draftFromNode(node)
       latestDraft.current = next
       editVersion.current = 0
@@ -228,6 +240,8 @@ export function PromptParameters({ node, projectId, disabled, onSave, onRegister
           disabled={disabled}
           aria-invalid={Boolean(draft.title.trim() === '')}
           aria-describedby={draft.title.trim() === '' ? titleErrorId : undefined}
+          onCompositionStart={startComposition}
+          onCompositionEnd={(event) => finishComposition('title', event.currentTarget.value)}
           onChange={(event) => updateField('title', event.currentTarget.value)}
         />
         {draft.title.trim() === '' ? <span className="topic-field-error" id={titleErrorId}>提示词标题不能为空。</span> : null}
@@ -241,6 +255,8 @@ export function PromptParameters({ node, projectId, disabled, onSave, onRegister
           value={draft.instruction}
           disabled={disabled}
           aria-describedby={validationError && draft.title.trim() ? taskErrorId : undefined}
+          onCompositionStart={startComposition}
+          onCompositionEnd={(event) => finishComposition('instruction', event.currentTarget.value)}
           onChange={(event) => updateField('instruction', event.currentTarget.value)}
         />
         {validationError && draft.title.trim() ? <span className="topic-field-error" id={taskErrorId}>{validationError}</span> : null}

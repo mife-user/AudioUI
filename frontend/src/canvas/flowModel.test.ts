@@ -109,21 +109,31 @@ describe('flowModel', () => {
     expect(model.nodes.find((node) => node.id === script.id)?.data.pendingOutputCount).toBe(1)
   })
 
-  it('uses the backend-provided leaf path for highlighting and includes an in-flight start path in the lock view', () => {
+  it('locks only the in-flight target path and its direct Script output', () => {
     const topic = makeNode('n_topic', 'topic')
     const candidate = makeNode('n_candidate', 'candidate', topic.id, {
       candidateSource: { topicNodeId: topic.id, artifactId: 'sha256:topics', index: 0 },
     })
     const prompt = makeNode('n_prompt', 'prompt', candidate.id)
     const agent = makeNode('n_agent', 'agent', prompt.id)
-    const graph = snapshot([topic, candidate, prompt, agent], agent.id)
+    const script = makeNode('n_script', 'script', agent.id)
+    const nextPrompt = makeNode('n_next_prompt', 'prompt', script.id)
+    const graph = snapshot([topic, candidate, prompt, agent, script, nextPrompt], agent.id)
     graph.lockedNodeIds = []
-    graph.chains = [{ id: 'c_n_agent', tailNodeId: agent.id, path: [topic.id, candidate.id, prompt.id, agent.id], label: '链路', status: 'idle' }]
+    graph.chains = [{
+      id: 'c_n_next_prompt',
+      tailNodeId: nextPrompt.id,
+      path: [topic.id, candidate.id, prompt.id, agent.id, script.id, nextPrompt.id],
+      label: '链路',
+      status: 'idle',
+    }]
 
     expect([...deriveHighlightedPath(graph)]).toEqual([topic.id, candidate.id, prompt.id, agent.id])
     const model = buildFlowModel(graph, vi.fn(), {}, false, { runSubmittingNodeId: agent.id })
-    expect(model.nodes.find((node) => node.id === prompt.id)?.data.runningLocked).toBe(true)
-    expect(model.nodes.find((node) => node.id === agent.id)?.data.runningLocked).toBe(true)
+    for (const id of [topic.id, candidate.id, prompt.id, agent.id, script.id]) {
+      expect(model.nodes.find((node) => node.id === id)?.data.runningLocked).toBe(true)
+    }
+    expect(model.nodes.find((node) => node.id === nextPrompt.id)?.data.runningLocked).toBe(false)
     expect(model.nodes.find((node) => node.id === agent.id)?.data.globalRunBusy).toBe(true)
     expect(model.edges.find((edge) => edge.target === prompt.id)?.className).toBe('workspace-edge-highlighted')
   })

@@ -11,7 +11,7 @@ export const PromptNode = memo(function PromptNode({ id, data }: NodeProps<Canva
     : [{ id: 'prompt-input', type: 'target' as const }]
   useMeasuredNodeHandles(id, nodeHandleLayoutKey('prompt', data), projectId ?? '', requiredHandles, data.onNodeHandlesMeasured)
   const isDraft = !node.parent
-  const disabled = runningLocked || node.locked || mutationsDisabled
+  const disabled = runningLocked || node.locked || (data.paramsEditingDisabled ?? mutationsDisabled)
 
   return (
     <article className={`canvas-node prompt-node${pathHighlighted ? ' is-path' : ''}${runningLocked ? ' is-running-locked' : ''}${node.locked ? ' is-content-locked' : ''}${isDraft ? ' is-draft' : ''}`}>
