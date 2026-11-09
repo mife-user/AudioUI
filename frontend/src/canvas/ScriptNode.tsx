@@ -1,9 +1,10 @@
 import { memo } from 'react'
 import { Handle, Position, type NodeProps } from '@xyflow/react'
 import { nodeHandleLayoutKey, type CanvasFlowNode } from './flowModel'
+import { NodeResizeHandles, NodeSizeControl } from './NodeLayoutControls'
 import { useMeasuredNodeHandles } from './useMeasuredNodeHandles'
 
-export const ScriptNode = memo(function ScriptNode({ id, data }: NodeProps<CanvasFlowNode>) {
+export const ScriptNode = memo(function ScriptNode({ id, data, selected }: NodeProps<CanvasFlowNode>) {
   const { node, projectId, runningLocked, pathHighlighted, mutationsDisabled, pendingOutputCount = 0, onAddChild } = data
   const requiredHandles = node.parent
     ? [{ id: 'script-input', type: 'target' as const }, { id: 'script-output', type: 'source' as const }]
@@ -13,7 +14,9 @@ export const ScriptNode = memo(function ScriptNode({ id, data }: NodeProps<Canva
   const latestVersion = versions[versions.length - 1]
 
   return (
-    <article className={`canvas-node script-node${pathHighlighted ? ' is-path' : ''}${runningLocked ? ' is-running-locked' : ''}${node.stale ? ' is-stale' : ''}`}>
+    <>
+      <NodeResizeHandles nodeId={id} visible={selected} disabled={mutationsDisabled} />
+      <article className={`canvas-node script-node${pathHighlighted ? ' is-path' : ''}${runningLocked ? ' is-running-locked' : ''}${node.stale ? ' is-stale' : ''}`}>
       <Handle
         id="script-input"
         type="target"
@@ -30,8 +33,9 @@ export const ScriptNode = memo(function ScriptNode({ id, data }: NodeProps<Canva
         <span className="canvas-node-status" role="status">
           {pendingOutputCount > 0 ? `待处理 ${pendingOutputCount}` : latestVersion ? `v${latestVersion.n}` : '空输出'}
         </span>
+        <NodeSizeControl node={node} disabled={mutationsDisabled} onApply={data.onSetNodeLayout} />
       </header>
-      <div className="canvas-node-content script-node-content">
+      <div className="canvas-node-content script-node-content nowheel">
         {latestVersion ? (
           <>
             <p className="script-version-summary">{versions.length} 个不可变版本 · 最新 v{latestVersion.n}</p>
@@ -80,6 +84,7 @@ export const ScriptNode = memo(function ScriptNode({ id, data }: NodeProps<Canva
           className="node-output-handle"
         />
       ) : null}
-    </article>
+      </article>
+    </>
   )
 })

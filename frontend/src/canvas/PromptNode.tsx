@@ -2,9 +2,10 @@ import { memo } from 'react'
 import { Handle, Position, type NodeProps } from '@xyflow/react'
 import { nodeHandleLayoutKey, type CanvasFlowNode } from './flowModel'
 import { PromptParameters } from './PromptParameters'
+import { NodeResizeHandles, NodeSizeControl } from './NodeLayoutControls'
 import { useMeasuredNodeHandles } from './useMeasuredNodeHandles'
 
-export const PromptNode = memo(function PromptNode({ id, data }: NodeProps<CanvasFlowNode>) {
+export const PromptNode = memo(function PromptNode({ id, data, selected }: NodeProps<CanvasFlowNode>) {
   const { node, runningLocked, pathHighlighted, mutationsDisabled, projectId, onAddChild } = data
   const requiredHandles = node.parent
     ? [{ id: 'prompt-input', type: 'target' as const }, { id: 'prompt-output', type: 'source' as const }]
@@ -14,7 +15,9 @@ export const PromptNode = memo(function PromptNode({ id, data }: NodeProps<Canva
   const disabled = runningLocked || node.locked || (data.paramsEditingDisabled ?? mutationsDisabled)
 
   return (
-    <article className={`canvas-node prompt-node${pathHighlighted ? ' is-path' : ''}${runningLocked ? ' is-running-locked' : ''}${node.locked ? ' is-content-locked' : ''}${isDraft ? ' is-draft' : ''}`}>
+    <>
+      <NodeResizeHandles nodeId={id} visible={selected} disabled={mutationsDisabled} />
+      <article className={`canvas-node prompt-node${pathHighlighted ? ' is-path' : ''}${runningLocked ? ' is-running-locked' : ''}${node.locked ? ' is-content-locked' : ''}${isDraft ? ' is-draft' : ''}`}>
       <Handle
         id="prompt-input"
         type="target"
@@ -30,8 +33,9 @@ export const PromptNode = memo(function PromptNode({ id, data }: NodeProps<Canva
         <strong title={node.title}>{node.title}</strong>
         {isDraft ? <span className="canvas-node-status">草稿</span> : null}
         {runningLocked ? <span className="canvas-node-status">运行中 · 只读</span> : node.stale ? <span className="canvas-node-status">上游已变化</span> : null}
+        <NodeSizeControl node={node} disabled={mutationsDisabled} onApply={data.onSetNodeLayout} />
       </header>
-      <div className="canvas-node-content prompt-node-content">
+      <div className="canvas-node-content prompt-node-content nowheel">
         <PromptParameters
           node={node}
           projectId={projectId ?? ''}
@@ -65,6 +69,7 @@ export const PromptNode = memo(function PromptNode({ id, data }: NodeProps<Canva
           className="node-output-handle prompt-output-handle"
         />
       ) : null}
-    </article>
+      </article>
+    </>
   )
 })

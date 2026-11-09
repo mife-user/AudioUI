@@ -86,6 +86,31 @@ describe('preserveCanvasNodeViewState', () => {
     expect(preserveCanvasNodeViewState([next], [previous], 'p_one')[0]).toBe(previous)
   })
 
+  it('preserves the in-progress resize geometry while a snapshot refreshes', () => {
+    const previous = flowNode('n_prompt', 'prompt', 'p_one', {
+      position: { x: 42, y: 58 },
+      style: { width: 360, height: 280 },
+      measured: { width: 360, height: 280 },
+      resizing: true,
+    })
+    const next = flowNode('n_prompt', 'prompt', 'p_one', {
+      data: {
+        ...flowNode('n_prompt', 'prompt', 'p_one').data,
+        node: graphNode('n_prompt', 'prompt', '最新标题'),
+      },
+    })
+
+    const [result] = preserveCanvasNodeViewState([next], [previous], 'p_one')
+
+    expect(result).toMatchObject({
+      position: { x: 42, y: 58 },
+      style: { width: 360, height: 280 },
+      measured: { width: 360, height: 280 },
+      resizing: true,
+      data: { node: { title: '最新标题' } },
+    })
+  })
+
   it('does not reuse stale measurements when the persisted node size changes', () => {
     const previous = flowNode('n_prompt', 'prompt', 'p_one', {
       measured: { width: 280, height: 230 },

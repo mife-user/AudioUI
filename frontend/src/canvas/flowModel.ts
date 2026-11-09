@@ -29,6 +29,7 @@ export type CanvasNodeData = {
   onRegisterPromptFlush?: (nodeId: string, projectId: string, flush: () => Promise<boolean>) => () => void
   onRegisterTopicFlush?: (nodeId: string, projectId: string, flush: () => Promise<boolean>) => () => void
   onNodeHandlesMeasured?: (nodeId: string, layoutKey: string, projectId: string) => void
+  onSetNodeLayout?: (nodeId: string, width: number, height: number) => void
   onAddChild: (nodeId: string, type: ChildNodeType) => void
 }
 
@@ -53,6 +54,7 @@ type CanvasCallbacks = {
   onRegisterPromptFlush?: CanvasNodeData['onRegisterPromptFlush']
   onRegisterTopicFlush?: CanvasNodeData['onRegisterTopicFlush']
   onNodeHandlesMeasured?: CanvasNodeData['onNodeHandlesMeasured']
+  onSetNodeLayout?: CanvasNodeData['onSetNodeLayout']
 }
 
 export function candidateAt(candidates: TopicCandidateFixture[] | undefined, index: number | null | undefined): TopicCandidateFixture | undefined {
@@ -202,6 +204,7 @@ export function buildFlowModel(
     return {
       id: node.id,
       type: node.type as CanvasFlowNode['type'],
+      dragHandle: '.canvas-node-head',
       position: { x: node.position.x, y: node.position.y },
       style: { width: node.size.width, height: node.size.height },
       selected: node.id === snapshot.project?.activeNodeId,
@@ -229,6 +232,7 @@ export function buildFlowModel(
         onRegisterPromptFlush: callbacks.onRegisterPromptFlush,
         onRegisterTopicFlush: callbacks.onRegisterTopicFlush,
         onNodeHandlesMeasured: callbacks.onNodeHandlesMeasured,
+        onSetNodeLayout: callbacks.onSetNodeLayout,
         onAddChild,
       },
     }

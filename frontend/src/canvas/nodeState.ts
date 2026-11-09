@@ -39,13 +39,21 @@ export function preserveCanvasNodeViewState(
     ) return node
 
     let next = node
-    if (sameNodeStyle(previous.style, node.style) && hasCompleteMeasurement(previous) && node.measured !== previous.measured) {
+    if (previous.resizing) {
+      next = {
+        ...next,
+        position: previous.position,
+        style: previous.style,
+        ...(hasCompleteMeasurement(previous) ? { measured: previous.measured } : {}),
+        resizing: true,
+      }
+    } else if (sameNodeStyle(previous.style, node.style) && hasCompleteMeasurement(previous) && node.measured !== previous.measured) {
       next = { ...next, measured: previous.measured }
     }
     if (typeof previous.dragging === 'boolean' && next.dragging !== previous.dragging) {
       next = { ...next, dragging: previous.dragging }
     }
-    if (typeof previous.resizing === 'boolean' && next.resizing !== previous.resizing) {
+    if (!previous.resizing && typeof previous.resizing === 'boolean' && next.resizing !== previous.resizing) {
       next = { ...next, resizing: previous.resizing }
     }
     if (

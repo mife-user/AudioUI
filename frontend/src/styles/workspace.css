@@ -537,6 +537,10 @@
   position: relative;
   width: 100%;
   height: 100%;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
   box-sizing: border-box;
   overflow: visible;
   border: 1px solid var(--border-strong);
@@ -544,6 +548,182 @@
   background: var(--panel);
   box-shadow: var(--shadow);
   color: var(--text);
+}
+
+.canvas-node-resize-handle {
+  width: 10px !important;
+  height: 10px !important;
+  border: 1px solid var(--accent) !important;
+  border-radius: 3px !important;
+  background: var(--panel) !important;
+  box-shadow: 0 0 0 2px var(--bg-elev);
+}
+
+.canvas-node-resize-line {
+  opacity: .72;
+}
+
+.react-flow__resize-control.line.canvas-node-resize-line.left,
+.react-flow__resize-control.line.canvas-node-resize-line.right {
+  width: 8px;
+}
+
+.react-flow__resize-control.line.canvas-node-resize-line.top,
+.react-flow__resize-control.line.canvas-node-resize-line.bottom {
+  height: 8px;
+}
+
+.canvas-node-size-trigger {
+  width: 22px;
+  height: 22px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  padding: 3px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.canvas-node-size-trigger:hover:not(:disabled),
+.canvas-node-size-trigger[aria-expanded='true'] {
+  border-color: var(--border-strong);
+  background: var(--panel-2);
+  color: var(--accent);
+}
+
+.canvas-node-size-trigger:focus-visible,
+.node-size-dialog button:focus-visible,
+.node-size-dialog input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.canvas-node-size-trigger:disabled,
+.node-size-dialog button:disabled {
+  cursor: not-allowed;
+  opacity: .55;
+}
+
+.canvas-node-size-trigger svg {
+  width: 13px;
+  height: 13px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.4;
+}
+
+.node-size-dialog {
+  width: min(320px, calc(100vw - 32px));
+  max-width: none;
+  margin: auto;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-elev);
+  box-shadow: var(--shadow-dialog);
+  color: var(--text);
+}
+
+.node-size-dialog::backdrop {
+  background: var(--backdrop);
+}
+
+.node-size-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+  padding: 16px;
+}
+
+.node-size-dialog-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--s3);
+}
+
+.node-size-dialog-heading h2 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.node-size-dialog-heading p,
+.node-size-help {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.node-size-close {
+  width: 26px;
+  height: 26px;
+  flex: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 16px;
+}
+
+.node-size-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--s2);
+}
+
+.node-size-fields label {
+  display: grid;
+  gap: var(--s1);
+  color: var(--text-dim);
+  font-size: 10px;
+}
+
+.node-size-fields input {
+  width: 100%;
+  min-width: 0;
+  min-height: 34px;
+  box-sizing: border-box;
+  padding: 0 var(--s2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+  color: var(--text);
+  font: inherit;
+}
+
+.node-size-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+}
+
+.node-size-actions span {
+  flex: 1;
+}
+
+.node-size-actions button {
+  min-height: 30px;
+  padding: 0 var(--s2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+  color: var(--text-dim);
+  cursor: pointer;
+  font: inherit;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.node-size-actions .node-size-apply {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 .react-flow__node.selected .canvas-node {
@@ -565,7 +745,9 @@
 }
 
 .canvas-node-head {
+  position: relative;
   min-height: 46px;
+  flex: none;
   display: flex;
   align-items: center;
   gap: var(--s2);
@@ -614,12 +796,23 @@
 }
 
 .canvas-node-status {
+  min-width: 0;
+  max-width: 35%;
   flex: none;
+  overflow: hidden;
   color: var(--warn);
   font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .canvas-node-content {
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 0px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
   padding: 9px 10px 10px;
 }
 

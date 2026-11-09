@@ -98,11 +98,17 @@ vi.mock('@xyflow/react', async () => {
       }, 'simulate-drag'),
       React.createElement('button', {
         type: 'button',
-        onClick: () => props.onNodesChange([{ id: 'n_prompt', type: 'dimensions', dimensions: { width: 340, height: 280 }, resizing: true }]),
+        onClick: () => props.onNodesChange([
+          { id: 'n_prompt', type: 'position', position: { x: 22, y: 42 }, dragging: false },
+          { id: 'n_prompt', type: 'dimensions', dimensions: { width: 340, height: 280 }, resizing: true },
+        ]),
       }, 'simulate-resize-start'),
       React.createElement('button', {
         type: 'button',
-        onClick: () => props.onNodesChange([{ id: 'n_prompt', type: 'dimensions', dimensions: { width: 340, height: 280 }, resizing: false }]),
+        onClick: () => props.onNodesChange([
+          { id: 'n_prompt', type: 'position', position: { x: 18, y: 38 }, dragging: false },
+          { id: 'n_prompt', type: 'dimensions', dimensions: { width: 340, height: 280 }, resizing: false },
+        ]),
       }, 'simulate-resize-end'),
       props.children,
     )
@@ -194,7 +200,8 @@ describe('WorkspaceCanvas', () => {
     expect(api.setNodeLayout).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole('button', { name: 'simulate-resize-end' }))
     await waitFor(() => expect(api.setNodeLayout).toHaveBeenCalledOnce())
-    expect(api.setNodeLayout).toHaveBeenCalledWith('n_prompt', 20, 40, 340, 280, 'p_test')
+    expect(api.setNodeLayout).toHaveBeenCalledWith('n_prompt', 18, 38, 340, 280, 'p_test')
+    expect(api.moveNode).not.toHaveBeenCalled()
   })
 
   it('asks before replacing a parent and leaves snapshot edges untouched until the backend succeeds', async () => {

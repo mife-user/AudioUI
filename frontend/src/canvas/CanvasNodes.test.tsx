@@ -1,7 +1,9 @@
 import { vi, describe, expect, it } from 'vitest'
-import type { HandleProps, NodeProps } from '@xyflow/react'
+import type { ReactElement } from 'react'
+import type { HandleProps, NodeProps, NodeResizerProps } from '@xyflow/react'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type { Node } from '../../bindings/audio-ui/internal/domain/entity'
+import { NodeType } from '../../bindings/audio-ui/internal/domain/valueobject'
 import type { CanvasFlowNode } from './flowModel'
 import { AgentNode } from './AgentNode'
 import { CandidateNode } from './CandidateNode'
@@ -18,6 +20,14 @@ vi.mock('@xyflow/react', async () => {
       'data-connectable': String(props.isConnectable),
       'aria-label': props['aria-label'],
       'aria-hidden': props['aria-hidden'],
+    }),
+    NodeResizer: (props: NodeResizerProps) => React.createElement('div', {
+      'data-testid': `resize-${props.nodeId}`,
+      'data-visible': String(props.isVisible),
+      'data-min-width': props.minWidth,
+      'data-min-height': props.minHeight,
+      'data-max-width': props.maxWidth,
+      'data-max-height': props.maxHeight,
     }),
     Position: { Left: 'left', Right: 'right', Top: 'top', Bottom: 'bottom' },
     useReactFlow: () => ({ getInternalNode: vi.fn() }),
@@ -55,7 +65,7 @@ function nodeData(nodeValue: Node, overrides: Partial<CanvasFlowNode['data']> = 
   }
 }
 
-function nodeProps(nodeValue: Node, data = nodeData(nodeValue)): NodeProps<CanvasFlowNode> {
+function nodeProps(nodeValue: Node, data = nodeData(nodeValue), selected = false): NodeProps<CanvasFlowNode> {
   return {
     id: nodeValue.id,
     type: nodeValue.type,
@@ -64,7 +74,7 @@ function nodeProps(nodeValue: Node, data = nodeData(nodeValue)): NodeProps<Canva
     zIndex: 0,
     selectable: true,
     deletable: false,
-    selected: false,
+    selected,
     draggable: true,
     isConnectable: true,
     positionAbsoluteX: 0,
@@ -72,7 +82,66 @@ function nodeProps(nodeValue: Node, data = nodeData(nodeValue)): NodeProps<Canva
   } as NodeProps<CanvasFlowNode>
 }
 
+type CanvasNodeView = {
+  label: string
+  type: Node['type']
+  defaultSize: { width: number; height: number }
+  renderNode: (nodeValue: Node, data: CanvasFlowNode['data'], selected: boolean) => ReactElement
+}
+
+const canvasNodeViews: CanvasNodeView[] = [
+  { label: '选题', type: NodeType.NodeTypeTopic, defaultSize: { width: 280, height: 250 }, renderNode: (value, data, selected) => <TopicNode {...nodeProps(value, data, selected)} /> },
+  { label: '候选', type: NodeType.NodeTypeCandidate, defaultSize: { width: 235, height: 160 }, renderNode: (value, data, selected) => <CandidateNode {...nodeProps(value, data, selected)} /> },
+  { label: '提示词', type: NodeType.NodeTypePrompt, defaultSize: { width: 280, height: 230 }, renderNode: (value, data, selected) => <PromptNode {...nodeProps(value, data, selected)} /> },
+  { label: 'Agent', type: NodeType.NodeTypeAgent, defaultSize: { width: 235, height: 165 }, renderNode: (value, data, selected) => <AgentNode {...nodeProps(value, data, selected)} /> },
+  { label: '脚本', type: NodeType.NodeTypeScript, defaultSize: { width: 270, height: 205 }, renderNode: (value, data, selected) => <ScriptNode {...nodeProps(value, data, selected)} /> },
+]
+
 describe('M2-12A canvas nodes', () => {
+  it.each(canvasNodeViews)('adds bounded resize and keyboard size controls to $label nodes', ({ type, defaultSize, renderNode }) => {
+    const nodeValue = node('n_size', type, '', {
+      size: { width: defaultSize.width + 20, height: defaultSize.height + 20 },
+    })
+    const onSetNodeLayout = vi.fn()
+    render(renderNode(nodeValue, nodeData(nodeValue, { onSetNodeLayout }), true))
+
+    expect(screen.getByTestId('resize-n_size')).toHaveAttribute('data-visible', 'true')
+    expect(screen.getByTestId('resize-n_size')).toHaveAttribute('data-min-width', '200')
+    expect(screen.getByTestId('resize-n_size')).toHaveAttribute('data-min-height', '140')
+    expect(screen.getByTestId('resize-n_size')).toHaveAttribute('data-max-width', '1200')
+    expect(screen.getByTestId('resize-n_size')).toHaveAttribute('data-max-height', '900')
+    fireEvent.click(screen.getByRole('button', { name: `调整 n_size 卡片尺寸` }))
+    fireEvent.click(screen.getByRole('button', { name: '恢复默认尺寸' }))
+
+    expect(onSetNodeLayout).toHaveBeenCalledWith('n_size', defaultSize.width, defaultSize.height)
+  })
+
+  it('applies numeric size changes and returns focus to the card control', () => {
+    const prompt = node('n_prompt', 'prompt')
+    const onSetNodeLayout = vi.fn()
+    render(<PromptNode {...nodeProps(prompt, nodeData(prompt, { onSetNodeLayout }), true)} />)
+    const trigger = screen.getByRole('button', { name: '调整 n_prompt 卡片尺寸' })
+
+    fireEvent.click(trigger)
+    fireEvent.change(screen.getByRole('spinbutton', { name: '宽度' }), { target: { value: '420' } })
+    fireEvent.change(screen.getByRole('spinbutton', { name: '高度' }), { target: { value: '360' } })
+    fireEvent.click(screen.getByRole('button', { name: '应用' }))
+
+    expect(onSetNodeLayout).toHaveBeenCalledWith('n_prompt', 420, 360)
+    expect(trigger).toHaveFocus()
+  })
+
+  it('keeps layout controls available on a running-locked path', () => {
+    const prompt = node('n_locked_prompt', 'prompt', 'n_candidate')
+    render(<PromptNode {...nodeProps(prompt, nodeData(prompt, {
+      runningLocked: true,
+      onSetNodeLayout: vi.fn(),
+    }), true)} />)
+
+    expect(screen.getByTestId('resize-n_locked_prompt')).toHaveAttribute('data-visible', 'true')
+    expect(screen.getByRole('button', { name: '调整 n_locked_prompt 卡片尺寸' })).toBeEnabled()
+  })
+
   it('renders application-generated candidate links without exposing topic output ports for manual connection', () => {
     const topic = node('n_topic', 'topic')
     const candidate = node('n_candidate', 'candidate', topic.id, {

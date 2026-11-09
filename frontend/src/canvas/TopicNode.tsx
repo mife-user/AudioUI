@@ -2,6 +2,7 @@ import { memo } from 'react'
 import { Handle, Position, type NodeProps } from '@xyflow/react'
 import { TopicParameters } from './TopicParameters'
 import { candidateAt, nodeHandleLayoutKey, type CanvasFlowNode } from './flowModel'
+import { NodeResizeHandles, NodeSizeControl } from './NodeLayoutControls'
 import { useMeasuredNodeHandles } from './useMeasuredNodeHandles'
 
 function runStatusLabel(status: string | undefined): string {
@@ -16,7 +17,7 @@ function runStatusLabel(status: string | undefined): string {
   }
 }
 
-export const TopicNode = memo(function TopicNode({ id, data }: NodeProps<CanvasFlowNode>) {
+export const TopicNode = memo(function TopicNode({ id, data, selected }: NodeProps<CanvasFlowNode>) {
   const {
     node,
     projectId,
@@ -46,13 +47,16 @@ export const TopicNode = memo(function TopicNode({ id, data }: NodeProps<CanvasF
         : runState
 
   return (
-    <article className={`canvas-node topic-node${pathHighlighted ? ' is-path' : ''}${runningLocked ? ' is-running-locked' : ''}${node.locked ? ' is-content-locked' : ''}`}>
+    <>
+      <NodeResizeHandles nodeId={id} visible={selected} disabled={mutationsDisabled} />
+      <article className={`canvas-node topic-node${pathHighlighted ? ' is-path' : ''}${runningLocked ? ' is-running-locked' : ''}${node.locked ? ' is-content-locked' : ''}`}>
       <header className="canvas-node-head">
         <span className="canvas-node-kind topic-kind">选题</span>
         <strong title={node.title}>{node.title}</strong>
         {status ? <span className="canvas-node-status">{status}</span> : null}
+        <NodeSizeControl node={node} disabled={mutationsDisabled} onApply={data.onSetNodeLayout} />
       </header>
-      <div className="canvas-node-content">
+      <div className="canvas-node-content nowheel">
         <TopicParameters
           node={node}
           projectId={projectId ?? ''}
@@ -96,6 +100,7 @@ export const TopicNode = memo(function TopicNode({ id, data }: NodeProps<CanvasF
           </p>
         ) : null}
       </div>
-    </article>
+      </article>
+    </>
   )
 })

@@ -1,9 +1,10 @@
 import { memo } from 'react'
 import { Handle, Position, type NodeProps } from '@xyflow/react'
 import { nodeHandleLayoutKey, type CanvasFlowNode } from './flowModel'
+import { NodeResizeHandles, NodeSizeControl } from './NodeLayoutControls'
 import { useMeasuredNodeHandles } from './useMeasuredNodeHandles'
 
-export const CandidateNode = memo(function CandidateNode({ id, data }: NodeProps<CanvasFlowNode>) {
+export const CandidateNode = memo(function CandidateNode({ id, data, selected }: NodeProps<CanvasFlowNode>) {
   const { node, candidate, runningLocked, pathHighlighted, mutationsDisabled, candidateError, candidateLoading, onAddChild } = data
   const sourceIndex = node.candidateSource?.index ?? -1
   const requiredHandles = [
@@ -13,7 +14,9 @@ export const CandidateNode = memo(function CandidateNode({ id, data }: NodeProps
   useMeasuredNodeHandles(id, nodeHandleLayoutKey('candidate', data), data.projectId ?? '', requiredHandles, data.onNodeHandlesMeasured)
 
   return (
-    <article className={`canvas-node candidate-node${pathHighlighted ? ' is-path' : ''}${runningLocked ? ' is-running-locked' : ''}${node.stale ? ' is-stale' : ''}`}>
+    <>
+      <NodeResizeHandles nodeId={id} visible={selected} disabled={mutationsDisabled} />
+      <article className={`canvas-node candidate-node${pathHighlighted ? ' is-path' : ''}${runningLocked ? ' is-running-locked' : ''}${node.stale ? ' is-stale' : ''}`}>
       <Handle
         id="candidate-input"
         type="target"
@@ -28,8 +31,9 @@ export const CandidateNode = memo(function CandidateNode({ id, data }: NodeProps
         <span className="canvas-node-kind candidate-kind">候选</span>
         <strong title={candidate?.title ?? node.title}>{candidate?.title ?? node.title}</strong>
         <span className="canvas-node-status">来源 #{sourceIndex + 1}</span>
+        <NodeSizeControl node={node} disabled={mutationsDisabled} onApply={data.onSetNodeLayout} />
       </header>
-      <div className="canvas-node-content candidate-node-content">
+      <div className="canvas-node-content candidate-node-content nowheel">
         {candidateError ? <p className="canvas-node-error" role="alert">候选读取失败：{candidateError}</p> : null}
         {candidateLoading ? <p className="canvas-node-hint" role="status">正在读取候选内容…</p> : null}
         {!candidateError && !candidateLoading && candidate ? (
@@ -59,6 +63,7 @@ export const CandidateNode = memo(function CandidateNode({ id, data }: NodeProps
         aria-label={`${candidate?.title ?? node.title} 输出端口`}
         className="node-output-handle candidate-output-handle"
       />
-    </article>
+      </article>
+    </>
   )
 })

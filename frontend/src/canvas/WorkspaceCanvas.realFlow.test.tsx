@@ -158,6 +158,27 @@ describe('WorkspaceCanvas with real React Flow', () => {
     await waitFor(() => expect(onSelectNode).toHaveBeenLastCalledWith('n_topic'))
   })
 
+  it('applies keyboard layout edits to a locked path and persists geometry atomically', async () => {
+    const snapshot = makeSnapshot()
+    snapshot.lockedNodeIds = ['n_topic', 'n_candidate', 'n_prompt', 'n_agent', 'n_script']
+    const api = makeAPI()
+    const { container } = render(
+      <WorkspaceCanvas snapshot={snapshot} onSelectNode={vi.fn().mockResolvedValue(undefined)} api={api} />,
+    )
+    const topicWrapper = await waitFor(() => container.querySelector<HTMLElement>('.react-flow__node[data-id="n_topic"]')!)
+    expect(topicWrapper.querySelectorAll('.react-flow__resize-control.handle')).toHaveLength(4)
+    expect(topicWrapper.querySelectorAll('.react-flow__resize-control.line')).toHaveLength(4)
+    expect(screen.getByRole('button', { name: '调整 n_topic 卡片尺寸' })).toBeEnabled()
+
+    fireEvent.click(screen.getByRole('button', { name: '调整 n_topic 卡片尺寸' }))
+    fireEvent.change(screen.getByRole('spinbutton', { name: '宽度' }), { target: { value: '360' } })
+    fireEvent.change(screen.getByRole('spinbutton', { name: '高度' }), { target: { value: '270' } })
+    fireEvent.click(screen.getByRole('button', { name: '应用' }))
+
+    await waitFor(() => expect(api.setNodeLayout).toHaveBeenCalledWith('n_topic', 40, 60, 360, 270, 'p_real_flow'))
+    expect(api.moveNode).not.toHaveBeenCalled()
+  })
+
   it('keeps the QuickBar and Script edge stable when selecting a chain and appending a version', async () => {
     const snapshot = makeSnapshot()
     const script = snapshot.nodes?.find((node) => node.id === 'n_script')

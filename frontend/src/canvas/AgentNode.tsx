@@ -3,6 +3,7 @@ import { Handle, Position, type NodeProps } from '@xyflow/react'
 import type { RunStartError } from '../../bindings/audio-ui/internal/domain/entity'
 import { formatRunStartError } from './runStartError'
 import { nodeHandleLayoutKey, type CanvasFlowNode } from './flowModel'
+import { NodeResizeHandles, NodeSizeControl } from './NodeLayoutControls'
 import { useMeasuredNodeHandles } from './useMeasuredNodeHandles'
 
 function runStatusLabel(status: string | undefined): string {
@@ -16,7 +17,7 @@ function runStatusLabel(status: string | undefined): string {
   }
 }
 
-export const AgentNode = memo(function AgentNode({ id, data }: NodeProps<CanvasFlowNode>) {
+export const AgentNode = memo(function AgentNode({ id, data, selected }: NodeProps<CanvasFlowNode>) {
   const { node, projectId, runningLocked, pathHighlighted, mutationsDisabled, globalRunBusy, runSubmitting, runStatus, pendingCount = 0, outputScript, onStartRun, onAddChild } = data
   const requiredHandles = node.parent
     ? [{ id: 'agent-input', type: 'target' as const }, { id: 'agent-output', type: 'source' as const }]
@@ -55,7 +56,9 @@ export const AgentNode = memo(function AgentNode({ id, data }: NodeProps<CanvasF
   const runDisabled = !hasParent || runningLocked || node.locked || mutationsDisabled || globalRunBusy || starting
 
   return (
-    <article className={`canvas-node agent-node${pathHighlighted ? ' is-path' : ''}${runningLocked ? ' is-running-locked' : ''}`}>
+    <>
+      <NodeResizeHandles nodeId={id} visible={selected} disabled={mutationsDisabled} />
+      <article className={`canvas-node agent-node${pathHighlighted ? ' is-path' : ''}${runningLocked ? ' is-running-locked' : ''}`}>
       <Handle
         id="agent-input"
         type="target"
@@ -70,8 +73,9 @@ export const AgentNode = memo(function AgentNode({ id, data }: NodeProps<CanvasF
         <span className="canvas-node-kind agent-kind">AGENT</span>
         <strong title={node.title}>{node.title}</strong>
         <span className="canvas-node-status" role="status">{statusWithPending}</span>
+        <NodeSizeControl node={node} disabled={mutationsDisabled} onApply={data.onSetNodeLayout} />
       </header>
-      <div className="canvas-node-content agent-node-content">
+      <div className="canvas-node-content agent-node-content nowheel">
         <p className="canvas-node-hint">按当前路径启动一次本地运行。</p>
         <p className="agent-output-summary"><span>输出契约</span>{outputSummary}</p>
         {!outputScript ? (
@@ -108,6 +112,7 @@ export const AgentNode = memo(function AgentNode({ id, data }: NodeProps<CanvasF
           className="node-output-handle"
         />
       ) : null}
-    </article>
+      </article>
+    </>
   )
 })
