@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { fetchEnvironment, fetchRecentLogs, type EnvironmentDTO, type LogEntryDTO } from './api/system'
 import { pendingAPI } from './api/pending'
 import type { GraphMutationReceipt } from '../bindings/audio-ui/internal/domain/entity'
@@ -6,6 +6,7 @@ import { useWorkspaceBridge } from './hooks/useWorkspaceBridge'
 import { useRunStore } from './stores/runStore'
 import { useWorkspaceStore } from './stores/workspaceStore'
 import { AboutDialog } from './ui/AboutDialog'
+import { ApplicationCloseGuard } from './ui/ApplicationCloseGuard'
 import { AgentConsole } from './ui/AgentConsole'
 import { CLIInstallBanner } from './ui/CLIInstallBanner'
 import { AppShell } from './ui/AppShell'
@@ -24,6 +25,7 @@ function App() {
   const bridge = useWorkspaceBridge()
   const workspaceStatus = useWorkspaceStore((store) => store.status)
   const workspaceSnapshot = useWorkspaceStore((store) => store.snapshot)
+  const draftFlushRef = useRef<((projectId: string) => Promise<boolean>) | null>(null)
   const workspaceError = useWorkspaceStore((store) => store.error)
   const runViews = useRunStore((store) => store.runs)
   const runSummaries = useRunStore((store) => store.summaries)
@@ -78,8 +80,40 @@ function App() {
     return () => window.clearInterval(timer)
   }, [systemOpen, loadLogs])
 
-  const createProject = useCallback((name: string) => bridge.createProject(name), [bridge])
-  const openProject = useCallback((projectId: string) => bridge.openProject(projectId), [bridge])
+  const registerDraftFlush = useCallback((flush: (projectId: string) => Promise<boolean>) => {
+    draftFlushRef.current = flush
+    return () => {
+      if (draftFlushRef.current === flush) draftFlushRef.current = null
+    }
+  }, [])
+  const prepareProjectChange = useCallback(async (discardDrafts: boolean) => {
+    if (discardDrafts) return
+    const projectId = useWorkspaceStore.getState().snapshot?.project?.id
+    if (!projectId) return
+    const flush = draftFlushRef.current
+    if (!flush) throw new Error('DRAFT_SAVE_FAILED: 当前工程草稿保护尚未就绪，未切换工程。')
+    try {
+      if (!await flush(projectId)) throw new Error('工程快照同步仍未完成。')
+    } catch (failure) {
+      throw new Error(`DRAFT_SAVE_FAILED: ${messageOf(failure)}`)
+    }
+  }, [])
+  const flushCurrentProjectDrafts = useCallback(async () => {
+    const projectId = useWorkspaceStore.getState().snapshot?.project?.id
+    if (!projectId) return true
+    const flush = draftFlushRef.current
+    if (!flush) throw new Error('当前工程草稿保护尚未就绪。')
+    if (!await flush(projectId)) throw new Error('工程快照同步仍未完成。')
+    return true
+  }, [])
+  const createProject = useCallback(async (name: string, discardDrafts = false) => {
+    await prepareProjectChange(discardDrafts)
+    await bridge.createProject(name)
+  }, [bridge, prepareProjectChange])
+  const openProject = useCallback(async (projectId: string, discardDrafts = false) => {
+    await prepareProjectChange(discardDrafts)
+    await bridge.openProject(projectId)
+  }, [bridge, prepareProjectChange])
   const refreshGraph = useCallback((receipt: GraphMutationReceipt) => bridge.syncGraphMutation(receipt), [bridge])
   const startNodeRun = useCallback((nodeId: string, projectId: string) => bridge.startRun(nodeId, projectId), [bridge])
   const onSelectRun = useCallback((runId: string) => bridge.selectRun(runId), [bridge])
@@ -144,6 +178,7 @@ function App() {
           error={workspaceError}
           onRetry={() => bridge.retryWorkspace()}
           onGraphMutation={refreshGraph}
+          onRegisterDraftFlush={registerDraftFlush}
           onStartRun={startNodeRun}
         />
         <AgentConsole
@@ -181,6 +216,7 @@ function App() {
         onClose={() => setSystemOpen(false)}
       />
       <AboutDialog open={aboutOpen} env={env} onClose={() => setAboutOpen(false)} />
+      <ApplicationCloseGuard onFlush={flushCurrentProjectDrafts} />
     </AppShell>
   )
 }

@@ -2,11 +2,13 @@ import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { listProjects } from '../api/workspace'
 import type { ProjectSummary, WorkspaceProject } from '../../bindings/audio-ui/internal/domain/entity'
 
+type DraftRequest = { kind: 'new' } | { kind: 'open'; projectId: string }
+
 type Props = {
   project: WorkspaceProject | null
   blocked: boolean
-  onNew: (name: string) => Promise<void>
-  onOpen: (projectId: string) => Promise<void>
+  onNew: (name: string, discardDrafts?: boolean) => Promise<void>
+  onOpen: (projectId: string, discardDrafts?: boolean) => Promise<void>
 }
 
 function messageOf(error: unknown): string {
@@ -31,6 +33,7 @@ export function ProjectSwitcher({ project, blocked, onNew, onOpen }: Props) {
   const [loadingList, setLoadingList] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
+  const [draftRequest, setDraftRequest] = useState<DraftRequest | null>(null)
 
   useEffect(() => {
     const dialog = dialogRef.current
@@ -54,6 +57,7 @@ export function ProjectSwitcher({ project, blocked, onNew, onOpen }: Props) {
 
   const showDialog = () => {
     if (blocked) return
+    setDraftRequest(null)
     setOpen(true)
     void reloadProjects()
   }
@@ -61,7 +65,20 @@ export function ProjectSwitcher({ project, blocked, onNew, onOpen }: Props) {
   const close = () => {
     if (submitting) return
     setOpen(false)
+    setDraftRequest(null)
     setError('')
+  }
+
+  const showOperationFailure = (failure: unknown, request: DraftRequest) => {
+    const message = messageOf(failure)
+    const draftPrefix = 'DRAFT_SAVE_FAILED:'
+    if (message.startsWith(draftPrefix)) {
+      setDraftRequest(request)
+      setError(message.slice(draftPrefix.length).trim())
+    } else {
+      setDraftRequest(null)
+      setError(operationMessage(failure))
+    }
   }
 
   const create = async (event: FormEvent<HTMLFormElement>) => {
@@ -73,9 +90,10 @@ export function ProjectSwitcher({ project, blocked, onNew, onOpen }: Props) {
     try {
       await onNew(value)
       setName('')
+      setDraftRequest(null)
       setOpen(false)
     } catch (err) {
-      setError(operationMessage(err))
+      showOperationFailure(err, { kind: 'new' })
     } finally {
       setSubmitting(false)
     }
@@ -87,9 +105,30 @@ export function ProjectSwitcher({ project, blocked, onNew, onOpen }: Props) {
     setError('')
     try {
       await onOpen(projectId)
+      setDraftRequest(null)
       setOpen(false)
     } catch (err) {
-      setError(operationMessage(err))
+      showOperationFailure(err, { kind: 'open', projectId })
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const continueDraftRequest = async (discardDrafts: boolean) => {
+    if (!draftRequest || submitting || blocked) return
+    setSubmitting(true)
+    setError('')
+    try {
+      if (draftRequest.kind === 'new') {
+        await onNew(name.trim(), discardDrafts)
+        setName('')
+      } else {
+        await onOpen(draftRequest.projectId, discardDrafts)
+      }
+      setDraftRequest(null)
+      setOpen(false)
+    } catch (failure) {
+      showOperationFailure(failure, draftRequest)
     } finally {
       setSubmitting(false)
     }
@@ -130,10 +169,29 @@ export function ProjectSwitcher({ project, blocked, onNew, onOpen }: Props) {
         </div>
         <div className="project-dialog-body">
           {blocked ? <div className="workspace-inline-error" role="status">运行中，工程切换已禁用。</div> : null}
-          {error ? <div className="workspace-inline-error" role="alert">{error}</div> : null}
+          {error && !draftRequest ? <div className="workspace-inline-error" role="alert">{error}</div> : null}
+          {draftRequest ? (
+            <section className="workspace-inline-error project-draft-warning" aria-labelledby="draft-switch-title">
+              <div className="project-draft-message">
+                <h3 id="draft-switch-title">当前工程有未保存草稿</h3>
+                <p role="alert">{error || '保存未完成。'}</p>
+              </div>
+              <div className="project-draft-actions">
+                <button className="primary-btn" type="button" disabled={blocked || submitting} onClick={() => void continueDraftRequest(false)}>
+                  {submitting ? '处理中…' : '重试保存并继续'}
+                </button>
+                <button className="agent-mini-btn" type="button" disabled={blocked || submitting} onClick={() => void continueDraftRequest(true)}>
+                  放弃未保存草稿并继续
+                </button>
+                <button className="agent-mini-btn" type="button" disabled={submitting} onClick={close}>
+                  留在当前工程
+                </button>
+              </div>
+            </section>
+          ) : null}
           <div className="project-list-head">
             <span>最近工程</span>
-            <button className="agent-mini-btn" type="button" disabled={loadingList || submitting} onClick={() => void reloadProjects()}>
+            <button className="agent-mini-btn" type="button" disabled={loadingList || submitting || draftRequest !== null} onClick={() => void reloadProjects()}>
               {loadingList ? '读取中…' : '刷新'}
             </button>
           </div>
@@ -145,7 +203,7 @@ export function ProjectSwitcher({ project, blocked, onNew, onOpen }: Props) {
                 <button
                   type="button"
                   className="project-list-item"
-                  disabled={blocked || submitting || item.id === project?.id}
+                  disabled={blocked || submitting || draftRequest !== null || item.id === project?.id}
                   onClick={() => void openProject(item.id)}
                 >
                   <span className="project-list-name">{item.name}</span>
@@ -164,10 +222,10 @@ export function ProjectSwitcher({ project, blocked, onNew, onOpen }: Props) {
                 value={name}
                 maxLength={80}
                 placeholder="输入工程名称"
-                disabled={blocked || submitting}
+                disabled={blocked || submitting || draftRequest !== null}
                 onChange={(event) => setName(event.target.value)}
               />
-              <button className="primary-btn" type="submit" disabled={blocked || submitting || !name.trim()}>
+              <button className="primary-btn" type="submit" disabled={blocked || submitting || draftRequest !== null || !name.trim()}>
                 {submitting ? '处理中…' : '新建'}
               </button>
             </div>

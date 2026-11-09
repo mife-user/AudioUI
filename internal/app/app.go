@@ -180,6 +180,18 @@ func Run(cfg Config) int {
 		BackgroundColour: application.NewRGB(10, 14, 17),
 		URL:              "/",
 	})
+	var closeApproved atomic.Bool
+	window.RegisterHook(events.Common.WindowClosing, func(event *application.WindowEvent) {
+		if closeApproved.Swap(false) {
+			return
+		}
+		event.Cancel()
+		app.Event.Emit("app:close-requested")
+	})
+	app.Event.On("app:close-approved", func(*application.CustomEvent) {
+		closeApproved.Store(true)
+		window.Close()
+	})
 	mainWindow.Store(window)
 	bus.SetApp(app)
 	app.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {

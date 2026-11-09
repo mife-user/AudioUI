@@ -11,11 +11,12 @@ type Props = {
   error: string
   onRetry: () => void
   onGraphMutation?: (receipt: GraphMutationReceipt) => void | Promise<void>
+  onRegisterDraftFlush?: (flush: (projectId: string) => Promise<boolean>) => () => void
   onStartRun?: (nodeId: string, projectId: string) => Promise<RunStartResult>
   api?: GraphAPI
 }
 
-export function WorkspacePage({ status, snapshot, error, onRetry, onGraphMutation, onStartRun, api = graphAPI }: Props) {
+export function WorkspacePage({ status, snapshot, error, onRetry, onGraphMutation, onRegisterDraftFlush, onStartRun, api = graphAPI }: Props) {
   const projectId = snapshot?.project?.id ?? ''
   const currentProjectId = useRef(projectId)
   currentProjectId.current = projectId
@@ -95,7 +96,7 @@ export function WorkspacePage({ status, snapshot, error, onRetry, onGraphMutatio
           <button className="agent-mini-btn" type="button" onClick={onRetry}>重试</button>
         </div>
       ) : null}
-      <WorkspaceCanvas snapshot={snapshot} onSelectNode={selectNode} onGraphMutation={onGraphMutation} onStartRun={onStartRun} api={api} />
+      <WorkspaceCanvas snapshot={snapshot} onSelectNode={selectNode} onGraphMutation={onGraphMutation} onRegisterDraftFlush={onRegisterDraftFlush} onStartRun={onStartRun} api={api} />
     </main>
   )
 }

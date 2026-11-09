@@ -172,6 +172,36 @@
   outline-offset: 2px;
 }
 
+.project-draft-warning {
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.project-draft-message {
+  flex: 1 1 180px;
+  min-width: 0;
+}
+
+.project-draft-message h3 {
+  margin: 0 0 var(--s2);
+}
+
+.project-draft-message p {
+  margin: 0;
+}
+
+.project-draft-actions {
+  display: flex;
+  flex: 1 1 100%;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--s2);
+}
+
+.project-draft-actions button {
+  white-space: normal;
+}
+
 .workspace-banner,
 .workspace-sync-error,
 .workspace-inline-error {
