@@ -1,5 +1,5 @@
 import { vi } from 'vitest'
-import type { PropsWithChildren } from 'react'
+import type { MouseEvent as ReactMouseEvent, PropsWithChildren } from 'react'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { Connection, Edge, NodeChange, NodeMouseHandler } from '@xyflow/react'
@@ -16,12 +16,18 @@ type MockFlowProps = {
   maxZoom: number
   onNodesChange: (changes: NodeChange<CanvasFlowNode>[]) => void
   onConnect: (connection: Connection) => void
+  onPaneClick: (event: ReactMouseEvent) => void
+  onPaneContextMenu: (event: ReactMouseEvent | MouseEvent) => void
   onNodeClick: (event: MouseEvent, node: CanvasFlowNode) => void
   onNodeDoubleClick: NodeMouseHandler<CanvasFlowNode>
   children?: PropsWithChildren['children']
 }
 
-const flowMocks = vi.hoisted(() => ({ fitView: vi.fn(), setViewport: vi.fn() }))
+const flowMocks = vi.hoisted(() => ({
+  fitView: vi.fn(),
+  setViewport: vi.fn(),
+  screenToFlowPosition: vi.fn((position: { x: number; y: number }) => position),
+}))
 
 vi.mock('@xyflow/react', async () => {
   const React = await import('react')
@@ -36,6 +42,17 @@ vi.mock('@xyflow/react', async () => {
       props.nodes.find((node) => node.id === nodeId)?.data.onAddChild(nodeId, type)
     }
     return React.createElement('div', { 'data-testid': 'mock-flow' },
+      React.createElement('div', {
+        'data-testid': 'mock-flow-pane',
+        className: 'react-flow__pane',
+        tabIndex: 0,
+        onContextMenu: (event: ReactMouseEvent<HTMLDivElement>) => {
+          if (event.target === event.currentTarget) props.onPaneContextMenu(event)
+        },
+        onClick: (event: ReactMouseEvent<HTMLDivElement>) => {
+          if (event.target === event.currentTarget) props.onPaneClick(event)
+        },
+      }),
       React.createElement('output', { 'data-testid': 'edge-count' }, String(props.edges.length)),
       React.createElement('output', { 'data-testid': 'zoom-range' }, `${props.minZoom}-${props.maxZoom}`),
       React.createElement('output', { 'data-testid': 'child-position' }, (() => {
@@ -128,7 +145,7 @@ vi.mock('@xyflow/react', async () => {
     useReactFlow: () => ({
       fitView: flowMocks.fitView,
       setViewport: flowMocks.setViewport,
-      screenToFlowPosition: (position: { x: number; y: number }) => position,
+      screenToFlowPosition: flowMocks.screenToFlowPosition,
     }),
   }
 })
@@ -189,8 +206,16 @@ function makeAPI(): GraphAPI {
 
 const mutationReceipt = { projectId: 'p_test', projectRevision: 3, nodeId: 'n_prompt' }
 
+async function createFromCanvasMenu(type: string, x = 320, y = 240) {
+  fireEvent.contextMenu(screen.getByTestId('mock-flow-pane'), { clientX: x, clientY: y })
+  fireEvent.click(await screen.findByRole('menuitem', { name: type }))
+}
+
 describe('WorkspaceCanvas', () => {
-  afterEach(() => vi.useRealTimers())
+  afterEach(() => {
+    vi.useRealTimers()
+    flowMocks.screenToFlowPosition.mockImplementation((position) => position)
+  })
 
   it('persists the final size and position together only after resizing ends', async () => {
     const api = makeAPI()
@@ -252,15 +277,92 @@ describe('WorkspaceCanvas', () => {
     expect(screen.getByTestId('edge-count')).toHaveTextContent('4')
   })
 
+  it('places a context-menu draft at the transformed click coordinate without moving the viewport', async () => {
+    const api = makeAPI()
+    const onSelectNode = vi.fn().mockResolvedValue(undefined)
+    render(<WorkspaceCanvas snapshot={makeSnapshot()} onSelectNode={onSelectNode} onGraphMutation={vi.fn()} api={api} />)
+    await waitFor(() => expect(flowMocks.fitView).toHaveBeenCalled())
+    flowMocks.fitView.mockClear()
+    flowMocks.screenToFlowPosition.mockImplementation(({ x, y }) => ({ x: (x - 100) / 2, y: (y - 60) / 2 }))
+
+    expect(screen.queryByRole('button', { name: '新选题' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '草稿提示词' })).not.toBeInTheDocument()
+    fireEvent.contextMenu(screen.getByTestId('mock-flow-pane'), { clientX: 380, clientY: 260 })
+    expect(await screen.findByRole('menu', { name: '新建节点' })).toBeInTheDocument()
+    expect(screen.getByText('候选节点由选题运行生成，不能手动创建。')).toBeInTheDocument()
+    expect(screen.queryByRole('menuitem', { name: '候选' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('menuitem', { name: '提示词' }))
+
+    await waitFor(() => expect(api.addNode).toHaveBeenCalledOnce())
+    expect(api.addNode).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'prompt',
+      parent: '',
+      parentCandidate: null,
+      position: { x: 140, y: 100 },
+    }))
+    expect(onSelectNode).toHaveBeenCalledWith('n_created')
+    expect(flowMocks.fitView).not.toHaveBeenCalled()
+  })
+
+  it('opens a centered menu from Shift+F10 and the menu key with keyboard focus control', async () => {
+    const api = makeAPI()
+    const { container } = render(<WorkspaceCanvas snapshot={makeSnapshot()} onSelectNode={vi.fn().mockResolvedValue(undefined)} api={api} />)
+    const canvas = container.querySelector<HTMLElement>('.canvas-flow-root')
+    if (!canvas) throw new Error('canvas root missing')
+    vi.spyOn(canvas, 'getBoundingClientRect').mockReturnValue({
+      x: 100, y: 50, left: 100, top: 50, right: 700, bottom: 450, width: 600, height: 400,
+      toJSON: () => ({}),
+    })
+
+    fireEvent.keyDown(canvas, { key: 'F10', shiftKey: true })
+    const topicItem = await screen.findByRole('menuitem', { name: '选题' })
+    expect(document.activeElement).toBe(topicItem)
+    fireEvent.keyDown(topicItem, { key: 'ArrowDown' })
+    expect(document.activeElement).toBe(screen.getByRole('menuitem', { name: '提示词' }))
+    fireEvent.keyDown(screen.getByRole('menuitem', { name: '提示词' }), { key: 'ArrowDown' })
+    expect(document.activeElement).toBe(screen.getByRole('menuitem', { name: 'Agent' }))
+    fireEvent.keyDown(screen.getByRole('menuitem', { name: 'Agent' }), { key: 'Escape' })
+    expect(screen.queryByRole('menu', { name: '新建节点' })).not.toBeInTheDocument()
+    await waitFor(() => expect(document.activeElement).toBe(canvas))
+
+    fireEvent.keyDown(canvas, { key: 'ContextMenu' })
+    fireEvent.click(await screen.findByRole('menuitem', { name: '脚本' }))
+    await waitFor(() => expect(api.addNode).toHaveBeenCalledOnce())
+    expect(api.addNode).toHaveBeenCalledWith(expect.objectContaining({ position: { x: 400, y: 250 }, parent: '' }))
+  })
+
+  it('clamps the menu inside the viewport near its lower-right edge', async () => {
+    const originalWidth = window.innerWidth
+    const originalHeight = window.innerHeight
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 500 })
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 600 })
+    try {
+      render(<WorkspaceCanvas snapshot={makeSnapshot()} onSelectNode={vi.fn().mockResolvedValue(undefined)} api={makeAPI()} />)
+      fireEvent.contextMenu(screen.getByTestId('mock-flow-pane'), { clientX: 495, clientY: 590 })
+      const menu = await screen.findByRole('menu', { name: '新建节点' })
+      vi.spyOn(menu, 'getBoundingClientRect').mockReturnValue({
+        x: 0, y: 0, left: 0, top: 0, right: 240, bottom: 250, width: 240, height: 250,
+        toJSON: () => ({}),
+      })
+      fireEvent.resize(window)
+      await waitFor(() => {
+        expect(menu).toHaveStyle({ left: '252px', top: '342px' })
+      })
+    } finally {
+      Object.defineProperty(window, 'innerWidth', { configurable: true, value: originalWidth })
+      Object.defineProperty(window, 'innerHeight', { configurable: true, value: originalHeight })
+    }
+  })
+
   it('creates v2 node types only through workflow commands', async () => {
     const api = makeAPI()
     const onGraphMutation = vi.fn()
     render(<WorkspaceCanvas snapshot={makeSnapshot()} onSelectNode={vi.fn().mockResolvedValue(undefined)} onGraphMutation={onGraphMutation} api={api} />)
 
-    fireEvent.click(screen.getByRole('button', { name: '＋ 新选题' }))
+    await createFromCanvasMenu('选题')
     await waitFor(() => expect(api.addNode).toHaveBeenCalledTimes(1))
     await waitFor(() => expect(onGraphMutation).toHaveBeenCalledTimes(1))
-    fireEvent.click(screen.getByRole('button', { name: '＋ 草稿提示词' }))
+    await createFromCanvasMenu('提示词')
     await waitFor(() => expect(api.addNode).toHaveBeenCalledTimes(2))
     await waitFor(() => expect(onGraphMutation).toHaveBeenCalledTimes(2))
     fireEvent.click(screen.getByRole('button', { name: 'simulate-add-prompt' }))
@@ -292,10 +394,10 @@ describe('WorkspaceCanvas', () => {
     }
     const { rerender } = render(<WorkspaceCanvas snapshot={initial} onSelectNode={vi.fn().mockResolvedValue(undefined)} onGraphMutation={onGraphMutation} api={api} />)
 
-    fireEvent.click(screen.getByRole('button', { name: '＋ 新选题' }))
+    await createFromCanvasMenu('选题')
     await waitFor(() => expect(api.addNode).toHaveBeenCalledOnce())
     await waitFor(() => expect(onGraphMutation).toHaveBeenCalledOnce())
-    const disabledWhileSyncing = screen.getByRole('button', { name: '＋ 新选题' }).hasAttribute('disabled')
+    const disabledWhileSyncing = screen.getByRole('button', { name: '＋ 新建节点' }).hasAttribute('disabled')
 
     rerender(<WorkspaceCanvas snapshot={refreshed} onSelectNode={vi.fn().mockResolvedValue(undefined)} onGraphMutation={onGraphMutation} api={api} />)
     expect(await screen.findByRole('button', { name: 'n_created' })).toBeInTheDocument()
@@ -311,7 +413,7 @@ describe('WorkspaceCanvas', () => {
     const onGraphMutation = vi.fn().mockRejectedValueOnce(new Error('同步失败')).mockResolvedValueOnce(undefined)
     render(<WorkspaceCanvas snapshot={makeSnapshot()} onSelectNode={vi.fn().mockResolvedValue(undefined)} onGraphMutation={onGraphMutation} api={api} />)
 
-    fireEvent.click(screen.getByRole('button', { name: '＋ 新选题' }))
+    await createFromCanvasMenu('选题')
     expect(await screen.findByRole('alert')).toHaveTextContent('选题节点已保存，但画布同步失败：同步失败')
     expect(api.addNode).toHaveBeenCalledOnce()
     fireEvent.click(screen.getByRole('button', { name: '仅重试快照同步' }))

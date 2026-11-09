@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent as ReactMouseEvent } from 'react'
 import {
   applyNodeChanges,
   Background,
@@ -20,6 +20,7 @@ import { allocateNodePosition } from './nodePosition'
 import { buildFlowEdges, buildFlowModel, inputHandleId, nodeMap, outputHandleId, subtreeSize, topicRootId, type CanvasFlowNode, type ChildNodeType } from './flowModel'
 import { preserveCanvasNodeViewState } from './nodeState'
 import { CandidateNode } from './CandidateNode'
+import { CanvasContextMenu, type CanvasCreateType } from './CanvasContextMenu'
 import { ChainQuickBar } from './ChainQuickBar'
 import { AgentNode } from './AgentNode'
 import { ScriptNode } from './ScriptNode'
@@ -108,6 +109,11 @@ type ConnectIntent = {
   oldParentId: string
   subtreeCount: number
   movesTree: boolean
+}
+
+type CreateMenuState = {
+  screenPosition: { x: number; y: number }
+  flowPosition: { x: number; y: number }
 }
 
 function errorMessage(error: unknown): string {
@@ -222,6 +228,7 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFl
   const [pendingFocusNodeId, setPendingFocusNodeId] = useState('')
   const [confirmIntent, setConfirmIntent] = useState<ConnectIntent | null>(null)
   const [connectionTarget, setConnectionTarget] = useState('')
+  const [createMenu, setCreateMenu] = useState<CreateMenuState | null>(null)
   const createInFlight = useRef(false)
   const connectInFlight = useRef(false)
   const runStartInFlight = useRef(false)
@@ -450,7 +457,16 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFl
     void saveNodeLayout(nodeId, layout.x, layout.y, layout.width, layout.height)
   }, [projectId, saveNodeLayout])
 
-  const createNode = useCallback(async (type: ChildNodeType, parentId: string, position: Node['position']) => {
+  const selectCreatedNode = useCallback(async (nodeId: string) => {
+    if (currentProjectId.current !== projectId) return
+    try {
+      await onSelectNode(nodeId)
+    } catch (failure) {
+      if (currentProjectId.current === projectId) setError(`节点已创建，但选中失败：${errorMessage(failure)}`)
+    }
+  }, [onSelectNode, projectId])
+
+  const createNode = useCallback(async (type: ChildNodeType, parentId: string, position: Node['position'], selectAfterSync = false) => {
     if (mutationBlockedRef.current || createInFlight.current) return
     createInFlight.current = true
     const requestId = ++createRequestId.current
@@ -469,7 +485,8 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFl
         params: {},
       })
       if (currentProjectId.current !== projectId || receipt.projectId !== projectId) return
-      await syncMutation(receipt, label, receipt.nodeId)
+      const synced = await syncMutation(receipt, label, selectAfterSync ? undefined : receipt.nodeId)
+      if (synced && selectAfterSync) await selectCreatedNode(receipt.nodeId)
     } catch (failure) {
       if (currentProjectId.current !== projectId) return
       setNotice('')
@@ -480,7 +497,39 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFl
         setBusy(false)
       }
     }
-  }, [api, projectId, syncMutation])
+  }, [api, projectId, selectCreatedNode, syncMutation])
+
+  const createTopic = useCallback(async (position: Node['position'], selectAfterSync = false) => {
+    if (mutationBlockedRef.current || createInFlight.current) return
+    createInFlight.current = true
+    const requestId = ++createRequestId.current
+    setBusy(true)
+    setError('')
+    setNotice('')
+    try {
+      const receipt = await api.addNode({
+        projectId,
+        type: 'topic',
+        title: '新选题',
+        parent: '',
+        parentCandidate: null,
+        position,
+        params: { candidateCount: 3 },
+      })
+      if (currentProjectId.current !== projectId || receipt.projectId !== projectId) return
+      const synced = await syncMutation(receipt, '选题节点', selectAfterSync ? undefined : receipt.nodeId)
+      if (synced && selectAfterSync) await selectCreatedNode(receipt.nodeId)
+    } catch (failure) {
+      if (currentProjectId.current !== projectId) return
+      setNotice('')
+      setError(`创建选题节点失败：${errorMessage(failure)}`)
+    } finally {
+      if (createRequestId.current === requestId) {
+        createInFlight.current = false
+        setBusy(false)
+      }
+    }
+  }, [api, projectId, selectCreatedNode, syncMutation])
 
   const addChild = useCallback((parentId: string, type: ChildNodeType) => {
     if (mutationBlockedRef.current) return
@@ -629,6 +678,7 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFl
     initialFit.current = { projectId, shouldFit: Boolean(projectId && snapshotNodeCount.current), done: false }
     if (projectId) void flowRef.current.setViewport({ x: 0, y: 0, zoom: 1 }, { duration: 0 })
     setConnectionTarget('')
+    setCreateMenu(null)
     resizingNodeIds.current.clear()
     for (const [key, timer] of moveTimers.current) {
       if (key.startsWith(`${projectId}:`)) continue
@@ -775,50 +825,46 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFl
     confirmReturnFocus.current = null
   }
 
-  function canvasPosition() {
+  const openCreateMenuAt = useCallback((x: number, y: number) => {
+    const flowPosition = flowRef.current.screenToFlowPosition({ x, y })
+    setCreateMenu({ screenPosition: { x, y }, flowPosition })
+  }, [])
+
+  const openCreateMenuAtCenter = useCallback(() => {
     const rect = flowRoot.current?.getBoundingClientRect()
-    if (!rect) return { x: 0, y: 0 }
-    return flow.screenToFlowPosition({
-      x: rect.left + rect.width / 2,
-      y: rect.top + rect.height / 2,
-    })
-  }
+    if (!rect) return
+    openCreateMenuAt(rect.left + rect.width / 2, rect.top + rect.height / 2)
+  }, [openCreateMenuAt])
 
-  function addDraftPrompt() {
-    const position = allocateNodePosition(graphNodes, canvasPosition(), 'prompt')
-    void createNode('prompt', '', position)
-  }
+  const closeCreateMenu = useCallback((returnFocus: boolean) => {
+    setCreateMenu(null)
+    if (returnFocus) scheduleFrame(() => flowRoot.current?.focus({ preventScroll: true }))
+  }, [])
 
-  async function addTopic() {
-    if (mutationBlockedRef.current || createInFlight.current) return
-    createInFlight.current = true
-    const requestId = ++createRequestId.current
-    setBusy(true)
-    setError('')
-    setNotice('')
-    try {
-      const receipt = await api.addNode({
-        projectId,
-        type: 'topic',
-        title: '新选题',
-        parent: '',
-        parentCandidate: null,
-        position: allocateNodePosition(graphNodes, canvasPosition(), 'topic'),
-        params: { candidateCount: 3 },
-      })
-      if (currentProjectId.current !== projectId || receipt.projectId !== projectId) return
-      await syncMutation(receipt, '选题节点', receipt.nodeId)
-    } catch (failure) {
-      if (currentProjectId.current !== projectId) return
-      setNotice('')
-      setError(`创建选题节点失败：${errorMessage(failure)}`)
-    } finally {
-      if (createRequestId.current === requestId) {
-        createInFlight.current = false
-        setBusy(false)
-      }
-    }
-  }
+  const focusCanvas = useCallback(() => {
+    flowRoot.current?.focus({ preventScroll: true })
+  }, [])
+
+  const handlePaneContextMenu = useCallback((event: ReactMouseEvent | MouseEvent) => {
+    event.preventDefault()
+    openCreateMenuAt(event.clientX, event.clientY)
+  }, [openCreateMenuAt])
+
+  const handleCanvasKeyDown = useCallback((event: KeyboardEvent<HTMLDivElement>) => {
+    if (createMenu || !(event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10'))) return
+    const target = event.target instanceof Element ? event.target : null
+    if (target?.closest('input, textarea, select, button, [contenteditable="true"], .react-flow__node, .react-flow__controls, .react-flow__panel')) return
+    event.preventDefault()
+    openCreateMenuAtCenter()
+  }, [createMenu, openCreateMenuAtCenter])
+
+  const handleCreateMenuSelect = useCallback((type: CanvasCreateType) => {
+    const request = createMenu
+    closeCreateMenu(true)
+    if (!request || mutationBlockedRef.current) return
+    if (type === 'topic') void createTopic(request.flowPosition, true)
+    else void createNode(type, '', request.flowPosition, true)
+  }, [closeCreateMenu, createMenu, createNode, createTopic])
 
   async function retryPendingSync() {
     if (!pendingSync || busy) return
@@ -927,12 +973,6 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFl
           <span className="workspace-kicker">工作台 / 节点图</span>
           <strong>{snapshot.project?.name}</strong>
         </div>
-        <button type="button" className="canvas-toolbar-btn" onClick={addTopic} disabled={mutationBlocked}>
-          ＋ 新选题
-        </button>
-        <button type="button" className="canvas-toolbar-btn" onClick={addDraftPrompt} disabled={mutationBlocked}>
-          ＋ 草稿提示词
-        </button>
         {selectedCanParent && connectionTargets.length ? (
           <div className="canvas-keyboard-connect">
             <label htmlFor="connection-target">连接 / 改挂</label>
@@ -964,12 +1004,18 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFl
       ) : null}
       {notice ? <div className="canvas-message" role="status">{notice}</div> : null}
 
-      <div className="canvas-flow-root" ref={flowRoot}>
+      <div
+        className="canvas-flow-root"
+        ref={flowRoot}
+        tabIndex={0}
+        aria-label="画布；按 Shift+F10 或菜单键打开新建菜单"
+        onKeyDown={handleCanvasKeyDown}
+      >
         {!graphNodes.length ? (
           <div className="canvas-empty-overlay" aria-label="空画布提示">
             <span aria-hidden="true">＋</span>
             <strong>从一个选题开始</strong>
-            <p>新建选题，或先放置未连接的提示词草稿。</p>
+            <p>在空白处右键，或按 Shift+F10 新建节点。</p>
           </div>
         ) : null}
         <ReactFlow<CanvasFlowNode>
@@ -978,6 +1024,8 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFl
           nodeTypes={nodeTypes}
           onNodesChange={onNodesChange}
           onConnect={onConnect}
+          onPaneClick={focusCanvas}
+          onPaneContextMenu={handlePaneContextMenu}
           isValidConnection={validConnection}
           onNodeClick={onNodeClick}
           onNodeDoubleClick={(_event, node) => void flow.fitView({ nodes: [{ id: node.id }], padding: 0.35, duration: 180 })}
@@ -1009,12 +1057,20 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFl
               nodes={graphNodes}
               activeNodeId={snapshot.project?.activeNodeId ?? ''}
               onSelectNode={selectChain}
-              onNewChain={() => void addTopic()}
-              newChainDisabled={mutationBlocked}
+              onCreateNode={openCreateMenuAtCenter}
+              createNodeDisabled={mutationBlocked}
             />
           </Panel>
         </ReactFlow>
       </div>
+      {createMenu ? (
+        <CanvasContextMenu
+          screenPosition={createMenu.screenPosition}
+          disabled={mutationBlocked}
+          onCreate={handleCreateMenuSelect}
+          onClose={closeCreateMenu}
+        />
+      ) : null}
 
       {confirmIntent ? (
         <div className="canvas-confirm-backdrop" role="presentation" onMouseDown={(event) => {

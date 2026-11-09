@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, createEvent, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type { ReactElement } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { OutputKind, PendingStatus, RunStatus } from '../../bindings/audio-ui/internal/domain/valueobject'
@@ -156,6 +156,24 @@ describe('WorkspaceCanvas with real React Flow', () => {
     await waitFor(() => expect(onSelectNode).toHaveBeenCalledWith('n_prompt'))
     fireEvent.keyDown(topicWrapper, { key: ' ', code: 'Space' })
     await waitFor(() => expect(onSelectNode).toHaveBeenLastCalledWith('n_topic'))
+  })
+
+  it('opens creation on the blank pane but leaves the Prompt textarea context menu untouched', async () => {
+    const { container } = render(
+      <WorkspaceCanvas snapshot={makeSnapshot()} onSelectNode={vi.fn().mockResolvedValue(undefined)} api={makeAPI()} />,
+    )
+    const promptInput = await waitFor(() => container.querySelector<HTMLTextAreaElement>('.react-flow__node[data-id="n_prompt"] textarea')!)
+    const inputContextMenu = createEvent.contextMenu(promptInput, { clientX: 180, clientY: 140 })
+    fireEvent(promptInput, inputContextMenu)
+    expect(inputContextMenu.defaultPrevented).toBe(false)
+    expect(screen.queryByRole('menu', { name: '新建节点' })).not.toBeInTheDocument()
+    fireEvent.keyDown(promptInput, { key: 'F10', shiftKey: true })
+    expect(screen.queryByRole('menu', { name: '新建节点' })).not.toBeInTheDocument()
+
+    const pane = container.querySelector<HTMLElement>('.react-flow__pane')
+    if (!pane) throw new Error('React Flow pane missing')
+    fireEvent.contextMenu(pane, { clientX: 760, clientY: 580 })
+    expect(await screen.findByRole('menu', { name: '新建节点' })).toBeInTheDocument()
   })
 
   it('applies keyboard layout edits to a locked path and persists geometry atomically', async () => {

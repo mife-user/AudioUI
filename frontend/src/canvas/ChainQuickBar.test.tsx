@@ -20,7 +20,7 @@ describe('ChainQuickBar', () => {
   beforeEach(() => localStorage.removeItem('audio-ui.chain-quickbar.collapsed'))
 
   it('renders backend leaf chains and their run/pending state when branches share a prefix', () => {
-    render(<ChainQuickBar chains={chains} nodes={nodes} activeNodeId="n_shared" onSelectNode={vi.fn()} onNewChain={vi.fn()} newChainDisabled={false} />)
+    render(<ChainQuickBar chains={chains} nodes={nodes} activeNodeId="n_shared" onSelectNode={vi.fn()} onCreateNode={vi.fn()} createNodeDisabled={false} />)
 
     expect(screen.getAllByRole('button', { name: /选择叶子链/ })).toHaveLength(3)
     expect(screen.getByRole('button', { name: '选择叶子链 分支甲，工作中' })).toHaveAttribute('aria-pressed', 'true')
@@ -30,18 +30,18 @@ describe('ChainQuickBar', () => {
 
   it('selects a chain tail through the supplied selection callback', () => {
     const onSelectNode = vi.fn()
-    const { rerender } = render(<ChainQuickBar chains={chains} nodes={nodes} activeNodeId="n_shared" onSelectNode={onSelectNode} onNewChain={vi.fn()} newChainDisabled={false} />)
+    const { rerender } = render(<ChainQuickBar chains={chains} nodes={nodes} activeNodeId="n_shared" onSelectNode={onSelectNode} onCreateNode={vi.fn()} createNodeDisabled={false} />)
 
     fireEvent.click(screen.getByRole('button', { name: '选择叶子链 分支乙，待处理' }))
     expect(onSelectNode).toHaveBeenCalledOnce()
     expect(onSelectNode).toHaveBeenCalledWith('n_agent_b')
 
-    rerender(<ChainQuickBar chains={chains} nodes={nodes} activeNodeId="n_agent_b" onSelectNode={onSelectNode} onNewChain={vi.fn()} newChainDisabled={false} />)
+    rerender(<ChainQuickBar chains={chains} nodes={nodes} activeNodeId="n_agent_b" onSelectNode={onSelectNode} onCreateNode={vi.fn()} createNodeDisabled={false} />)
     expect(screen.getByRole('button', { name: '选择叶子链 分支乙，待处理' })).toHaveAttribute('aria-pressed', 'true')
   })
 
   it('persists collapse state and summarizes authoritative chain statuses', () => {
-    const props = { chains, nodes, activeNodeId: 'n_shared', onSelectNode: vi.fn(), onNewChain: vi.fn(), newChainDisabled: false }
+    const props = { chains, nodes, activeNodeId: 'n_shared', onSelectNode: vi.fn(), onCreateNode: vi.fn(), createNodeDisabled: false }
     const first = render(<ChainQuickBar {...props} />)
     const toggle = screen.getByRole('button', { name: '叶子链3收起' })
 
@@ -56,23 +56,23 @@ describe('ChainQuickBar', () => {
     expect(screen.getByRole('button', { name: '选择叶子链 分支甲，工作中', hidden: true })).not.toBeVisible()
   })
 
-  it('creates a new chain through the supplied command and respects its disabled state', () => {
-    const onNewChain = vi.fn()
+  it('opens the shared node creation menu and respects its disabled state', () => {
+    const onCreateNode = vi.fn()
     const { rerender } = render(
-      <ChainQuickBar chains={chains} nodes={nodes} activeNodeId="n_shared" onSelectNode={vi.fn()} onNewChain={onNewChain} newChainDisabled />,
+      <ChainQuickBar chains={chains} nodes={nodes} activeNodeId="n_shared" onSelectNode={vi.fn()} onCreateNode={onCreateNode} createNodeDisabled />,
     )
-    const create = screen.getByRole('button', { name: '＋ 新链路' })
+    const create = screen.getByRole('button', { name: '＋ 新建节点' })
     expect(create).toBeDisabled()
     fireEvent.click(create)
-    expect(onNewChain).not.toHaveBeenCalled()
+    expect(onCreateNode).not.toHaveBeenCalled()
 
-    rerender(<ChainQuickBar chains={chains} nodes={nodes} activeNodeId="n_shared" onSelectNode={vi.fn()} onNewChain={onNewChain} newChainDisabled={false} />)
-    fireEvent.click(screen.getByRole('button', { name: '＋ 新链路' }))
-    expect(onNewChain).toHaveBeenCalledOnce()
+    rerender(<ChainQuickBar chains={chains} nodes={nodes} activeNodeId="n_shared" onSelectNode={vi.fn()} onCreateNode={onCreateNode} createNodeDisabled={false} />)
+    fireEvent.click(screen.getByRole('button', { name: '＋ 新建节点' }))
+    expect(onCreateNode).toHaveBeenCalledOnce()
   })
 
   it('shows an empty state when the authoritative snapshot has no leaf chains', () => {
-    render(<ChainQuickBar chains={[]} nodes={[]} activeNodeId="" onSelectNode={vi.fn()} onNewChain={vi.fn()} newChainDisabled={false} />)
+    render(<ChainQuickBar chains={[]} nodes={[]} activeNodeId="" onSelectNode={vi.fn()} onCreateNode={vi.fn()} createNodeDisabled={false} />)
     expect(screen.getByText('暂无叶子链')).toBeInTheDocument()
   })
 })

@@ -479,7 +479,7 @@ Topic ──应用校验 topics──> Candidate A ──> Prompt ──> Agent 
 
 ### 4.9 工作台交互优化（独立批次，U0 已确认）
 
-本批次位于 M2 验收之后、M3 开始之前。设计原型为[画布交互优化单文件演示](design/canvas-workbench-redesign-demo.html)；演示仅使用模拟数据，不连接 Agent、不访问工程或网络，不代表实现或验收证据。
+本批次位于 M2 验收之后、M3 开始之前。设计原型为[画布交互优化单文件演示](design/canvas-workbench-redesign-demo.html)；U4 新建菜单交互另见[单文件演示](design/u4-canvas-context-menu-demo.html)。演示仅使用模拟数据，不连接 Agent、不访问工程或网络，不代表实现或验收证据。
 
 **卡片尺寸与布局**：五类节点支持四角与四边八向缩放，缩放范围为 200 × 140 至 1200 × 900；固定标题栏是唯一拖动区，正文在卡片内部滚动且滚轮不缩放画布。标题栏提供键盘可达的尺寸设置与恢复默认尺寸入口；输入、拖动、端口和缩放命中区相互隔离。下表为建议的逻辑画布尺寸，真实页面验收后可调整。
 
@@ -493,7 +493,7 @@ Topic ──应用校验 topics──> Candidate A ──> Prompt ──> Agent 
 
 缩放范围建议为最小 200 × 140、最大 1200 × 900。卡片的 `position + size` 作为一组工程布局数据，通过单次原子布局命令保存；仅改布局不改变图拓扑、上下文哈希、产物、stale 或运行锁。开发期工程数据不要求兼容或迁移，已有开发工程可丢弃。
 
-**新建入口**：移除画布左上角「新选题」「草稿提示词」按钮。空白画布右键菜单与键盘等价入口创建 Topic、Prompt、Agent、Script；位置取菜单触发时画布坐标。除 Topic 外均为无父草稿，Candidate 仍仅由 Topic 自动生成。节点右键菜单、命令面板不在本批；既有双击聚焦保留。
+**新建入口**：移除画布左上角「新选题」「草稿提示词」按钮。空白画布右键菜单与键盘等价入口创建 Topic、Prompt、Agent、Script；以 `screenToFlowPosition` 将触发时的屏幕坐标映射为画布落点，菜单自身在当前视口内避边。除 Topic 外均为无父草稿，Candidate 仍仅由 Topic 自动生成。方向键、Home/End、Enter、Escape 可操作菜单；文本输入区右键保留系统菜单。快捷栏「新建节点」复用同一菜单并从画布中心打开；成功后选中新卡但不移动视口。节点右键菜单、命令面板不在本批；既有双击聚焦保留。
 
 **Agent 栏和请求归属**：Agent 栏默认收起为悬浮状态入口；展开面板有界且可滚动，不占画布列宽。运行控制与历史仍可用。权限、问题及待确认结果按冻结的 project/run/request/pending 身份定位到关联节点；面板收起不自动授权或丢弃请求，无法定位时提供异常恢复入口。
 
@@ -542,6 +542,7 @@ Topic ──应用校验 topics──> Candidate A ──> Prompt ──> Agent 
 | `ThemeBadge` | 当前主题入口（M3） | A/B/C | `--accent` |
 | `IconButton` | 图标按钮 | default/hover/focus/disabled | `--border` `--border-strong` |
 | `Canvas` | 无限画布容器 | default/panning | `--bg` `--grid` |
+| `CanvasContextMenu` | 空白画布节点创建菜单；统一右键、键盘与快捷栏入口 | open/disabled/clamped | `--bg-elev` `--border-strong` `--accent-soft` |
 | `WorldLayer` | 节点与连线的变换层 | translate/scale | — |
 | `NodeCard` | 节点容器 | default/hover/selected/disabled/error | `--panel` `--border` `--accent` |
 | `NodeHeader` | 节点标题与状态 | 默认/带徽标 | `--text` |

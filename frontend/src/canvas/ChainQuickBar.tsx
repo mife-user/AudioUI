@@ -8,8 +8,8 @@ type Props = {
   nodes: Node[]
   activeNodeId: string
   onSelectNode: (nodeId: string) => void
-  onNewChain: () => void
-  newChainDisabled: boolean
+  onCreateNode: () => void
+  createNodeDisabled: boolean
 }
 
 function statusLabel(status: string): string {
@@ -21,7 +21,7 @@ function statusLabel(status: string): string {
   }
 }
 
-export function ChainQuickBar({ chains, nodes, activeNodeId, onSelectNode, onNewChain, newChainDisabled }: Props) {
+export function ChainQuickBar({ chains, nodes, activeNodeId, onSelectNode, onCreateNode, createNodeDisabled }: Props) {
   const [collapsed, setCollapsed] = useState(() => window.localStorage.getItem(COLLAPSED_STORAGE_KEY) === 'true')
   const titleByNodeId = new Map(nodes.map((node) => [node.id, node.title]))
   const selectedChain = chains.find((chain) => chain.tailNodeId === activeNodeId)
@@ -82,8 +82,8 @@ export function ChainQuickBar({ chains, nodes, activeNodeId, onSelectNode, onNew
       ) : !collapsed ? (
         <p className="chain-quickbar-empty">暂无叶子链</p>
       ) : null}
-      <button type="button" className="chain-quickbar-new" disabled={newChainDisabled} onClick={onNewChain}>
-        ＋ 新链路
+      <button type="button" className="chain-quickbar-new" disabled={createNodeDisabled} onClick={onCreateNode}>
+        ＋ 新建节点
       </button>
     </nav>
   )
