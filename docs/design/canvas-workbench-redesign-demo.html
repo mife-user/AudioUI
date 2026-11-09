@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AudioUI · 画布交互优化方案</title>
+  <style>
+    :root { color-scheme: dark; --bg:#0c1115; --panel:#152026; --panel2:#10191e; --line:#30434a; --text:#e5eff0; --sub:#a9babe; --mute:#809399; --accent:#7dd8df; --accentbg:#1a393e; --warn:#f2ce83; --warnbg:#493c24; --good:#9bdbb8; --shadow:0 12px 36px #0007; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg); color:var(--text); font:14px/1.5 "Segoe UI", "Microsoft YaHei", sans-serif; }
+    button,textarea { font:inherit; } button { color:inherit; cursor:pointer; } button:focus-visible,textarea:focus-visible,[tabindex]:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+    button:disabled { cursor:not-allowed; opacity:.55; }
+    .top { height:58px; display:flex; align-items:center; gap:18px; padding:0 24px; border-bottom:1px solid var(--line); background:var(--panel2); }
+    .brand { font-weight:700; letter-spacing:.13em; color:var(--accent); font-size:13px; }
+    .separator { height:22px; width:1px; background:var(--line); }
+    .project { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:600; }
+    .top-sub { color:var(--mute); font-size:12px; }
+    .grow { flex:1; }
+    .demo { color:var(--warn); background:var(--warnbg); border:1px solid #78623a; border-radius:999px; padding:4px 9px; font-size:11px; white-space:nowrap; }
+    .frame { padding:18px 20px 12px; }
+    .intro { display:flex; justify-content:space-between; align-items:flex-end; gap:18px; margin-bottom:12px; }
+    .intro h1 { margin:0 0 2px; font-size:17px; letter-spacing:.02em; }
+    .intro p { margin:0; color:var(--sub); font-size:12px; }
+    .instruction { color:var(--mute); font-size:12px; text-align:right; }
+    .stage { position:relative; height:min(760px, calc(100vh - 154px)); min-height:520px; overflow:hidden; border:1px solid var(--line); border-radius:12px; background:var(--bg); }
+    .canvas-scroll { position:absolute; inset:0; overflow:auto; outline-offset:-3px; background-image:radial-gradient(#24363b 1px, transparent 1px); background-size:24px 24px; }
+    .world { position:relative; width:1300px; height:720px; }
+    .wires { position:absolute; inset:0; width:100%; height:100%; overflow:visible; pointer-events:none; }
+    .wire-under { fill:none; stroke:var(--bg); stroke-width:6; }
+    .wire { fill:none; stroke:#5c7178; stroke-width:1.8; }
+    .wire.active { stroke:var(--accent); stroke-width:2.5; }
+    .node { position:absolute; display:flex; flex-direction:column; min-width:180px; min-height:135px; overflow:visible; background:var(--panel); border:1px solid var(--line); border-radius:9px; box-shadow:0 6px 22px #0004; }
+    .node.selected { border-color:var(--accent); box-shadow:0 0 0 1px var(--accent),0 6px 22px #0004; }
+    .node-head { display:flex; align-items:center; gap:7px; min-height:42px; padding:8px 9px; border-bottom:1px solid var(--line); cursor:grab; user-select:none; touch-action:none; }
+    .node-head:active { cursor:grabbing; }
+    .kind { flex:none; padding:2px 6px; border:1px solid var(--line); border-radius:5px; color:var(--sub); font-size:10px; letter-spacing:.04em; }
+    .title { min-width:0; flex:1; overflow:hidden; font-size:12px; font-weight:650; text-overflow:ellipsis; white-space:nowrap; }
+    .mini-action { flex:none; padding:3px 6px; border:1px solid #887048; border-radius:5px; background:var(--warnbg); color:var(--warn); font-size:10px; white-space:nowrap; }
+    .node-content { min-height:0; flex:1; overflow:auto; padding:10px; color:var(--sub); font-size:12px; scrollbar-width:thin; }
+    .node-content p { margin:0 0 9px; overflow-wrap:anywhere; }
+    .node-content label { display:block; margin-bottom:5px; color:var(--mute); font-size:11px; }
+    .node-content textarea { display:block; width:100%; min-height:72px; resize:none; padding:8px; border:1px solid var(--line); border-radius:6px; color:var(--text); background:var(--panel2); line-height:1.5; }
+    .state { display:inline-flex; align-items:center; gap:5px; padding:2px 6px; border-radius:5px; background:var(--accentbg); color:var(--accent); font-size:10px; }
+    .state.warn { background:var(--warnbg); color:var(--warn); }
+    .quiet { color:var(--mute); font-size:11px; }
+    .value { color:var(--text); }
+    .primary, .secondary { min-height:30px; padding:5px 10px; border:1px solid var(--line); border-radius:6px; background:var(--panel2); font-size:12px; }
+    .primary { border-color:var(--accent); background:var(--accentbg); color:var(--accent); }
+    .node-content .primary { width:100%; }
+    .port { position:absolute; z-index:2; top:50%; width:10px; height:10px; border:2px solid var(--bg); border-radius:50%; background:var(--accent); transform:translateY(-50%); }
+    .port.in { left:-6px; } .port.out { right:-6px; }
+    .grip { position:absolute; z-index:4; touch-action:none; }
+    .grip.n,.grip.s { height:8px; left:10px; right:10px; cursor:ns-resize; } .grip.n { top:-4px; } .grip.s { bottom:-4px; }
+    .grip.e,.grip.w { width:8px; top:10px; bottom:10px; cursor:ew-resize; } .grip.e { right:-4px; } .grip.w { left:-4px; }
+    .grip.ne,.grip.nw,.grip.se,.grip.sw { width:13px; height:13px; } .grip.ne { right:-5px; top:-5px; cursor:nesw-resize; } .grip.nw { left:-5px; top:-5px; cursor:nwse-resize; } .grip.se { right:-5px; bottom:-5px; cursor:nwse-resize; } .grip.sw { left:-5px; bottom:-5px; cursor:nesw-resize; }
+    .grip.se::after { content:""; position:absolute; right:3px; bottom:3px; width:8px; height:8px; border-right:2px solid var(--mute); border-bottom:2px solid var(--mute); opacity:.7; }
+    .stage-hint { position:absolute; z-index:5; top:13px; left:15px; padding:5px 9px; border:1px solid var(--line); border-radius:6px; background:var(--panel2); color:var(--sub); font-size:11px; pointer-events:none; }
+    .agent-launch { position:absolute; z-index:10; top:13px; right:14px; display:flex; gap:8px; align-items:center; padding:7px 10px; border:1px solid var(--line); border-radius:8px; background:var(--panel); box-shadow:var(--shadow); font-size:12px; }
+    .agent-launch strong { color:var(--accent); font-size:11px; letter-spacing:.06em; } .agent-launch .count { color:var(--warn); }
+    .float-panel { position:absolute; z-index:11; top:54px; right:14px; width:min(345px, calc(100% - 28px)); max-height:calc(100% - 142px); display:flex; flex-direction:column; border:1px solid var(--line); border-radius:10px; background:var(--panel2); box-shadow:var(--shadow); }
+    [hidden] { display:none !important; }
+    .float-head { display:flex; align-items:center; gap:10px; padding:12px; border-bottom:1px solid var(--line); } .float-head strong { flex:1; }
+    .icon { width:28px; height:28px; border:1px solid var(--line); border-radius:5px; background:var(--panel); }
+    .float-body { overflow:auto; min-height:0; padding:12px; }
+    .run-card { margin-bottom:10px; padding:10px; border:1px solid var(--line); border-radius:7px; background:var(--panel); }
+    .run-card h3 { margin:0 0 5px; font-size:12px; } .run-card p { margin:0 0 8px; color:var(--sub); font-size:12px; overflow-wrap:anywhere; }
+    .log { margin:0; padding:0 0 0 17px; color:var(--sub); font-size:12px; } .log li { margin-bottom:8px; }
+    .chainbar { position:absolute; z-index:8; left:16px; right:16px; bottom:13px; display:flex; align-items:stretch; gap:8px; max-width:880px; padding:7px; border:1px solid var(--line); border-radius:9px; background:var(--panel2); box-shadow:var(--shadow); }
+    .chain-label { display:flex; flex-direction:column; justify-content:center; padding:0 9px; color:var(--sub); font-size:11px; white-space:nowrap; }
+    .chain-list { display:flex; gap:7px; min-width:0; overflow-x:auto; }
+    .chain { display:flex; align-items:center; gap:9px; min-width:max-content; padding:7px 10px; border:1px solid var(--line); border-radius:6px; background:var(--panel); text-align:left; font-size:12px; }
+    .chain[aria-pressed="true"] { border-color:var(--accent); background:var(--accentbg); }
+    .chain small { color:var(--sub); font-size:10px; }
+    .context { position:absolute; z-index:20; width:215px; padding:5px; border:1px solid var(--line); border-radius:8px; background:var(--panel2); box-shadow:var(--shadow); }
+    .context-title { padding:6px 8px; color:var(--mute); font-size:11px; }
+    .context button { display:flex; width:100%; justify-content:space-between; gap:6px; padding:8px; border:0; border-radius:5px; background:transparent; text-align:left; font-size:12px; }
+    .context button:hover:not(:disabled), .context button:focus-visible { background:var(--accentbg); }
+    .context small { color:var(--mute); }
+    .toast { position:absolute; z-index:18; left:50%; bottom:93px; max-width:calc(100% - 40px); padding:7px 11px; border:1px solid var(--line); border-radius:6px; background:var(--panel2); color:var(--text); transform:translateX(-50%); font-size:12px; }
+    dialog { width:min(560px, calc(100vw - 28px)); max-height:calc(100vh - 40px); overflow:auto; padding:0; border:1px solid var(--line); border-radius:10px; background:var(--panel2); color:var(--text); box-shadow:var(--shadow); }
+    dialog::backdrop { background:#0009; }
+    .dialog-head { display:flex; align-items:center; gap:10px; padding:16px; border-bottom:1px solid var(--line); } .dialog-head h2 { flex:1; margin:0; font-size:15px; }
+    .dialog-body { padding:16px; } .dialog-body p { margin:0 0 12px; color:var(--sub); font-size:13px; }
+    .preview { max-height:230px; overflow:auto; padding:12px; border:1px solid var(--line); border-radius:6px; background:var(--panel); white-space:pre-wrap; overflow-wrap:anywhere; font:12px/1.7 inherit; }
+    .dialog-actions { display:flex; justify-content:flex-end; gap:8px; padding:0 16px 16px; }
+    .footnote { margin:10px 2px 0; color:var(--mute); font-size:11px; }
+    @media (max-width:700px) { .frame { padding:12px 10px; } .intro { align-items:flex-start; flex-direction:column; gap:4px; } .instruction { text-align:left; } .top { padding:0 12px; gap:9px; } .top-sub { display:none; } .stage { height:calc(100vh - 190px); } .chain-label { display:none; } }
+    @media (prefers-reduced-motion:reduce) { * { scroll-behavior:auto !important; } }
+  </style>
+</head>
+<body>
+  <header class="top"><span class="brand">AUDIOUI</span><span class="separator"></span><span class="project">音游作曲解析 · 示例工程</span><span class="top-sub">本地工作台</span><span class="grow"></span><span class="demo">交互方案 · 模拟数据</span></header>
+  <main class="frame">
+    <div class="intro"><div><h1>更自由的节点工作台</h1><p>保留画布空间，让内容、结果和需要处理的请求回到节点旁边。</p></div><div class="instruction">拖动卡片边缘缩放 · 空白处右键新建 · 点击右上角查看待确认内容</div></div>
+    <section class="stage" aria-label="画布交互方案演示">
+      <div class="canvas-scroll" id="canvas" tabindex="0" aria-label="模拟画布，空白处右键或按 Shift+F10 新建节点">
+        <div class="world" id="world">
+          <svg class="wires" id="wires" aria-hidden="true"><defs><marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M 1 1 L 9 5 L 1 9 z" fill="context-stroke"></path></marker></defs><g id="paths"></g></svg>
+          <article class="node" id="topic" style="left:35px;top:170px;width:190px;height:162px" aria-label="选题节点：节奏中的情绪">
+            <header class="node-head"><span class="kind">选题</span><span class="title">节奏中的情绪</span></header><div class="node-content"><p class="value">从音游音乐中的节奏变化切入。</p><span class="state">已生成 2 个候选</span><p class="quiet">内容已锁定</p></div><span class="port out" aria-hidden="true"></span>
+          </article>
+          <article class="node" id="candidate-a" style="left:280px;top:95px;width:190px;height:165px" aria-label="候选节点：节奏与叙事">
+            <header class="node-head"><span class="kind">候选</span><span class="title">节奏与叙事</span></header><div class="node-content"><p><span class="quiet">方向</span><br><span class="value">从鼓点变化讲音乐如何推动叙事。</span></p><span class="state">候选 1</span></div><span class="port in" aria-hidden="true"></span><span class="port out" aria-hidden="true"></span>
+          </article>
+          <article class="node selected" id="prompt" style="left:520px;top:75px;width:235px;height:215px" aria-label="提示词节点：脚本任务">
+            <header class="node-head"><span class="kind">提示词</span><span class="title">脚本任务</span><span class="quiet">已保存</span></header><div class="node-content"><label for="sample-task">任务</label><textarea id="sample-task">根据当前候选写一段 90 秒的中文解说，保留关键节奏变化。</textarea><p class="quiet" style="margin-top:8px">只构建任务；由下游 Agent 运行。</p></div><span class="port in" aria-hidden="true"></span><span class="port out" aria-hidden="true"></span>
+          </article>
+          <article class="node" id="agent" style="left:805px;top:100px;width:185px;height:175px" aria-label="Agent 节点：本地运行">
+            <header class="node-head"><span class="kind">AGENT</span><span class="title">本地运行</span><button class="mini-action" id="request-open" type="button">请求 1</button></header><div class="node-content"><p><span class="state">运行中</span></p><p class="quiet">输出：脚本结果</p><button class="primary" type="button" disabled>运行中</button></div><span class="port in" aria-hidden="true"></span><span class="port out" aria-hidden="true"></span>
+          </article>
+          <article class="node" id="script" style="left:1045px;top:75px;width:215px;height:230px" aria-label="脚本节点：脚本结果">
+            <header class="node-head"><span class="kind">脚本</span><span class="title">脚本结果</span><button class="mini-action" id="result-open" type="button">待确认 1</button></header><div class="node-content"><p class="quiet" id="script-version">当前版本 v1 · 已保存</p><p class="value" id="script-text">第一段：熟悉的鼓点响起，情绪却悄悄发生了变化……</p><details><summary>版本与来源</summary><p class="quiet">v1 · 来源运行 r_example_01<br>产物标识 sha256:…</p></details></div><span class="port in" aria-hidden="true"></span><span class="port out" aria-hidden="true"></span>
+          </article>
+          <article class="node" id="candidate-b" style="left:280px;top:380px;width:190px;height:155px" aria-label="候选节点：另一种节奏">
+            <header class="node-head"><span class="kind">候选</span><span class="title">另一种节奏</span></header><div class="node-content"><p class="value">聚焦编曲和音色的对照。</p><span class="state">候选 2</span></div><span class="port in" aria-hidden="true"></span><span class="port out" aria-hidden="true"></span>
+          </article>
+          <article class="node" id="prompt-b" style="left:520px;top:375px;width:220px;height:165px" aria-label="提示词节点：备用方向">
+            <header class="node-head"><span class="kind">提示词</span><span class="title">备用方向</span></header><div class="node-content"><p class="value">比较前后两段的音色设计。</p><span class="state">未运行</span></div><span class="port in" aria-hidden="true"></span><span class="port out" aria-hidden="true"></span>
+          </article>
+          <div class="context" id="context-menu" role="menu" hidden><div class="context-title">在此处新建节点</div><button role="menuitem" data-new="topic">选题节点 <small>新链路</small></button><button role="menuitem" data-new="prompt">提示词节点 <small>草稿</small></button><button role="menuitem" data-new="agent">Agent 节点 <small>草稿</small></button><button role="menuitem" data-new="script">脚本节点 <small>草稿</small></button><button role="menuitem" disabled>候选节点 <small>由选题生成</small></button></div>
+        </div>
+      </div>
+      <div class="stage-hint">实线：当前路径　·　灰线：其他分支</div>
+      <button class="agent-launch" type="button" id="agent-toggle" aria-expanded="false" aria-controls="agent-panel"><strong>AGENT</strong><span>运行中</span><span class="count">1 个请求</span><span aria-hidden="true">▾</span></button>
+      <aside class="float-panel" id="agent-panel" aria-label="悬浮运行面板" hidden>
+        <div class="float-head"><strong>运行记录</strong><span class="quiet">悬浮面板</span><button class="icon" id="agent-close" aria-label="关闭运行面板">×</button></div>
+        <div class="float-body"><div class="run-card"><h3>本地运行 · 正在工作</h3><p>关联节点：本地运行。权限与内容确认在对应节点处理。</p><button class="secondary" type="button" id="go-request">定位有请求的节点</button></div><div class="run-card"><h3>最近动态</h3><ol class="log"><li>已读取当前路径的选题与提示词。</li><li>正在整理脚本结果。</li><li>有 1 个工具权限请求等待处理。</li></ol></div><div class="run-card"><h3>历史运行</h3><p>前一次运行已完成，可在此滚动查看对话及工具记录。</p></div></div>
+      </aside>
+      <nav class="chainbar" aria-label="派生叶子链"><div class="chain-label"><strong>叶子链</strong><span>2 条路径</span></div><div class="chain-list"><button class="chain" type="button" data-chain="main" aria-pressed="true"><span>脚本链</span><small>5 节点 · 待确认</small></button><button class="chain" type="button" data-chain="alternate" aria-pressed="false"><span>备用方向</span><small>3 节点 · 未运行</small></button></div></nav>
+      <div class="toast" id="toast" role="status" hidden></div>
+    </section>
+    <p class="footnote">此页面为本地交互示意：不连接 Agent、不访问工程、不联网；尺寸与文字仅用于讨论，不代表实际软件已经实现。</p>
+  </main>
+  <dialog id="result-dialog" aria-labelledby="result-title"><div class="dialog-head"><h2 id="result-title">脚本结果 · 确认追加</h2><button class="icon" type="button" data-close="result-dialog" aria-label="关闭结果预览">×</button></div><div class="dialog-body"><p>目标：脚本结果　·　基准版本：v1　·　新结果来源：示例运行</p><div class="preview">新版本预览 v2
+
+第一段：熟悉的鼓点响起，音乐的情绪逐渐推进。
+第二段：节奏突然留白，让后续旋律更有张力。</div><p style="margin-top:12px">确认只追加新版本，保留旧版本。实际应用时仍会重新校验绑定与版本；冲突不会强制覆盖。</p></div><div class="dialog-actions"><button class="secondary" type="button" data-close="result-dialog">暂不处理</button><button class="primary" type="button" id="confirm-result">确认追加</button></div></dialog>
+  <dialog id="request-dialog" aria-labelledby="request-title"><div class="dialog-head"><h2 id="request-title">本地运行 · 权限请求</h2><button class="icon" type="button" data-close="request-dialog" aria-label="关闭权限预览">×</button></div><div class="dialog-body"><p>工具请求与发起它的运行绑定。这里仅模拟在节点上查看，不会执行任何命令或产生真实授权。</p><div class="preview">示例请求：读取当前运行工作区中的文本文件</div></div><div class="dialog-actions"><button class="secondary" type="button" id="deny-request">拒绝（模拟）</button><button class="primary" type="button" id="allow-request">允许（模拟）</button></div></dialog>
+  <script>
+    (() => {
+      const canvas = document.getElementById('canvas');
+      const world = document.getElementById('world');
+      const paths = document.getElementById('paths');
+      const menu = document.getElementById('context-menu');
+      const toast = document.getElementById('toast');
+      const edges = [['topic','candidate-a'],['candidate-a','prompt'],['prompt','agent'],['agent','script'],['topic','candidate-b'],['candidate-b','prompt-b']];
+      const chains = { main:['topic','candidate-a','prompt','agent','script'], alternate:['topic','candidate-b','prompt-b'] };
+      let activeChain = 'main';
+      let clickPoint = {x:100,y:100};
+      let nextId = 1;
+      let toastTimer;
+      const showToast = (text) => { toast.textContent=text; toast.hidden=false; clearTimeout(toastTimer); toastTimer=setTimeout(() => {toast.hidden=true;}, 2600); };
+      function renderEdges() {
+        paths.replaceChildren();
+        for (const [sourceId,targetId] of edges) {
+          const a=document.getElementById(sourceId), b=document.getElementById(targetId); if(!a || !b) continue;
+          const x1=a.offsetLeft+a.offsetWidth, y1=a.offsetTop+a.offsetHeight/2, x2=b.offsetLeft, y2=b.offsetTop+b.offsetHeight/2;
+          const dx=Math.max(38, Math.abs(x2-x1)*.48);
+          const d=`M ${x1} ${y1} C ${x1+dx} ${y1}, ${x2-dx} ${y2}, ${x2} ${y2}`;
+          for (const name of ['wire-under','wire']) {
+            const path=document.createElementNS('http://www.w3.org/2000/svg','path');
+            path.setAttribute('d',d); path.setAttribute('class',name+(name==='wire' && chains[activeChain].includes(sourceId) && chains[activeChain].includes(targetId) ? ' active':''));
+            if(name==='wire') path.setAttribute('marker-end','url(#arrow)'); paths.append(path);
+          }
+        }
+      }
+      function selectNode(node) { document.querySelectorAll('.node.selected').forEach((item) => item.classList.remove('selected')); node.classList.add('selected'); }
+      function addHandles(node) {
+        for (const direction of ['n','s','e','w','ne','nw','se','sw']) {
+          const grip=document.createElement('span'); grip.className=`grip ${direction}`; grip.setAttribute('aria-hidden','true'); node.append(grip);
+          grip.addEventListener('pointerdown',(event) => {
+            event.preventDefault(); event.stopPropagation(); selectNode(node); grip.setPointerCapture(event.pointerId);
+            const start={x:event.clientX,y:event.clientY,left:node.offsetLeft,top:node.offsetTop,width:node.offsetWidth,height:node.offsetHeight};
+            const move=(e) => {
+              const dx=e.clientX-start.x, dy=e.clientY-start.y;
+              const width=Math.max(180,Math.min(620,start.width+(direction.includes('e')?dx:direction.includes('w')?-dx:0)));
+              const height=Math.max(135,Math.min(600,start.height+(direction.includes('s')?dy:direction.includes('n')?-dy:0)));
+              node.style.width=`${width}px`; node.style.height=`${height}px`;
+              if(direction.includes('w')) node.style.left=`${start.left+start.width-width}px`;
+              if(direction.includes('n')) node.style.top=`${start.top+start.height-height}px`;
+              renderEdges();
+            };
+            const end=() => {grip.removeEventListener('pointermove',move); grip.removeEventListener('pointerup',end); grip.removeEventListener('pointercancel',end);};
+            grip.addEventListener('pointermove',move); grip.addEventListener('pointerup',end); grip.addEventListener('pointercancel',end);
+          });
+        }
+        const header=node.querySelector('.node-head');
+        header.addEventListener('pointerdown',(event) => {
+          if(event.button!==0 || event.target.closest('button')) return;
+          event.preventDefault(); selectNode(node); header.setPointerCapture(event.pointerId);
+          const start={x:event.clientX,y:event.clientY,left:node.offsetLeft,top:node.offsetTop};
+          const move=(e) => { node.style.left=`${Math.max(0,start.left+e.clientX-start.x)}px`; node.style.top=`${Math.max(0,start.top+e.clientY-start.y)}px`; renderEdges(); };
+          const end=() => {header.removeEventListener('pointermove',move); header.removeEventListener('pointerup',end); header.removeEventListener('pointercancel',end);};
+          header.addEventListener('pointermove',move); header.addEventListener('pointerup',end); header.addEventListener('pointercancel',end);
+        });
+        node.addEventListener('pointerdown',() => selectNode(node));
+      }
+      document.querySelectorAll('.node').forEach(addHandles);
+      function openMenu(x,y) { clickPoint={x,y}; menu.style.left=`${Math.max(0,Math.min(x,world.clientWidth-220))}px`; menu.style.top=`${Math.max(0,Math.min(y,world.clientHeight-250))}px`; menu.hidden=false; menu.querySelector('button:not(:disabled)').focus(); }
+      canvas.addEventListener('contextmenu',(event) => { if(event.target.closest('.node')) return; event.preventDefault(); const rect=world.getBoundingClientRect(); openMenu(event.clientX-rect.left,event.clientY-rect.top); });
+      canvas.addEventListener('keydown',(event) => { if(event.key==='F10' && event.shiftKey) { event.preventDefault(); openMenu(canvas.scrollLeft+canvas.clientWidth/2,canvas.scrollTop+canvas.clientHeight/2); } if(event.key==='Escape') menu.hidden=true; });
+      document.addEventListener('pointerdown',(event) => { if(!event.target.closest('#context-menu')) menu.hidden=true; });
+      menu.addEventListener('click',(event) => {
+        const button=event.target.closest('[data-new]'); if(!button) return;
+        const labels={topic:['选题','新选题','新的独立选题'],prompt:['提示词','新提示词','未连接 · 编辑任务后连接上游'],agent:['AGENT','新 Agent','未连接 · 连接提示词后可运行'],script:['脚本','新脚本','未连接 · 可作为 Agent 的输出']};
+        const [kind,title,hint]=labels[button.dataset.new];
+        const node=document.createElement('article'); node.className='node'; node.id=`draft-${nextId++}`; node.style.cssText=`left:${clickPoint.x}px;top:${clickPoint.y}px;width:210px;height:150px`; node.setAttribute('aria-label',`${title}，模拟节点`);
+        const head=document.createElement('header'); head.className='node-head'; const tag=document.createElement('span'); tag.className='kind'; tag.textContent=kind; const name=document.createElement('span'); name.className='title'; name.textContent=title; head.append(tag,name);
+        const content=document.createElement('div'); content.className='node-content'; const text=document.createElement('p'); text.textContent=hint; content.append(text); node.append(head,content); world.append(node); addHandles(node); selectNode(node); menu.hidden=true; showToast(`已在点击位置放置${title}（模拟）`);
+      });
+      document.querySelectorAll('[data-chain]').forEach((button) => button.addEventListener('click',() => { activeChain=button.dataset.chain; document.querySelectorAll('[data-chain]').forEach((item) => item.setAttribute('aria-pressed',String(item===button))); selectNode(document.getElementById(chains[activeChain].at(-1))); renderEdges(); }));
+      const panel=document.getElementById('agent-panel'), toggle=document.getElementById('agent-toggle');
+      function setPanel(open) { panel.hidden=!open; toggle.setAttribute('aria-expanded',String(open)); }
+      toggle.addEventListener('click',() => setPanel(panel.hidden)); document.getElementById('agent-close').addEventListener('click',() => setPanel(false));
+      document.getElementById('go-request').addEventListener('click',() => { setPanel(false); const node=document.getElementById('agent'); node.scrollIntoView({block:'nearest',inline:'center'}); selectNode(node); document.getElementById('request-open').focus(); });
+      for (const [button,dialog] of [['result-open','result-dialog'],['request-open','request-dialog']]) document.getElementById(button).addEventListener('click',() => document.getElementById(dialog).showModal());
+      document.querySelectorAll('[data-close]').forEach((button) => button.addEventListener('click',() => document.getElementById(button.dataset.close).close()));
+      document.getElementById('confirm-result').addEventListener('click',() => { document.getElementById('script-version').textContent='当前版本 v2 · 已追加'; document.getElementById('script-text').textContent='第一段：熟悉的鼓点响起，音乐的情绪逐渐推进。'; document.getElementById('result-open').hidden=true; document.getElementById('result-dialog').close(); showToast('已确认追加 v2；v1 保留（模拟）'); });
+      for(const id of ['deny-request','allow-request']) document.getElementById(id).addEventListener('click',() => { document.getElementById('request-dialog').close(); document.getElementById('request-open').hidden=true; showToast('权限请求已处理（仅模拟）'); });
+      renderEdges();
+    })();
+  </script>
+</body>
+</html>

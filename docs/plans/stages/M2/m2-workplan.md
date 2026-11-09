@@ -2,16 +2,16 @@
 
 | 项 | 内容 |
 |---|---|
-| 状态 | 草案（M2-00..10 旧模型已验收；M2-11A 已验收（2026-11-06）；M2-11B 已验收（2026-11-06）；M2-11C 已验收（2026-11-07）；M2-11D 已验收（2026-11-07）；M2-12A 已验收（2026-11-08）；M2-12B 已于 2026-11-08 通过用户验收；M2-13 已于 2026-11-08 通过用户验收） |
+| 状态 | M2 整体已于 2026-11-08 通过用户验收；任务级状态与证据见 §6，批次唯一状态源为路线图。 |
 | 最后更新 | 2026-11-08 |
 | 适用 | 每个新开对话只执行一个 M2 任务 |
-| 关联 | [路线图](roadmap.md)、[流程](process.md)、[PRD](../prd.md)、[架构](../architecture.md)、[协议](../agent-protocol.md)、[验收](../acceptance.md)、[ADR](../decisions.md) |
+| 关联 | [路线图](../../../dev/roadmap.md)、[流程](../../../dev/process.md)、[PRD](../../../prd.md)、[架构](../../../architecture.md)、[协议](../../../agent-protocol.md)、[验收](../../../acceptance.md)、[ADR](../../../decisions.md) |
 
 > **M2 不一口气写完。** 每个任务单独开一个对话，做完、跑门禁、更新文档与证据，交给用户评审后再开下一个。任何任务都不得顺手实现其他任务的代码。
 
-> M2-08～10 的选题闭环细化任务及顺序见 [工作台至选题闭环计划](m2-topic-closure-plan.md)。该计划将 M2-08 和 M2-10 拆成单独验收的子项，并在其中安排本闭环必需的部分 M2-12 功能；各原任务状态仍以本手册状态表和用户验收为准。
+> M2-08～10 的原始细化方案见[工作台至选题闭环计划](m2-topic-closure-plan.md)；现行验收状态以本手册 §6 为准。
 
-> **M2-11～13 目标切换**：用户选择 RM-018 的本地脚本子范围纳入 M2-11～13，详见[目标闭环计划](m2-target-closure-plan.md)。M2-00～10 旧模型实现与验收事实保留，不覆盖新目标；M2-11A 已于 2026-11-06 验收，M2-11B 工程格式与图领域模型已于 2026-11-06 验收；M2-11C 已验收（2026-11-07）；M2-11D 已验收（2026-11-07）；M2-12A 已于 2026-11-08 通过用户验收；M2-12B 已于 2026-11-08 通过用户验收；M2-13 已于 2026-11-08 通过用户验收。云端 RM-019 与视频 RM-020 仍待评估，不能混入本批次。
+> RM-018 本地脚本目标见[目标闭环计划](m2-target-closure-plan.md)；M2-11～13 已验收。RM-019 云端和 RM-020 视频仍待评估。
 
 ---
 
@@ -43,9 +43,9 @@
 新对话建议直接粘贴：
 
 ```text
-按 CLAUDE.md 与 docs/dev/m2-workplan.md 执行 M2-XX。
+按 CLAUDE.md 与 docs/plans/stages/M2/m2-workplan.md 执行 M2-XX。
 开工前读：CLAUDE.md、docs/dev/roadmap.md、docs/dev/process.md、
-docs/dev/m2-workplan.md、该任务涉及的 ADR 与验收用例。
+docs/plans/stages/M2/m2-workplan.md、该任务涉及的 ADR 与验收用例。
 只实现 M2-XX，不顺手做其他任务；测试与文档同次完成；
 跑任务级门禁；完成后把任务状态改为「待验收」并列出证据，不要自我验收。
 ```
@@ -120,7 +120,7 @@ DoD：分层与不变量未破坏；新增/修改逻辑有测试；任务级门�
 ### M2-03 工作区与写作用域
 
 - **状态**：已完成（用户确认验收通过；2026-11-02）。
-- **验收记录**：[M2-03 验收证据](evidence/m2-03.md)（用户已确认验收完成）。
+- **验收记录**：[M2-03 验收证据](../../../dev/evidence/m2-03.md)（用户已确认验收完成）。
 - **需求 / 验收**：F-03、F-13；不变量 9；AC-M2-11（路径隔离）、AC-M1-2（权限回归）。
 - **依赖**：M2-01（已完成）；M2-02（已验收通过）。
 - **目标**：topic 树 cwd、`steps/<nodeId>`、路径叠加读取、内置文件读写白名单、Bash 残余风险登记；跨树 steps 移动沿用 M2-02 已实现的 mover。
@@ -151,7 +151,7 @@ DoD：分层与不变量未破坏；新增/修改逻辑有测试；任务级门�
   - `contextHash` 覆盖上下文主体和工作区清单，`ancestorHash` 覆盖图祖先与候选但不含工作区，`paramsHash` 覆盖目标参数；`InputHashes` 可供 M2-05 校验复用。详见 ADR-026。
 - **文件**：`internal/service/context/`；`internal/domain/valueobject/context.go`；`internal/domain/port/workspace.go`；`internal/infra/workspace/view.go`。
 - **测试**：golden、同输入同哈希、候选分支、路径隔离、降级顺序、完整目标、超限、混合文本估算、清单上限、真实叠加视图与文件正文隔离。
-- **证据与门禁**：[M2-04 自检证据](evidence/m2-04.md)；最终 Go 全量及 vet、前端门禁、临时副本绑定/构建通过；首屏 JS 83.53 kB gzip。
+- **证据与门禁**：[M2-04 自检证据](../../../dev/evidence/m2-04.md)；最终 Go 全量及 vet、前端门禁、临时副本绑定/构建通过；首屏 JS 83.53 kB gzip。
 - **未包含**：待应用校验接线（M2-05）、运行启动与实际 usage 采集/存储（M2-07）、GUI 与 live CLI 端到端验收（M2-13）。
 - **风险**：token 为启发式估算；清单只按路径与大小入 `contextHash`，无法识别同大小内容变化或截断范围外变化。
 
@@ -172,14 +172,14 @@ DoD：分层与不变量未破坏；新增/修改逻辑有测试；任务级门�
   - Wails handler 提供列表、详情、应用与丢弃；创建入口留给 M2-06 的 `reply` 接线。topic 应用后候选端口仍由现有候选计数逻辑读取，无 selectedTopic。
 - **文件**：`internal/domain/{entity/pending.go,port/project.go,port/context.go,valueobject/project.go,valueobject/structured_payload.go}`；`internal/infra/persistence/{pending.go,pending_provider.go,pending_recovery.go,project.go}`；`internal/service/{project/service.go,workflow/pending.go,workflow/service.go,workflow/errors.go,workflow/candidates.go,context/builder.go}`；`internal/app/workflow.go`；`internal/handler/workflow.go`。
 - **测试**：Schema 与 canonical JSON 精度/额外字段；幂等重放、request_id 冲突、同 run 第二结果拒绝；无效原文保留；payload/每树限额及释放名额；哈希冲突与 force 边界；轮次、锁定、后代 stale、CAS 去重/跨 kind；discard 幂等及重复 apply；pending ID 身份冲突不覆盖原文；未提交回滚、已提交恢复、恢复失败阻断及重试。主要用例位于 `internal/domain/valueobject/structured_payload_test.go`、`internal/service/workflow/pending_test.go`、`internal/infra/persistence/pending*_test.go`、`internal/handler/workflow_test.go`。
-- **证据**：[M2-05 自检证据](evidence/m2-05.md)。
+- **证据**：[M2-05 自检证据](../../../dev/evidence/m2-05.md)。
 - **未包含**：MCP `reply` 与 create pending 的协议接线、只读图工具/`read_artifact`（M2-06）；运行启动与实际 usage 存储（M2-07）；前端 pending 卡片及 GUI/live CLI 端到端验收（后续任务）。
 - **风险**：事务日志损坏或磁盘错误时工程 fail closed，需人工修复/恢复文件；内容寻址目录的 `meta.json` 首写为准，消费端必须按 project round kind 校验；组件级自动化不等同于 GUI/端到端 AC 验收。
 
 ### M2-06 MCP 只读图与结构化 reply
 
 - **状态**：已完成（用户于 2026-11-03 确认验收）。GUI/live CLI 与 M2 整体端到端验收仍按后续任务范围推进。
-- **证据**：[M2-06 自检与验收证据](evidence/m2-06.md)。
+- **证据**：[M2-06 自检与验收证据](../../../dev/evidence/m2-06.md)。
 - **需求 / 验收**：F-04、F-07；AC-M2-3、AC-M2-12、AC-06（MCP/后端组件级覆盖）。
 - **依赖**：M2-02、M2-05（均已验收）。
 - **实现**：
@@ -198,7 +198,7 @@ DoD：分层与不变量未破坏；新增/修改逻辑有测试；任务级门�
 ### M2-07 运行管理与运行锁
 
 - **状态**：已完成（用户于 2026-11-03 确认验收）。GUI/live CLI 与 AC-M2-9/11 的后续端到端验收按 M2-13 推进。
-- **证据**：[M2-07 自检与验收证据](evidence/m2-07.md)。
+- **证据**：[M2-07 自检与验收证据](../../../dev/evidence/m2-07.md)。
 - **需求 / 验收**：F-06、F-13；AC-06、AC-13、AC-M1-1/2/5、AC-M2-9、AC-M2-11。
 - **依赖**：M2-03、M2-04、M2-06。
 - **目标**：一次性 driver、per-run MCP/token/permission、TurnGate、run store、runId/treeId/chainPath 事件、运行路径锁、重启中断。
@@ -221,7 +221,7 @@ DoD：分层与不变量未破坏；新增/修改逻辑有测试；任务级门�
 
 - **需求 / 验收**：F-01、F-03；AC-01、AC-03。
 - **依赖**：M2-07。
-- **子项进度**：M2-08A 后端快照、事件与恢复契约已验收（用户于 2026-11-03 确认）；任务级 Go、前端、绑定生成与 Wails 构建门禁通过。AC-01/03/06 有接口级自动化覆盖，证据见 [M2-08A 自检与验收证据](evidence/m2-08a.md)。M2-08B 前端工作台与运行控制台已实现、自动化及构建门禁通过；用户于 2026-11-03 明确指定截图更名后即算完成验收，证据见 [M2-08B 自检证据](evidence/m2-08b.md)。原任务 M2-08 已完成；M2-09 已于 2026-11-04 验收，证据见 [M2-09](evidence/m2-09.md)。
+- **子项进度**：M2-08A 后端快照、事件与恢复契约已验收（用户于 2026-11-03 确认）；任务级 Go、前端、绑定生成与 Wails 构建门禁通过。AC-01/03/06 有接口级自动化覆盖，证据见 [M2-08A 自检与验收证据](../../../dev/evidence/m2-08a.md)。M2-08B 前端工作台与运行控制台已实现、自动化及构建门禁通过；用户于 2026-11-03 明确指定截图更名后即算完成验收，证据见 [M2-08B 自检证据](../../../dev/evidence/m2-08b.md)。原任务 M2-08 已完成；M2-09 已于 2026-11-04 验收，证据见 [M2-09](../../../dev/evidence/m2-09.md)。
 - **M2-08A 接口**：`GetWorkspaceSnapshot` 返回进程内工作台 revision 与工程、节点、pending/run 摘要、Go 派生链及路径锁；`workspace:changed` 携带来源 `projectId`、reason 和持久化工程 revision。运行事件加入 `projectId`，`GetRunSnapshot` 同步返回 transcript、`lastSeq` 与活动待决请求。两种 revision 不落盘混用，既有 `GetRun` 和运行记录格式保持兼容。
 - **目标**：workspaceStore、runStore、事件桥、控制台分页、工程入口、删除 M1 临时 UI。
 - **关键设计**：快照字段以 `agent-protocol.md` §10.1 为准；快照 + revision/seq；快照含 Go 派生的链视图与 `lockedNodeIds`；runStore 按 runId；控制台「对话/待处理」；删除 PromptDock、SessionPage、ResumeFailureCard/新开会话/取消恢复；工程切换 dialog；运行在途禁止切换工程；`SelectNode` 本地更新，不递增 revision、不重拉快照。
@@ -231,7 +231,7 @@ DoD：分层与不变量未破坏；新增/修改逻辑有测试；任务级门�
 
 ### M2-09 画布与节点交互
 
-- **状态**：已完成（用户于 2026-11-04 确认验收）；执行结果与 AC 覆盖见 [M2-09 证据](evidence/m2-09.md)。
+- **状态**：已完成（用户于 2026-11-04 确认验收）；执行结果与 AC 覆盖见 [M2-09 证据](../../../dev/evidence/m2-09.md)。
 
 - **需求 / 验收**：F-02、F-03；AC-02、AC-M2-1/6、AC-M2-11。
 - **依赖**：M2-02、M2-08。
@@ -240,8 +240,8 @@ DoD：分层与不变量未破坏；新增/修改逻辑有测试；任务级门�
 - **文件**：`frontend/src/canvas/{WorkspaceCanvas,TopicNode,PromptNode,flowModel,graphApi}.ts(x)`、`styles/workspace.css`、`@xyflow/react`。
 - **实现**：AddNode/Connect/MoveNode/UpdateNodeParams/SelectNode 按发起工程 ID 校验；图写命令返回工程 ID、持久化 revision 与目标节点 ID 的 receipt。前端等待 receipt 对应的权威快照（工程、revision、节点 ID）后才结束同步；命令提交成功但快照失败时显示已提交状态，仅允许重试快照读取，避免重复写入。新节点确定性避让并在同步后聚焦；工程切换清除旧工程 pending 状态；同工程快照不覆盖本地选择。画布尺寸链使用明确的列 flex 高度与绝对填充 React Flow 根；键盘选择/位置变化与鼠标操作共用持久化路径。改挂确认在提交期间禁用取消、背景关闭与 Escape。
 - **提前交付**：M2-09 已显示快照 `lockedNodeIds` 路径锁，并阻止该路径端口连接和新增子节点；锁定内容节点仍可执行其旧基线允许的拓扑操作。旧 M2-11 的 prompt 直接执行入口已被 M2-11～13 本地脚本目标取代，尚未实现。
-- **测试**：端口连接/改挂确认、同父换候选与跨树提示/取消/失败、非法目标、位置防抖/回退/工程切换、缩放/重置/聚焦、键盘连接、路径高亮与锁状态；新增工程范围/回执/快照一致性及同步失败只重试读取；新增不 mock `@xyflow/react` 的 DOM 集成测试，验证节点 wrapper 测量、候选 Handle、SVG edge 和键盘选择。HTML/jsdom 测试不替代 WebView2 GUI 尺寸与像素验收；详情见 [证据](evidence/m2-09.md)。
-- **状态边界**：用户在隔离工程的生产 Wails 窗口中手工新增 topic 与草稿 prompt，确认工程 revision 12→13→14、节点 4→5→6、界面显示「已同步」且 6 个节点可见不重叠；同步失败重试、较小窗口、鼠标/键盘操作仍由自动测试覆盖，未在真实窗口逐项手工复测。保留截图与测量于 [M2-09 证据](evidence/m2-09.md)；不启动真实 Claude CLI。
+- **测试**：端口连接/改挂确认、同父换候选与跨树提示/取消/失败、非法目标、位置防抖/回退/工程切换、缩放/重置/聚焦、键盘连接、路径高亮与锁状态；新增工程范围/回执/快照一致性及同步失败只重试读取；新增不 mock `@xyflow/react` 的 DOM 集成测试，验证节点 wrapper 测量、候选 Handle、SVG edge 和键盘选择。HTML/jsdom 测试不替代 WebView2 GUI 尺寸与像素验收；详情见 [证据](../../../dev/evidence/m2-09.md)。
+- **状态边界**：用户在隔离工程的生产 Wails 窗口中手工新增 topic 与草稿 prompt，确认工程 revision 12→13→14、节点 4→5→6、界面显示「已同步」且 6 个节点可见不重叠；同步失败重试、较小窗口、鼠标/键盘操作仍由自动测试覆盖，未在真实窗口逐项手工复测。保留截图与测量于 [M2-09 证据](../../../dev/evidence/m2-09.md)；不启动真实 Claude CLI。
 - **剩余风险**：已存节点坐标不会自动迁移；同步失败重试和窄窗口布局仍需在后续 GUI 验收中补查。
 
 ### M2-10 选题流程
@@ -253,7 +253,7 @@ DoD：分层与不变量未破坏；新增/修改逻辑有测试；任务级门�
 - **文件**：`TopicNode.tsx`、pending UI、workflow handler。
 - **测试**：候选 ≥3、无效 Schema、应用/丢弃、端口连接、锁定后新增分支、不同候选上下文。
 - **风险**：候选端口与 React Flow handle 同步；应用前禁止连线。
-- **子项状态**：按[工作台至选题闭环计划](m2-topic-closure-plan.md)独立验收；M2-10A、M2-10B 已验收（[10A 证据](evidence/m2-10a.md)，[10B 证据](evidence/m2-10b.md)）；M2-10C 已验收（用户确认页面验收；[10C 证据](evidence/m2-10c.md)）；M2-10 原任务完成。
+- **子项状态**：按[工作台至选题闭环计划](m2-topic-closure-plan.md)独立验收；M2-10A、M2-10B 已验收（[10A 证据](../../../dev/evidence/m2-10a.md)，[10B 证据](../../../dev/evidence/m2-10b.md)）；M2-10C 已验收（用户确认页面验收；[10C 证据](../../../dev/evidence/m2-10c.md)）；M2-10 原任务完成。
 - **M2-10A 已交付边界**：选题参数编辑、防抖保存与运行前 flush、一次性运行启动和结构化启动错误；本子项不读取候选正文、不预览/应用/丢弃 pending、不创建真实候选端口，也不做真实 CLI 或 GUI 验收。
 
 ### M2-11A 需求、契约与交互设计
@@ -261,7 +261,7 @@ DoD：分层与不变量未破坏；新增/修改逻辑有测试；任务级门�
 - **状态**：已完成（用户于 2026-11-06 验收；仅需求、契约与交互设计完成，产品功能未实现）。
 - **需求 / 验收**：F-04/F-05/F-07/F-15/F-17/本地 F-18；AC-T-01～03、05～10、18～19。
 - **目标**：统一本地脚本范围、节点/产物映射、连接矩阵、输出版本语义、工程版本策略、错误码与交互原型。
-- **产物**：PRD、路线图、ADR-027、架构、Agent 协议、验收、前端设计、CLAUDE/AGENTS/README；[本地流程演示](../design/m2-11-13-local-flow-demo.html)；[原型浏览器自检证据](evidence/m2-11a.md)。详细设计见[目标闭环计划](m2-target-closure-plan.md) § M2-11A。
+- **产物**：PRD、路线图、ADR-027、架构、Agent 协议、验收、前端设计、CLAUDE/AGENTS/README；[本地流程演示](../../../design/m2-11-13-local-flow-demo.html)；[原型浏览器自检证据](../../../dev/evidence/m2-11a.md)。详细设计见[目标闭环计划](m2-target-closure-plan.md) § M2-11A。
 - **门禁**：文档一致性检查、原型浏览器实测与视口记录；无 Go/前端产品实现。评审通过前不得进入 M2-11B。
 
 ### M2-11B 工程版本与图领域模型
@@ -272,7 +272,7 @@ DoD：分层与不变量未破坏；新增/修改逻辑有测试；任务级门�
 - **目标**：`project.json` v2、candidate/agent/script 节点与来源引用、连接矩阵、草稿、改挂确认、派生链和 M1 迁移新格式；v1 明确不兼容。
 - **实现边界**：严格 `Graph.Validate()` 校验 v2 持久化与图写命令；`Graph.ValidateForest()` 仅供旧候选只读查询及旧上下文兼容回归使用。Candidate 原子生成留给 M2-11D；M2-11C 负责在途输出绑定保护和发送快照。
 - **阶段限制**：M2-11B 验收时仅开放 topic 运行入口；prompt、agent、script 当时均返回 `RUN_ENTRY_UNAVAILABLE`。M2-11C 现允许 Agent 运行并冻结发送快照；Candidate 原子生成留给 M2-11D。旧 `ParentCandidate` 仅作为过渡 DTO 保留，v2 校验拒绝非空值且序列化省略该字段。
-- **测试**：节点/连接矩阵、候选来源身份、静态单输出、单父/无环、改挂、跨树 steps 回滚、v1 不兼容但有效工程可用、M1 迁移和重启；自动化门禁结果见[自检证据](evidence/m2-11b.md)。
+- **测试**：节点/连接矩阵、候选来源身份、静态单输出、单父/无环、改挂、跨树 steps 回滚、v1 不兼容但有效工程可用、M1 迁移和重启；自动化门禁结果见[自检证据](../../../dev/evidence/m2-11b.md)。
 - **特殊操作**：仅按目标闭环计划，在应用关闭并复核后一次性清理用户指定的 `bin` 旧工程；不删除其他数据、不实现启动时自动删除。本次指定工程目录与配置文件不存在，因此未执行清理。
 
 ### M2-11C 发送快照、上下文与输出契约
@@ -290,12 +290,12 @@ DoD：分层与不变量未破坏；新增/修改逻辑有测试；任务级门�
 - **依赖**：M2-11B、M2-11C。
 - **实现**：`SubmitRunReply` 按发送快照与活动运行锁校验 kind/绑定；topics 原子写 artifact、Round、Candidate 与幂等回执；Agent Script 无绑定/空绑定自动写入，已有版本转为带基准的确认结果；确认不可用 `force` 绕过版本冲突。MCP 保留原始 payload 与活动运行租约，仅将 pending/invalid 登记到运行记录。
 - **恢复**：复用 `pending.txn.json`；提交 revision 是恢复分界，已提交工程恢复 CAS 与 pending 索引前核对 Candidate/Script 图关联，基准 revision 回滚意图；支持安全未引用 CAS。
-- **测试**：topics/Script 自动结果、空输出与已有版本确认/取消、版本冲突、request/no-request 幂等、并发冲突、过期/变化快照拒绝、提交各写入阶段故障与恢复、运行 pending 索引失败重试及事件去重、MCP 租约/原文/待处理通知；证据见 [M2-11D 自检证据](evidence/m2-11d.md)。真实 CLI、GUI 与 M2-13 跨层黄金链路未执行。
+- **测试**：topics/Script 自动结果、空输出与已有版本确认/取消、版本冲突、request/no-request 幂等、并发冲突、过期/变化快照拒绝、提交各写入阶段故障与恢复、运行 pending 索引失败重试及事件去重、MCP 租约/原文/待处理通知；证据见 [M2-11D 自检证据](../../../dev/evidence/m2-11d.md)。真实 CLI、GUI 与 M2-13 跨层黄金链路未执行。
 
 ### M2-12A 新模型工作台与脚本闭环
 
 - **状态**：已完成（用户于 2026-11-08 确认验收）。
-- **证据**：[M2-12A 自检证据](evidence/m2-12a.md)。
+- **证据**：[M2-12A 自检证据](../../../dev/evidence/m2-12a.md)。
 - **需求 / 验收**：F-04/F-05/F-15；AC-T-01～03、AC-T-05、AC-T-19。
 - **依赖**：M2-11B～D。
 - **目标**：按权威快照渲染 Candidate/Prompt/Agent/Script；提示词保存任务，Agent 启动本地运行；覆盖无绑定自动建脚本和指定空节点接收。
@@ -304,7 +304,7 @@ DoD：分层与不变量未破坏；新增/修改逻辑有测试；任务级门�
 ### M2-12B 已有输出确认、叶子链与运行状态
 
 - **状态**：已验收（用户于 2026-11-08 确认；自动化/离线门禁自检完成；真实浏览器交互未执行）。
-- **证据**：[M2-12B 自检证据](evidence/m2-12b.md)。
+- **证据**：[M2-12B 自检证据](../../../dev/evidence/m2-12b.md)。
 - **需求 / 验收**：F-03/F-07/F-17；AC-T-08～10、AC-T-18～19。
 - **依赖**：M2-12A。
 - **目标**：显示已有 Script 版本来源与待确认结果；确认仅在冻结版本匹配时追加，取消不修改旧版本；QuickBar 消费 Go 快照派生链。
@@ -313,7 +313,7 @@ DoD：分层与不变量未破坏；新增/修改逻辑有测试；任务级门�
 ### M2-13 完整集成、验收与证据
 
 - **状态**：已验收（用户于 2026-11-08 确认）。
-- **证据**：[M2 集成与 AC 状态证据](evidence/m2.md)。
+- **证据**：[M2 集成与 AC 状态证据](../../../dev/evidence/m2.md)。
 - **需求 / 验收**：M2-11～12 全部目标需求；AC-T-01～03、AC-T-05～10、AC-T-16、AC-T-18～19，以及既有基线回归。
 - **依赖**：M2-11A～12B 均经用户评审。
 - **目标**：临时工程与可控 DriverProvider 覆盖选题候选、分支、prompt/agent、自动脚本节点、指定空/已有输出、改挂新旧快照、非法 reply 和故障恢复；回归 M1 导入、工程切换、绿色目录与全局 BUSY。
@@ -373,20 +373,20 @@ wails3 build
 | M2-00 设计收口 | 已完成 | ADR/文档/原型；用户确认开工 M2-01 |
 | M2-01 工程存储与迁移 | 已完成 | `internal/infra/persistence`、`internal/service/project`、`internal/handler/project_test.go`、绑定生成；用户确认开始 M2-02 |
 | M2-02 图命令层/改挂/运行锁 | 已完成 | 用户确认 AC-M2-1/6/11 通过；`internal/domain/entity/graph.go`、`internal/service/workflow`、`internal/infra/workspace/mover.go`、`internal/handler/workflow_test.go`、全量 Go/前端/Wails 门禁通过 |
-| M2-03 工作区与写作用域 | 已完成 | [验收证据](evidence/m2-03.md)；用户确认通过（2026-11-02） |
-| M2-04 上下文构建器 | 已完成 | [验收证据](evidence/m2-04.md)；用户确认通过（2026-11-02） |
-| M2-05 Pending 后端 | 已完成 | [自检与验收证据](evidence/m2-05.md)；用户已确认验收通过（2026-11-02） |
-| M2-06 MCP 只读与 reply | 已完成 | [自检与验收证据](evidence/m2-06.md)；用户于 2026-11-03 确认验收 |
-| M2-07 运行管理 | 已完成 | [自检与验收证据](evidence/m2-07.md)；用户于 2026-11-03 确认验收 |
-| M2-08 前端工作台骨架 | 已完成（08A、08B 均已验收） | [M2-08A 证据](evidence/m2-08a.md)；[M2-08B 自检证据](evidence/m2-08b.md) |
-| M2-09 画布与节点交互 | 已完成 | [自检证据](evidence/m2-09.md)；用户于 2026-11-04 通过真实窗口手工新增确认验收 |
-| M2-10 选题流程 | 已完成（M2-10A、10B、10C 均已验收） | [M2-10A 证据](evidence/m2-10a.md)、[M2-10B 证据](evidence/m2-10b.md)、[M2-10C 证据](evidence/m2-10c.md) |
-| M2-11A 需求、契约与交互设计 | 已完成（设计阶段，用户于 2026-11-06 验收） | [自检证据](evidence/m2-11a.md)；PRD/ADR/架构/协议/验收/前端设计与本地演示 |
-| M2-11B 工程版本与图领域模型 | 已完成（用户于 2026-11-06 验收） | [M2-11B 自检证据](evidence/m2-11b.md) |
-| M2-11C 发送快照、上下文与输出契约 | 已完成（用户于 2026-11-07 验收） | [自检与验收证据](evidence/m2-11c.md) |
-| M2-11D 受限 reply 与原子提交 | 已完成（用户于 2026-11-07 验收） | [M2-11D 自检证据](evidence/m2-11d.md) |
-| M2-12A 新模型工作台与脚本闭环 | 已完成（用户于 2026-11-08 验收） | [自检证据](evidence/m2-12a.md) |
-| M2-12B 已有输出确认与叶子链 | 已完成（用户于 2026-11-08 确认验收） | [自检证据](evidence/m2-12b.md) |
-| M2-13 集成与验收证据 | 已完成（用户于 2026-11-08 验收） | [M2 集成与 AC 状态证据](evidence/m2.md) |
+| M2-03 工作区与写作用域 | 已完成 | [验收证据](../../../dev/evidence/m2-03.md)；用户确认通过（2026-11-02） |
+| M2-04 上下文构建器 | 已完成 | [验收证据](../../../dev/evidence/m2-04.md)；用户确认通过（2026-11-02） |
+| M2-05 Pending 后端 | 已完成 | [自检与验收证据](../../../dev/evidence/m2-05.md)；用户已确认验收通过（2026-11-02） |
+| M2-06 MCP 只读与 reply | 已完成 | [自检与验收证据](../../../dev/evidence/m2-06.md)；用户于 2026-11-03 确认验收 |
+| M2-07 运行管理 | 已完成 | [自检与验收证据](../../../dev/evidence/m2-07.md)；用户于 2026-11-03 确认验收 |
+| M2-08 前端工作台骨架 | 已完成（08A、08B 均已验收） | [M2-08A 证据](../../../dev/evidence/m2-08a.md)；[M2-08B 自检证据](../../../dev/evidence/m2-08b.md) |
+| M2-09 画布与节点交互 | 已完成 | [自检证据](../../../dev/evidence/m2-09.md)；用户于 2026-11-04 通过真实窗口手工新增确认验收 |
+| M2-10 选题流程 | 已完成（M2-10A、10B、10C 均已验收） | [M2-10A 证据](../../../dev/evidence/m2-10a.md)、[M2-10B 证据](../../../dev/evidence/m2-10b.md)、[M2-10C 证据](../../../dev/evidence/m2-10c.md) |
+| M2-11A 需求、契约与交互设计 | 已完成（设计阶段，用户于 2026-11-06 验收） | [自检证据](../../../dev/evidence/m2-11a.md)；PRD/ADR/架构/协议/验收/前端设计与本地演示 |
+| M2-11B 工程版本与图领域模型 | 已完成（用户于 2026-11-06 验收） | [M2-11B 自检证据](../../../dev/evidence/m2-11b.md) |
+| M2-11C 发送快照、上下文与输出契约 | 已完成（用户于 2026-11-07 验收） | [自检与验收证据](../../../dev/evidence/m2-11c.md) |
+| M2-11D 受限 reply 与原子提交 | 已完成（用户于 2026-11-07 验收） | [M2-11D 自检证据](../../../dev/evidence/m2-11d.md) |
+| M2-12A 新模型工作台与脚本闭环 | 已完成（用户于 2026-11-08 验收） | [自检证据](../../../dev/evidence/m2-12a.md) |
+| M2-12B 已有输出确认与叶子链 | 已完成（用户于 2026-11-08 确认验收） | [自检证据](../../../dev/evidence/m2-12b.md) |
+| M2-13 集成与验收证据 | 已完成（用户于 2026-11-08 验收） | [M2 集成与 AC 状态证据](../../../dev/evidence/m2.md) |
 
-状态词表沿用 [路线图第 2.3 节](roadmap.md#23-状态词表)：未开始 / 进行中 / 待验收 / 已完成 / 阻塞 / 暂缓。只有用户可以把「待验收」改为「已完成」。
+状态词表沿用 [路线图第 2.3 节](../../../dev/roadmap.md#23-状态词表)：未开始 / 进行中 / 待验收 / 已完成 / 阻塞 / 暂缓。只有用户可以把「待验收」改为「已完成」。

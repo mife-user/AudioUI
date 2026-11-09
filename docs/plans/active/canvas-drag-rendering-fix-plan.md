@@ -11,11 +11,11 @@
 ## 一、结论与证据等级
 
 1. **已验证的缺陷**：修复前，节点选择、快照刷新等导致画布节点模型重建时，现有实现会以新节点对象覆盖受控节点，丢失 React Flow 维护的 `measured` 等视图状态。若拖动在重新测量完成前继续，React Flow 可能产生 **015：拖动未初始化节点**。该状态协调缺陷已修复。
-2. **受控复现**：本地 Edge 浏览器、1410 × 858、真实 `WorkspacePage` / `WorkspaceCanvas` / React Flow、仅内存 GraphAPI fixture；人为延迟 `ResizeObserver` 回调后，从未选中状态拖动草稿提示词或已连接提示词，修复前观察到 015、最终修复后不再出现；[最终截图](evidence/canvas-drag-015-fixed.png)与[修复前截图](evidence/canvas-drag-015-repro.png)。
+2. **受控复现**：本地 Edge 浏览器、1410 × 858、真实 `WorkspacePage` / `WorkspaceCanvas` / React Flow、仅内存 GraphAPI fixture；人为延迟 `ResizeObserver` 回调后，从未选中状态拖动草稿提示词或已连接提示词，修复前观察到 015、最终修复后不再出现；[最终截图](../../dev/evidence/canvas-drag-015-fixed.png)与[修复前截图](../../dev/evidence/canvas-drag-015-repro.png)。
 3. **构建差异**：初次诊断时，原 `bin/audio-ui.exe` 内嵌 `index-B_cH0elX.js`，而当时前端 dist 是 `index-B0FbMVaA.js`；表明原二进制未包含当时前端修复。现在独立 `bin/audio-ui-fixed.exe` 内嵌 `/assets/index-GZrRhW-J.js`，HTML/JS 与最新 `frontend/dist` 逐字节一致；原 exe 未覆盖。
 4. **错误编号边界**：用户未提供本次完整错误编号。015 的受控复现是已修复的独立缺陷，但不能断言它就是用户所见错误。如果实际看到 008，仍需按用户原始 source / target Handle ID 与 edge ID 继续核对；其他编号按 React Flow 原始消息定位。
 
-交互机制示意：[canvas-drag-measurement-diagnosis.html](../design/canvas-drag-measurement-diagnosis.html)。这是独立模拟，不读取数据、不依赖外部资源，不是修复实现。
+交互机制示意：[canvas-drag-measurement-diagnosis.html](../../design/canvas-drag-measurement-diagnosis.html)。这是独立模拟，不读取数据、不依赖外部资源，不是修复实现。
 
 ## 二、原因链路
 
@@ -89,6 +89,6 @@
 
 - 完整前端：17 个测试文件、107 项通过；typecheck、lint、token 检查通过。
 - Go：`GOPROXY=off GOSUMDB=off go test . ./internal/...` 全部通过；`go mod tidy -diff` 离线检查无差异。
-- 浏览器：本地 Edge 1410 × 858，内存 fixture；草稿/已连接提示词/topic 拖动，在 500ms ResizeObserver 延迟下均无 008/015，位置同步、连线持续可见，控制台错误 0，外网请求 0。截图见 [canvas-drag-015-fixed.png](evidence/canvas-drag-015-fixed.png)。
+- 浏览器：本地 Edge 1410 × 858，内存 fixture；草稿/已连接提示词/topic 拖动，在 500ms ResizeObserver 延迟下均无 008/015，位置同步、连线持续可见，控制台错误 0，外网请求 0。截图见 [canvas-drag-015-fixed.png](../../dev/evidence/canvas-drag-015-fixed.png)。
 - exe：`bin/audio-ui-fixed.exe --version` 输出 `AudioUI v0.2.0`；SHA-256 `42ee9e816600882a89dba54117448eecf4483c6f94ea7499bfe88c208732c854`；内嵌页面和 `/assets/index-GZrRhW-J.js` 与最新 `frontend/dist` 逐字节一致。旧 `bin/audio-ui.exe` 未覆盖。
 - 构建边界：Wails CLI 构建被本地自动安全策略拒绝；没有重试或绕过。因用户明确要求交付 exe，使用离线等效 Go production build 输出独立的新文件。Wails/WebView2 GUI 行为仍需用户评审/平台验收。

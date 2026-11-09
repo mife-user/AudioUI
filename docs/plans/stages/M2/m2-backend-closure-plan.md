@@ -2,18 +2,16 @@
 
 | 项 | 内容 |
 |---|---|
-| 状态 | 计划（M2-05、M2-06、M2-07 已验收；M2-06/M2-07 于 2026-11-03 由用户确认） |
+| 状态 | 已完成的历史实现方案；M2-05～07 均已验收 |
 | 最后更新 | 2026-11-03 |
 | 范围 | M2-05 Pending 后端、M2-06 MCP 只读与结构化回复、M2-07 运行管理 |
-| 关联 | [M2 逐任务执行手册](m2-workplan.md)、[路线图](roadmap.md)、[开发流程](process.md)、[验收标准](../acceptance.md) |
+| 关联 | [M2 逐任务执行手册](m2-workplan.md)、[路线图](../../../dev/roadmap.md)、[开发流程](../../../dev/process.md)、[验收标准](../../../acceptance.md) |
 
-> 本文用于保存用户确认的计划与决策；当前任务状态以 [M2 逐任务执行手册](m2-workplan.md) 为准。M2-05、M2-06、M2-07 已验收；M2-06 组件级实现曾作为 M2-07 前置继续推进。
->
-> 这里的待应用、本机 MCP 文件工具和本地运行是既有 M2 基线。用户提出的新目标见 [PRD 1.1](../prd.md#11-新目标需求草案未实现) 与 ADR-027/028；不反向改写本计划及既有验收证据。
+> 本文记录 M2-05～07 的原始实现方案及决策；三个子项均已验收。当前阶段和整体进度以 [M2 逐任务执行手册](m2-workplan.md) 与[路线图](../../../dev/roadmap.md)为准。
 
 ## 1. 背景与现状
 
-M2-00～07 已由用户验收；M2-08～13 未开始。用户选择把关联最紧密的 M2-05 待应用后端、M2-06 MCP 只读与结构化回复、M2-07 运行管理作为一组规划。M2-06 组件级实现作为 M2-07 前置继续推进；GUI/live CLI 与端到端验收仍按后续任务范围覆盖。本文件只保存计划，当前状态以 M2 执行手册为准，不升版本。
+这是 2026-11-03 规划时的阶段快照；当时 M2-08～13 尚未开始，后续进展以 M2 手册和路线图为准。本文保留 M2-05～07 的原始技术方案，不作为当前待办清单。
 
 现有基础：`internal/infra/persistence/{pending,artifacts,runs}.go` 已有存储；`internal/service/workflow` 已有图命令与运行路径锁；`internal/service/context/builder.go` 的 `Build`/`InputHashes` 已实现路径上下文与指纹；`internal/infra/agent/mcp/server.go` 仍是 M1 工具集；`internal/service/session` 和 `internal/app/agent.go` 仍使用 M1 会话。复用现有端口和组件，不重新实现它们。
 
@@ -72,7 +70,7 @@ M2-00～07 已由用户验收；M2-08～13 未开始。用户选择把关联最�
 ## 6. 文档、门禁与交付
 
 - 分任务同步权威文档并在对应阶段实现前记录技术方案：M2-05 更新 `docs/decisions.md` 的 ADR-022、`docs/architecture.md` 的存储/恢复、`docs/agent-protocol.md` 的 Schema 与限额；M2-06 更新 ADR-023、`docs/agent-protocol.md` 的作用域/错误码/分块协议及 `docs/acceptance.md`；M2-07 更新 ADR-021/024/026、架构、协议、验收、`CLAUDE.md` 及必要的 README。`docs/prd.md`、`docs/product.md` 等按受影响行为同步，不改已有需求而不留决策记录。
-- 每项更新 `docs/dev/m2-workplan.md` 对应任务卡、`docs/dev/roadmap.md` 的状态描述、`CHANGELOG.md` Unreleased，创建 `docs/dev/evidence/m2-05.md`、`m2-06.md`、`m2-07.md` 并在 `docs/README.md` 索引；仅将自检完成项记为“待验收”，用户确认后才记“已完成”。不得改变后续任务状态，也不把局部测试写成完整 AC 通过。
+- 每项更新 `docs/plans/stages/M2/m2-workplan.md` 对应任务卡、`docs/dev/roadmap.md` 的状态描述、`CHANGELOG.md` Unreleased，创建 `docs/dev/evidence/m2-05.md`、`m2-06.md`、`m2-07.md` 并在 `docs/README.md` 索引；仅将自检完成项记为“待验收”，用户确认后才记“已完成”。不得改变后续任务状态，也不把局部测试写成完整 AC 通过。
 - 每阶段执行工作手册列出的任务级门禁：`gofmt`、`go vet . ./internal/...`、`go test . ./internal/...`、绑定生成、前端 `typecheck/lint/check:tokens/test/build`、`wails3 build`，另跑上述专项测试；避免 `go test ./...`。检查 `git status`，不提交、不推送。
 - 当前工作区存在未提交及未跟踪的 M2-03/04 变更；实施前读取并保留，不覆盖或重置。涉及生成物/构建的命令先检查目标，必要时在隔离副本中运行并报告，避免覆盖现有数据、绑定、dist 或 exe。
 - 本计划不宣称已运行测试。阶段性交付包含具体命令、结果、失败与跳过项、AC 映射、证据路径及剩余风险，交用户逐项验收。

@@ -1,73 +1,47 @@
-# 文档索引
+# 文档导航
 
-> M2-11～13 已选择 RM-018 的本地脚本子范围；M2-11A 设计、M2-11B 工程格式/图领域模型与 M2-11C 发送快照均已验收；M2-11D 已验收（2026-11-07），M2-12A 已验收（2026-11-08），M2-12B 已于 2026-11-08 通过用户验收（真实浏览器实测未执行）；M2-13 已于 2026-11-08 通过用户验收，本地脚本闭环阶段完成。M2-00～10 旧模型验收事实保留；RM-019 云端与 RM-020 视频仍待评估。
+> **先看这页，再按任务进入相应文档。** M2-11～13 本地脚本闭环已通过用户验收；独立工作台交互优化批次已确认并进行中；M3 尚未开始，状态以[路线图](dev/roadmap.md)为准。
+>
+> - [当前计划与阶段计划总览](plans/README.md)
+> - [当前工作计划：画布、节点与 Agent 交互优化](plans/active/canvas-workbench-optimization-plan.md)
+> - [M2 阶段任务手册](plans/stages/M2/m2-workplan.md)
 
-| 文档 | 读者 | 状态 | 说明 |
-|---|---|---|---|
-| [product.md](product.md) | 产品 / 设计 / 开发 | 草案 | 产品总览：概念、流程、架构、数据模型 |
-| [prd.md](prd.md) | 产品 / 开发 | 草案 | 需求、目标、范围、规则、非功能 |
-| [architecture.md](architecture.md) | 开发 | 草案 | 技术方案、分层、数据流、存储 |
-| [frontend-design.md](frontend-design.md) | 前端 / 设计 | 草案 | 设计令牌、组件、交互状态、响应式、可访问性、验收 |
-| [design/style-directions.html](design/style-directions.html) | 设计 / 前端 | 原型 | 设计依据：主题、布局、交互 |
-| [design/m0-startup-shell.html](design/m0-startup-shell.html) | 设计 / 前端 | 原型 | M0 启动自检壳（临时） |
-| [design/m1-session-shell.html](design/m1-session-shell.html) | 设计 / 前端 | 原型 | M1 临时会话页与控制台（M2 已删除） |
-| [design/m2-workspace.html](design/m2-workspace.html) | 设计 / 前端 | 原型 | M2 工作台：画布、草稿节点、候选端口、运行分组、待应用、运行路径锁、同父换候选确认 |
-| [design/m2-09-canvas-demo.html](design/m2-09-canvas-demo.html) | 设计 / 前端 | 演示 | M2-09 节点画布、端口、草稿、改挂确认与视图控制本地演示 |
-| [design/m2-10a-topic-run-demo.html](design/m2-10a-topic-run-demo.html) | 设计 / 前端 | 演示 | M2-10A 选题参数保存、一次性运行状态与结构化错误本地演示 |
-| [design/m2-topic-closure-demo.html](design/m2-topic-closure-demo.html) | 设计 / 前端 | 演示 | 选题运行、待应用、候选分支及改挂的本地交互示例 |
-| [design/target-agent-flow-demo.html](design/target-agent-flow-demo.html) | 产品 / 设计 / 开发 | 历史目标演示 | 较早的目标方向草案，含云端/视频示意；不代表当前 M2-11～13 范围 |
-| [design/m2-11-13-local-flow-demo.html](design/m2-11-13-local-flow-demo.html) | 产品 / 设计 / 开发 | M2-11A 设计验收演示 | 本地候选→提示词→Agent→`script` 输出模拟交互；设计已验收，不是产品实现 |
-| [design/m2-12b-output-chain-demo.html](design/m2-12b-output-chain-demo.html) | 产品 / 设计 / 开发 | M2-12B 交互演示 | 已有脚本结果确认/冲突/丢弃及叶子链切换的静态模拟 |
-| [design/canvas-edge-008-diagnosis.html](design/canvas-edge-008-diagnosis.html) | 开发 / 测试 | 诊断示意 | React Flow 动态候选端口、测量缓存与错误 008 的时序说明 |
-| [design/canvas-drag-measurement-diagnosis.html](design/canvas-drag-measurement-diagnosis.html) | 开发 / 测试 | 诊断示意 | 拖动时节点测量状态丢失及修复思路的独立交互示意 |
-| [dev/process.md](dev/process.md) | 开发 / 产品 | 草案 | 阶段、工作分解、门禁、变更控制 |
-| [dev/roadmap.md](dev/roadmap.md) | 产品 / 开发 | 草案 | 需求优先级、批次、暂存需求池 |
-| [dev/m2-workplan.md](dev/m2-workplan.md) | 开发 | 草案 | M2 逐任务执行手册、开工协议、任务卡与状态 |
-| [dev/m2-target-closure-plan.md](dev/m2-target-closure-plan.md) | 开发 / 测试 | 草案 | M2-11～13 新节点模型与本地脚本闭环计划 |
-| [dev/m2-topic-closure-plan.md](dev/m2-topic-closure-plan.md) | 开发 / 测试 | 计划 | M2 工作台至选题闭环的分项实现、测试与验收计划 |
-| [dev/canvas-drag-rendering-fix-plan.md](dev/canvas-drag-rendering-fix-plan.md) | 开发 / 测试 | 草案 | 提示词节点拖动渲染错误的复现证据与修复计划 |
-| [dev/m2-backend-closure-plan.md](dev/m2-backend-closure-plan.md) | 开发 | 草案 | M2-05～07 后端闭环实现计划与已确认决策 |
-| [dev/evidence/m0.md](dev/evidence/m0.md) | 产品 / 测试 | 证据 | M0 自测与 GUI 冒烟记录 |
-| [dev/evidence/m1.md](dev/evidence/m1.md) | 产品 / 测试 | 证据 | M1 会话/权限/resume 冒烟记录 |
-| [dev/evidence/m2-03.md](dev/evidence/m2-03.md) | 产品 / 测试 | 证据 | M2-03 工作区与写作用域验收记录（用户已确认） |
-| [dev/evidence/m2-04.md](dev/evidence/m2-04.md) | 产品 / 测试 | 证据 | M2-04 上下文构建器验收记录（用户已确认通过） |
-| [dev/evidence/m2-05.md](dev/evidence/m2-05.md) | 产品 / 测试 | 证据 | M2-05 Pending 后端自检与验收记录（用户已确认通过） |
-| [dev/evidence/m2-06.md](dev/evidence/m2-06.md) | 产品 / 测试 | 证据 | M2-06 MCP 只读图、结构化 reply 与 artifact 分块自检及验收记录 |
-| [dev/evidence/m2-07.md](dev/evidence/m2-07.md) | 产品 / 测试 | 证据 | M2-07 运行管理与运行锁自检及验收记录 |
-| [dev/evidence/m2-09.md](dev/evidence/m2-09.md) | 产品 / 测试 | 证据 | M2-09 画布与节点连接实现自检、门禁结果、真实窗口验收和 AC 映射（已验收） |
-| [dev/evidence/m2-10a.md](dev/evidence/m2-10a.md) | 产品 / 测试 | 证据 | M2-10A 选题参数与一次性运行验收证据（已验收；M2-10B 已验收，M2-10C 已验收） |
-| [dev/evidence/canvas-edge-008.md](dev/evidence/canvas-edge-008.md) | 开发 / 测试 | 证据 | 候选端口动态测量与派生边竞态修复自检、测试和浏览器截图 |
-| [dev/evidence/canvas-drag-015-fix.md](dev/evidence/canvas-drag-015-fix.md) | 开发 / 测试 | 证据 | 节点拖动测量竞态修复、前端门禁、浏览器操作和 exe 资源核对 |
-| [dev/evidence/agent-mcp-startup-race.md](dev/evidence/agent-mcp-startup-race.md) | 开发 / 测试 | 证据 | SDK 版本探测触发重复启动并清理活动 MCP 配置的原因、修复与验证 |
-| [dev/evidence/m2-10b.md](dev/evidence/m2-10b.md) | 产品 / 测试 | 证据 | M2-10B 待应用与候选端口验收证据（已验收；浏览器实测留在 M2-10C） |
-| [dev/evidence/m2-10c.md](dev/evidence/m2-10c.md) | 产品 / 测试 | 证据 | M2-10C 页面验收已由用户确认；附件截图未归档到仓库 |
-| [dev/evidence/m2-11c.md](dev/evidence/m2-11c.md) | 产品 / 测试 | 证据 | M2-11C 发送快照、上下文与运行授权（用户已验收） |
-| [dev/evidence/m2-11d.md](dev/evidence/m2-11d.md) | 产品 / 测试 | 自检与验收证据 | M2-11D 受限 reply、原子结果事务与恢复自检；不代表 M2-13 完整验收 |
-| [dev/evidence/m2-12a.md](dev/evidence/m2-12a.md) | 产品 / 测试 | 自检与验收证据 | M2-12A 新模型工作台与 Agent 运行入口 |
-| [dev/evidence/m2-12b.md](dev/evidence/m2-12b.md) | 产品 / 测试 | 自检与验收证据 | M2-12B Script 确认、叶子链快捷栏与未覆盖的浏览器实测 |
-| [dev/evidence/m2.md](dev/evidence/m2.md) | 产品 / 测试 | M2-13 集成自检与验收状态 | 可控全链路、回归矩阵、自检边界与用户验收记录 |
-| [agent-protocol.md](agent-protocol.md) | 开发 | 草案 | MCP 工具、能力位、权限、会话 |
-| [acceptance.md](acceptance.md) | 产品 / 测试 | 草案 | 验收标准与发布门禁 |
-| [decisions.md](decisions.md) | 开发 | 草案 | 架构决策记录 |
-| [release/versioning.md](release/versioning.md) | 开发 / 发布 | 草案 | 版本号与一致性规范 |
-| [release/release-process.md](release/release-process.md) | 开发 / 发布 | 草案 | 发布流程与角色 |
-| [release/release-checklist.md](release/release-checklist.md) | 发布 | 草案 | 发布前/中/后检查项 |
-| [release/release-notes-template.md](release/release-notes-template.md) | 发布 | 草案 | 发布说明模板 |
+## 按用途查找
+
+| 你要查看 | 文档 |
+|---|---|
+| 当前阶段、优先级、暂缓项 | [开发路线图](dev/roadmap.md) |
+| M2 各任务状态与验收入口 | [M2 逐任务执行手册](plans/stages/M2/m2-workplan.md) |
+| 当前待评审或待补验收计划 | [计划导航](plans/README.md) |
+| 需求与范围 | [产品需求 PRD](prd.md)；[产品总览](product.md) |
+| 架构、技术决策、Agent 权限 | [架构](architecture.md)；[ADR 决策记录](decisions.md)；[Agent 协议](agent-protocol.md) |
+| 界面与交互规范 | [前端设计](frontend-design.md)；[设计方向原型](design/style-directions.html) |
+| 验收条件 | [验收标准](acceptance.md) |
+| 开发阶段与门禁 | [开发流程](dev/process.md) |
+| 发布与版本 | [发布规范](release/)；[CHANGELOG](../CHANGELOG.md) |
+
+## 阶段计划
+
+阶段计划统一放在 [`plans/stages/`](plans/README.md) 下。当前保留 M2 主手册及各子阶段的原始方案，状态以路线图和 M2 手册为准；已完成计划保留用于追溯，不代表仍待实施。
+
+## 设计原型与证据
+
+- M2 本地脚本流程：[交互演示](design/m2-11-13-local-flow-demo.html)（模拟数据，不连接 Agent）。
+- 画布整体优化：[交互原型](design/canvas-workbench-redesign-demo.html)（待评审方案，不代表产品已实现）。
+- 既有阶段自检与验收记录按编号存放在 [`dev/evidence/`](dev/evidence/m2.md)；M2-13 汇总见 [M2 集成证据](dev/evidence/m2.md)。
+- 其它历史原型、诊断示意按主题存放于 `design/`，历史验收截图与记录存放于 `dev/evidence/`。
 
 ## 阅读顺序
 
-1. 产品总览 → 理解概念与流程。
-2. PRD → 确认目标、边界与验收。
-3. 路线图 → 确认优先级、批次与暂缓项。
-4. 架构 + Agent 协议 → 开发依据。
-5. 开发流程 → 阶段、门禁与变更控制。
-6. 验收标准 → 测试与发布门禁。
-7. 发布规范 → 发版操作。
+1. [PRD](prd.md) 与 [路线图](dev/roadmap.md)：确认要做什么、当前做什么。
+2. [计划导航](plans/README.md)：选择当前计划或对应阶段任务手册。
+3. [架构](architecture.md)、[ADR](decisions.md)、[Agent 协议](agent-protocol.md)：确认技术与安全边界。
+4. [前端设计](frontend-design.md) 与 [验收标准](acceptance.md)：确认交互要求及通过条件。
+5. [开发流程](dev/process.md) 与[发布规范](release/)：确认门禁和交付流程。
 
-## 文档规则
+## 文档维护约定
 
-- 所有文档以仓库内版本为准，不另存个人副本。
-- 需求变更必须更新 PRD 的变更记录，并关联验收标准。
-- 开发中暂无法处理的变更写入 [dev/roadmap.md](dev/roadmap.md) 暂存池，不直接扩大当前批次。
-- 发版前检查 README、文档中的版本号、下载链接、命令示例是否同步。
-- 草案文档标注状态；定稿后改为「已评审」。
+- 路线图是需求优先级、批次与暂存项的唯一状态源；M2 子任务细节由 M2 手册维护。
+- 已完成的阶段计划保留历史决策和证据；当前工作以“计划导航”中的待处理计划为入口，避免在多个索引重复抄写状态。
+- 新需求或范围变更需同步 PRD、验收标准和路线图；架构/协议/界面变化按项目规则更新对应文档。
+- 草案须标注状态；只有用户评审后才标为「已评审」。

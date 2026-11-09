@@ -2,39 +2,18 @@
 
 本地运行的、以节点图编排的内容生产工作台。用户在一张无限画布上完成选题、提示词、Agent 生成、渲染、配音和导出，再把素材交给剪映成片。
 
-> **状态**：M1 已完成（v0.2.0）· M2-00～10 旧模型已验收；M2-11A 设计已验收；M2-11B 工程格式与图领域模型已验收（2026-11-06）；M2-11C 已验收（2026-11-07）；M2-11D 已验收（2026-11-07）；M2-12A 已于 2026-11-08 通过用户验收；M2-12B 已于 2026-11-08 通过用户验收（真实浏览器实测未执行）；M2-13 已于 2026-11-08 通过用户验收，本地脚本闭环完成。
-> **平台**：Windows 11 · 绿色版单 exe · 当前本地应用数据落在 exe 目录（Agent 自身凭据为例外，模型请求由 Agent 发出）。
->
-> **新目标范围已选定，设计已验收**：M2-11～13 仅纳入 RM-018 本地脚本子范围（候选节点、提示词/Agent 分离、受限 `reply` 输出与发送时上下文）。M2-11B 工程 v2 与图领域模型已验收；M2-11C 的运行快照、上下文、运行授权和本地文件边界已实现并验收；M2-11D 受限输出事务已于 2026-11-07 通过用户验收；M2-12A 新模型工作台已于 2026-11-08 通过用户验收；M2-12B 已于 2026-11-08 通过用户验收（真实浏览器交互未执行）。云端 Agent（RM-019）与视频输出/渲染（RM-020）仍待评估。详见 [PRD 1.1](docs/prd.md#11-新目标需求m2-本地脚本子范围已选定设计已验收完整闭环已验收)、[路线图](docs/dev/roadmap.md) 与 [M2 目标闭环计划](docs/dev/m2-target-closure-plan.md)。
+> **当前状态**：M0、M1 已验收，M2 已于 2026-11-08 通过用户整体验收；画布交互优化作为 M2 后、M3 前的独立工作批次进行中，M3 尚未开始。以[路线图](docs/dev/roadmap.md)为准。
+> **平台**：Windows 11 · 绿色版单 exe · 应用数据落在 exe 目录（Agent 自身凭据除外）。
+> **范围**：RM-018 本地脚本子范围已纳入并验收；RM-019 云端与 RM-020 视频仍待评估。
+
 
 ---
 
 ## 文档
 
-| 文档 | 说明 |
-|---|---|
-| [产品总览](docs/product.md) | 概念、用户流程、架构、数据模型、节点、DSL |
-| [PRD](docs/prd.md) | 背景、目标、范围、功能需求、业务规则、非功能需求 |
-| [架构设计](docs/architecture.md) | 技术栈、分层、数据流、存储、渲染、安全 |
-| [前端设计](docs/frontend-design.md) | 设计令牌、组件清单、交互状态、响应式、可访问性、验收 |
-| [设计依据（原型）](docs/design/style-directions.html) | 主题、布局、交互原型 |
-| [M0 启动自检壳](docs/design/m0-startup-shell.html) | M0 临时界面原型 |
-| [M1 会话页](docs/design/m1-session-shell.html) | M1 临时会话/控制台原型（M2 已删除） |
-| [M2 工作台](docs/design/m2-workspace.html) | M2 画布、草稿节点、运行分组原型 |
-| [M2 选题闭环演示](docs/design/m2-topic-closure-demo.html) | 工作台至选题分支的本地交互演示 |
-| [M2-11A 本地脚本流程演示](docs/design/m2-11-13-local-flow-demo.html) | 候选→提示词→Agent→script 输出的模拟交互；设计已验收，原型不连接 Agent |
-| [开发流程](docs/dev/process.md) | 阶段、工作分解、门禁、变更控制 |
-| [路线图](docs/dev/roadmap.md) | 需求优先级、里程碑批次、暂存需求池 |
-| [M2 逐任务执行手册](docs/dev/m2-workplan.md) | M2 开工协议、任务卡、DoR/DoD 与状态 |
-| [M2 目标闭环计划](docs/dev/m2-target-closure-plan.md) | M2-11～13 本地脚本闭环设计、任务与阶段门禁 |
-| [M2 选题闭环计划](docs/dev/m2-topic-closure-plan.md) | 工作台、画布、选题与待应用的逐项实现和验收计划 |
-| [Agent 协议](docs/agent-protocol.md) | MCP 工具、能力位、权限、会话、分叉与删除 |
-| [验收标准](docs/acceptance.md) | Given-When-Then、测试矩阵、发布门禁 |
-| [决策记录](docs/decisions.md) | ADR 列表 |
-| [发布规范](docs/release/) | 版本管理、发布流程、检查清单、发布说明模板 |
-| [CHANGELOG](CHANGELOG.md) | 版本变更 |
+文档入口和分类索引统一在 [docs/README.md](docs/README.md)。查看当前进行中的计划、M2 阶段手册或已完成阶段计划，请从[计划导航](docs/plans/README.md)进入。
 
-推荐阅读顺序：产品总览 → PRD → 路线图 → 架构 → Agent 协议 → 开发流程 → 验收 → 发布规范。
+常用入口：[当前工作计划](docs/plans/active/canvas-workbench-optimization-plan.md) · [M2 阶段任务手册](docs/plans/stages/M2/m2-workplan.md) · [路线图](docs/dev/roadmap.md) · [开发流程](docs/dev/process.md)。
 
 使用 Claude Code 开发时，先读 [CLAUDE.md](CLAUDE.md)。
 
@@ -72,7 +51,7 @@ AudioUI/
 │   └── app/                # 生命周期、窗口、单实例、自检、Agent 组装
 ├── frontend/               # React + Vite
 ├── runtime/                # 共享只读运行时
-├── docs/                   # 设计文档
+├── docs/                   # 产品、设计、阶段计划与当前计划
 └── data/                   # 运行时生成（gitignore）
 ```
 
@@ -115,7 +94,7 @@ M2 起每次节点执行启动一次性运行：App 从祖先链构建上下文�
 
 ## 版本与发布
 
-- 当前版本：**0.2.0（M1 已完成；M2 进行中，收口后升 0.3.0）**
+- 当前版本：**0.2.0（M2 已通过用户验收；0.3.0 版本与 S6 收口待另行确认）**
 - 版本规范：[docs/release/versioning.md](docs/release/versioning.md)
 - 发布流程：[docs/release/release-process.md](docs/release/release-process.md)
 - 发布检查清单：[docs/release/release-checklist.md](docs/release/release-checklist.md)
