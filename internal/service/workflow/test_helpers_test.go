@@ -103,41 +103,43 @@ func baseProject() entity.Project {
 		Nodes: []entity.Node{
 			{
 				ID: "n_topic", Type: valueobject.NodeTypeTopic, Title: "选题",
-				Position: entity.Position{X: 0, Y: 0}, Params: entity.NodeParams{Idea: "想法", CandidateCount: 3},
+				Position: entity.Position{X: 0, Y: 0}, Size: entity.DefaultNodeSize(valueobject.NodeTypeTopic), Params: entity.NodeParams{Idea: "想法", CandidateCount: 3},
 				Rounds: []entity.Round{{N: 1, Kind: valueobject.OutputKindTopics, ArtifactID: artifactID}},
 				Locked: true,
 			},
 			{
 				ID: "n_candidate", Type: valueobject.NodeTypeCandidate, Title: "候选一",
 				Parent: "n_topic", CandidateSource: &entity.CandidateSource{TopicNodeID: "n_topic", ArtifactID: artifactID, Index: 0},
+				Size:   entity.DefaultNodeSize(valueobject.NodeTypeCandidate),
 				Rounds: []entity.Round{},
 			},
 			{
 				ID: "n_a", Type: valueobject.NodeTypePrompt, Title: "A",
-				Parent: "n_candidate", Position: entity.Position{X: 10, Y: 10},
+				Parent: "n_candidate", Position: entity.Position{X: 10, Y: 10}, Size: entity.DefaultNodeSize(valueobject.NodeTypePrompt),
 				Params: entity.NodeParams{Instruction: "A"}, Rounds: []entity.Round{},
 			},
 			{
 				ID: "n_b", Type: valueobject.NodeTypeAgent, Title: "B",
-				Parent: "n_a", Position: entity.Position{X: 20, Y: 20},
+				Parent: "n_a", Position: entity.Position{X: 20, Y: 20}, Size: entity.DefaultNodeSize(valueobject.NodeTypeAgent),
 				Rounds: []entity.Round{},
 			},
 			{
 				ID: "n_candidate2", Type: valueobject.NodeTypeCandidate, Title: "候选二",
 				Parent: "n_topic", CandidateSource: &entity.CandidateSource{TopicNodeID: "n_topic", ArtifactID: artifactID, Index: 1},
+				Size:   entity.DefaultNodeSize(valueobject.NodeTypeCandidate),
 				Rounds: []entity.Round{},
 			},
 			{
 				ID: "n_c", Type: valueobject.NodeTypePrompt, Title: "C",
-				Parent: "n_candidate2", Position: entity.Position{X: 30, Y: 10},
+				Parent: "n_candidate2", Position: entity.Position{X: 30, Y: 10}, Size: entity.DefaultNodeSize(valueobject.NodeTypePrompt),
 				Params: entity.NodeParams{Instruction: "C"}, Rounds: []entity.Round{},
 			},
 			{
 				ID: "n_draft", Type: valueobject.NodeTypePrompt, Title: "草稿",
-				Position: entity.Position{X: 40, Y: 40}, Params: entity.NodeParams{Instruction: "D"},
+				Position: entity.Position{X: 40, Y: 40}, Size: entity.DefaultNodeSize(valueobject.NodeTypePrompt), Params: entity.NodeParams{Instruction: "D"},
 				Rounds: []entity.Round{},
 			},
-			{ID: "n_agent_draft", Type: valueobject.NodeTypeAgent, Title: "Agent 草稿", Rounds: []entity.Round{}},
+			{ID: "n_agent_draft", Type: valueobject.NodeTypeAgent, Title: "Agent 草稿", Size: entity.DefaultNodeSize(valueobject.NodeTypeAgent), Rounds: []entity.Round{}},
 		},
 	}
 }
@@ -147,7 +149,7 @@ func projectWithSecondTree() entity.Project {
 	artifactID := "sha256:" + strings.Repeat("1", 64)
 	project.Nodes = append(project.Nodes,
 		entity.Node{
-			ID: "n_topic2", Type: valueobject.NodeTypeTopic, Title: "选题 2",
+			ID: "n_topic2", Type: valueobject.NodeTypeTopic, Title: "选题 2", Size: entity.DefaultNodeSize(valueobject.NodeTypeTopic),
 			Params: entity.NodeParams{Idea: "想法 2", CandidateCount: 3},
 			Rounds: []entity.Round{{N: 1, Kind: valueobject.OutputKindTopics, ArtifactID: artifactID}},
 			Locked: true,
@@ -159,7 +161,7 @@ func projectWithSecondTree() entity.Project {
 		},
 		entity.Node{
 			ID: "n_y", Type: valueobject.NodeTypePrompt, Title: "Y",
-			Parent: "n_x", Params: entity.NodeParams{Instruction: "Y"}, Rounds: []entity.Round{},
+			Parent: "n_x", Size: entity.DefaultNodeSize(valueobject.NodeTypePrompt), Params: entity.NodeParams{Instruction: "Y"}, Rounds: []entity.Round{},
 		},
 	)
 	return project

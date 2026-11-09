@@ -148,7 +148,7 @@ Agent 前提：只使用原生 `claude.exe`（拒绝 `.cmd`），默认复用现
 - topic 的有效 `topics` reply 复用现有 `ValidateStructuredPayload`，应用原子保存 artifact 并生成 candidate 节点；来源身份固定为 artifactId + 0 基索引。topic 生成候选后锁定内容/执行。
 - prompt 只保存任务与约束，不独立运行；Agent 是本地运行入口，可在无活动运行锁时再次执行。每次发送冻结路径、候选来源、提示词、输出绑定及 `script@1` 契约；改挂后新运行重建快照，旧运行/结果来源不随图变化。
 - Agent 仅能提交受限 `reply`：无指定输出时合法 script 结果自动建节点；指定空 Script 自动接收；已有版本则建立绑定基准版本的待确认结果，确认后追加、不覆盖旧 artifact，取消不改旧版本。错误/过期/越权 reply 不改图；提交成功不自动运行下游。
-- 新工程 `project.json` v2；v1 明确 `UNSUPPORTED_VERSION`，不静默迁移，不能阻塞有效工程列表/新建/打开。M1 导入直接创建 v2。用户指定的 `bin` 旧工程仅按 M2-11B 执行一次性手工清理，不写应用启动删除逻辑；`bin` 外旧工程不删除、不自动迁移。
+- 新工程 `project.json` v3；v1/v2 明确 `UNSUPPORTED_VERSION`，不静默迁移，不能阻塞有效工程列表/新建/打开。M1 导入直接创建 v3。用户指定的 `bin` 旧工程仅按 M2-11B 执行一次性手工清理，不写应用启动删除逻辑；`bin` 外旧工程不删除、不自动迁移。
 - M2-11B 阶段限制：工程 v2 与 Go 图领域校验已实现，并于 2026-11-06 通过用户验收；当时仅开放 topic 运行入口。M2-11C 已于 2026-11-07 验收发送快照、上下文与运行授权；M2-11D 已实现 Candidate 原子生成和受限 Script reply 事务，并于 2026-11-07 通过用户验收；新模型工作台留给 M2-12A。当前 Prompt 不可独立运行，Agent 可作为本地入口运行；不得将此描述为完整脚本闭环。
 - 旧 `ParentCandidate` 字段仅为现有 RPC/UI DTO 过渡保留；v2 图校验拒绝非空值，v2 工程序列化省略该字段。`Graph.ValidateForest()` 仅供尚未迁移的旧上下文构建器和旧候选只读查询使用；工程持久化与图写命令必须使用严格 `Graph.Validate()`。
 - M2-11～13 任务状态见 [M2 阶段手册](docs/plans/stages/M2/m2-workplan.md)；M2 整体状态以路线图为准。

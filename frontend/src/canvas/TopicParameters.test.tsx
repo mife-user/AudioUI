@@ -12,6 +12,7 @@ function makeNode(overrides: Partial<Node> = {}): Node {
     type: 'topic' as Node['type'],
     title: '选题标题',
     position: { x: 0, y: 0 },
+    size: { width: 280, height: 230 },
     params: { idea: '初始想法', direction: '人物观察', candidateCount: 3 },
     rounds: [],
     locked: false,

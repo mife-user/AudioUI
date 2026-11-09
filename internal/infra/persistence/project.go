@@ -294,6 +294,9 @@ func validateProject(project entity.Project) error {
 		if strings.TrimSpace(node.Title) == "" {
 			return fmt.Errorf("%w: node %s title is empty", ErrInvalidProject, node.ID)
 		}
+		if !node.Size.Valid() {
+			return fmt.Errorf("%w: node %s size is invalid", ErrInvalidProject, node.ID)
+		}
 		if utf8.RuneCountInString(node.Title) > valueobject.MaxNodeTitleLength {
 			return fmt.Errorf("%w: node %s title is too long", ErrInvalidProject, node.ID)
 		}

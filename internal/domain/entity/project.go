@@ -1,6 +1,46 @@
 package entity
 
-import "audio-ui/internal/domain/valueobject"
+import (
+	"math"
+
+	"audio-ui/internal/domain/valueobject"
+)
+
+const (
+	MinNodeWidth  = 200
+	MinNodeHeight = 140
+	MaxNodeWidth  = 1200
+	MaxNodeHeight = 900
+)
+
+type NodeSize struct {
+	Width  float64 `json:"width"`
+	Height float64 `json:"height"`
+}
+
+func (s NodeSize) Valid() bool {
+	return !math.IsNaN(s.Width) && !math.IsInf(s.Width, 0) &&
+		!math.IsNaN(s.Height) && !math.IsInf(s.Height, 0) &&
+		s.Width >= MinNodeWidth && s.Width <= MaxNodeWidth &&
+		s.Height >= MinNodeHeight && s.Height <= MaxNodeHeight
+}
+
+func DefaultNodeSize(nodeType valueobject.NodeType) NodeSize {
+	switch nodeType {
+	case valueobject.NodeTypeTopic:
+		return NodeSize{Width: 280, Height: 250}
+	case valueobject.NodeTypeCandidate:
+		return NodeSize{Width: 235, Height: 160}
+	case valueobject.NodeTypePrompt:
+		return NodeSize{Width: 280, Height: 230}
+	case valueobject.NodeTypeAgent:
+		return NodeSize{Width: 235, Height: 165}
+	case valueobject.NodeTypeScript:
+		return NodeSize{Width: 270, Height: 205}
+	default:
+		return NodeSize{}
+	}
+}
 
 // Position is the persisted canvas position of a node.
 type Position struct {
@@ -58,6 +98,7 @@ type Node struct {
 	CandidateSource *CandidateSource     `json:"candidateSource,omitempty"`
 	ScriptVersions  []ScriptVersion      `json:"scriptVersions,omitempty"`
 	Position        Position             `json:"position"`
+	Size            NodeSize             `json:"size"`
 	Params          NodeParams           `json:"params"`
 	Rounds          []Round              `json:"rounds"`
 	Locked          bool                 `json:"locked"`

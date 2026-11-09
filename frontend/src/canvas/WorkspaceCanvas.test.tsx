@@ -96,6 +96,14 @@ vi.mock('@xyflow/react', async () => {
           if (node) props.onNodesChange([{ id: node.id, type: 'position', position: { x: 420, y: 160 }, dragging: false }])
         },
       }, 'simulate-drag'),
+      React.createElement('button', {
+        type: 'button',
+        onClick: () => props.onNodesChange([{ id: 'n_prompt', type: 'dimensions', dimensions: { width: 340, height: 280 }, resizing: true }]),
+      }, 'simulate-resize-start'),
+      React.createElement('button', {
+        type: 'button',
+        onClick: () => props.onNodesChange([{ id: 'n_prompt', type: 'dimensions', dimensions: { width: 340, height: 280 }, resizing: false }]),
+      }, 'simulate-resize-end'),
       props.children,
     )
   }
@@ -126,6 +134,7 @@ function makeNode(id: string, type: string, parent = '', overrides: Partial<Node
     title: id,
     parent,
     position: { x: 20, y: 40 },
+    size: { width: 280, height: 230 },
     params: {},
     rounds: [],
     locked: false,
@@ -165,6 +174,7 @@ function makeAPI(): GraphAPI {
     addNode: vi.fn().mockResolvedValue({ projectId: 'p_test', projectRevision: 3, nodeId: 'n_created' }),
     connect: vi.fn().mockResolvedValue({ projectId: 'p_test', projectRevision: 3, nodeId: 'n_prompt' }),
     moveNode: vi.fn().mockResolvedValue({ projectId: 'p_test', projectRevision: 3, nodeId: 'n_prompt' }),
+    setNodeLayout: vi.fn().mockResolvedValue({ projectId: 'p_test', projectRevision: 3, nodeId: 'n_prompt' }),
     selectNode: vi.fn().mockResolvedValue({ projectId: 'p_test', projectRevision: 3, nodeId: 'n_prompt' }),
     updateNodeParams: vi.fn().mockResolvedValue({ projectId: 'p_test', projectRevision: 3, nodeId: 'n_prompt' }),
     getTopicCandidates: vi.fn().mockResolvedValue([]),
@@ -175,6 +185,17 @@ const mutationReceipt = { projectId: 'p_test', projectRevision: 3, nodeId: 'n_pr
 
 describe('WorkspaceCanvas', () => {
   afterEach(() => vi.useRealTimers())
+
+  it('persists the final size and position together only after resizing ends', async () => {
+    const api = makeAPI()
+    render(<WorkspaceCanvas snapshot={makeSnapshot()} onSelectNode={vi.fn().mockResolvedValue(undefined)} api={api} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'simulate-resize-start' }))
+    expect(api.setNodeLayout).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'simulate-resize-end' }))
+    await waitFor(() => expect(api.setNodeLayout).toHaveBeenCalledOnce())
+    expect(api.setNodeLayout).toHaveBeenCalledWith('n_prompt', 20, 40, 340, 280, 'p_test')
+  })
 
   it('asks before replacing a parent and leaves snapshot edges untouched until the backend succeeds', async () => {
     const api = makeAPI()

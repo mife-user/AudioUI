@@ -218,7 +218,7 @@ func (g *Graph) IsAncestor(ancestor, node string) bool {
 	return false
 }
 
-// Validate checks the version 2 node connection and provenance rules.
+// Validate checks typed node connection and provenance rules.
 func (g *Graph) Validate() error {
 	if err := g.ValidateForest(); err != nil {
 		return err

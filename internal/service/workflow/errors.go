@@ -23,6 +23,7 @@ var (
 	ErrUnknownNodeType          = errors.New("UNKNOWN_NODE_TYPE")
 	ErrWorkspaceMoveFailed      = errors.New("WORKSPACE_MOVE_FAILED")
 	ErrInvalidPosition          = errors.New("INVALID_POSITION")
+	ErrInvalidNodeSize          = errors.New("INVALID_NODE_SIZE")
 	ErrInvalidInput             = errors.New("INVALID_INPUT")
 	ErrPendingNotFound          = port.ErrPendingNotFound
 	ErrPendingAlreadyApplied    = errors.New("PENDING_ALREADY_APPLIED")

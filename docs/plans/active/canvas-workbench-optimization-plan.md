@@ -1,6 +1,6 @@
 # 画布、节点与 Agent 交互整体优化计划
 
-> **状态：U0 范围与文档决策已于 2026-11-08 确认；U1 代码、自动化与真实 Wails/WebView2 页面自检完成，待用户验收；Windows 原生 IME 与真实 Agent 未测；U2～U9 尚未实施。**
+> **状态：U0 范围与文档决策已于 2026-11-08 确认；U1 代码、自动化与真实 Wails/WebView2 页面自检完成，待用户验收；Windows 原生 IME 与真实 Agent 未测；U2 的 Go、前端自动化、类型检查、lint、令牌检查、前端构建和 Wails 构建均通过，真实页面布局交互仍待验证；U3～U9 尚未实施。**
 >
 > **范围**：在已验收的 M2 本地 `script` 闭环基础上，优化卡片尺寸、输入、悬浮运行面板、节点确认、链路与新建交互，同时核对指定会话的当前阶段需求。
 >
@@ -169,7 +169,9 @@
 
 ### U2：持久化卡片几何与兼容
 
-- **存储**：在当前工程节点上持久化必需的 `size: {width, height}`，新建各类型节点时赋予对应默认尺寸。几何位置继续使用现有 `position`，不另建第二套坐标真相。开发期既有工程可能因缺少字段而无法载入，不提供兼容回退。
+- **状态**：domain 类型、工程校验、默认尺寸、AddNode/自动生成节点/M1 导入、原子布局命令与 Handler 已实现；Go 全量测试与 vet、前端 20 个测试文件 / 149 项、typecheck、lint、令牌检查、前端生产构建及 Wails 构建均通过。Wails 构建自动重新生成绑定；生产构建有单个 JS chunk 超过 500 kB 的提示，npm audit 报告 7 个 moderate 漏洞。Vite 页面可在本地 Edge 加载，但浏览器没有 Wails 后端且仓库无安全页面 fixture，工作台快照读取失败，真实布局交互尚未验证；任务保持未完成。
+
+- **存储**：在当前工程节点上持久化必需的 `size: {width, height}`，新建各类型节点时赋予对应默认尺寸。当前开发期 `project.json` 版本升为 v3；v1/v2 明确不兼容、不迁移。几何位置继续使用现有 `position`，不另建第二套坐标真相。开发期既有工程可能因缺少字段而无法载入，不提供兼容回退。
 - **原子命令**：新增或扩展 Workflow 布局命令，一次传入 `projectId/nodeId/x/y/width/height`，在同一工程保存事务中写 `position + size`；无变化可幂等返回。推荐沿用现有 `GraphMutationReceipt` 和单调 revision。
 - **原因**：左/上边缩放同时改变坐标和尺寸；拆成 `MoveNode` 与单独写尺寸会在失败/重启后留下半个几何变更。不得仅把尺寸写 WebView 本机缓存，导致工程复制或重开后丢失。
 - **涉及**：`internal/domain/entity/project.go`（含 Clone）、`internal/service/workflow/service.go` / 校验与测试、`internal/handler/workflow.go`、`internal/infra/persistence/project*.go` 测试、Wails 生成绑定、`frontend/src/canvas/graphApi.ts`、`flowModel.ts`、`nodeState.ts`、`WorkspaceCanvas.tsx`。

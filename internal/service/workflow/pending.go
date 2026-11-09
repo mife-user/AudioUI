@@ -192,6 +192,7 @@ func (s *Service) SubmitRunReply(ctx context.Context, scope port.RunScope, kind 
 					Parent:          topicID,
 					CandidateSource: &entity.CandidateSource{TopicNodeID: topicID, ArtifactID: pending.ArtifactID, Index: index},
 					Position:        entity.Position{X: target.Position.X + 420, Y: target.Position.Y + float64(index)*160},
+					Size:            entity.DefaultNodeSize(valueobject.NodeTypeCandidate),
 					Rounds:          []entity.Round{},
 				}
 			}
@@ -217,6 +218,7 @@ func (s *Service) SubmitRunReply(ctx context.Context, scope port.RunScope, kind 
 				project.Nodes = append(project.Nodes, entity.Node{
 					ID: id, Type: valueobject.NodeTypeScript, Title: generatedNodeTitle(title, "新脚本"),
 					Parent: target.ID, Position: entity.Position{X: target.Position.X + 420, Y: target.Position.Y},
+					Size:           entity.DefaultNodeSize(valueobject.NodeTypeScript),
 					ScriptVersions: []entity.ScriptVersion{}, Rounds: []entity.Round{},
 				})
 				output = &project.Nodes[len(project.Nodes)-1]

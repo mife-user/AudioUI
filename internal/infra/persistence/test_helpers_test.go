@@ -41,6 +41,7 @@ func sampleProject(id string) entity.Project {
 			Type:     valueobject.NodeTypeTopic,
 			Title:    "选题",
 			Position: entity.Position{X: 10, Y: 20},
+			Size:     entity.DefaultNodeSize(valueobject.NodeTypeTopic),
 			Params:   entity.NodeParams{Idea: "想法", CandidateCount: 3},
 			Rounds:   []entity.Round{},
 		}},

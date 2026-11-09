@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"math"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -27,6 +28,9 @@ func TestAddNodeTopicAndDraft(t *testing.T) {
 	if added.Type != valueobject.NodeTypeTopic || added.Title != "新选题" || added.Parent != "" || added.ParentCandidate != nil {
 		t.Fatalf("added topic = %+v", added)
 	}
+	if added.Size != entity.DefaultNodeSize(valueobject.NodeTypeTopic) {
+		t.Fatalf("added topic size = %+v", added.Size)
+	}
 	if err := valueobject.ValidateID(added.ID); err != nil {
 		t.Fatalf("generated id: %v", err)
 	}
@@ -43,6 +47,9 @@ func TestAddNodeTopicAndDraft(t *testing.T) {
 	draft := project.Nodes[len(project.Nodes)-1]
 	if draft.Type != valueobject.NodeTypePrompt || draft.Title != "新提示词" || draft.Parent != "" || draft.ParentCandidate != nil {
 		t.Fatalf("draft = %+v", draft)
+	}
+	if draft.Size != entity.DefaultNodeSize(valueobject.NodeTypePrompt) {
+		t.Fatalf("draft size = %+v", draft.Size)
 	}
 }
 
@@ -91,6 +98,9 @@ func TestGraphCommandsRejectStaleProjectScope(t *testing.T) {
 	}
 	if _, err := h.service.MoveNode(context.Background(), "n_a", 4, 5, wrongProjectID); !errors.Is(err, ErrProjectChanged) {
 		t.Fatalf("MoveNode error = %v, want PROJECT_CHANGED", err)
+	}
+	if _, err := h.service.SetNodeLayout(context.Background(), "n_a", 4, 5, 300, 200, wrongProjectID); !errors.Is(err, ErrProjectChanged) {
+		t.Fatalf("SetNodeLayout error = %v, want PROJECT_CHANGED", err)
 	}
 	if _, err := h.service.SelectNode(context.Background(), "n_a", wrongProjectID); !errors.Is(err, ErrProjectChanged) {
 		t.Fatalf("SelectNode error = %v, want PROJECT_CHANGED", err)
@@ -373,6 +383,73 @@ func TestMoveNode(t *testing.T) {
 	}
 	if _, err := h.service.MoveNode(context.Background(), "n_a", 13, 14); err != nil {
 		t.Fatalf("moving a locked node position should be allowed: %v", err)
+	}
+}
+
+func TestSetNodeLayout(t *testing.T) {
+	h := newHarness(t, baseProject())
+	before := h.node(t, "n_a").Clone()
+	project, err := h.service.SetNodeLayout(context.Background(), "n_a", 41, 42, 340, 260, "p_test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated := h.node(t, "n_a")
+	if project.Revision != 2 || updated.Position != (entity.Position{X: 41, Y: 42}) || updated.Size != (entity.NodeSize{Width: 340, Height: 260}) {
+		t.Fatalf("layout = %+v revision=%d", updated, project.Revision)
+	}
+	if updated.Type != before.Type || updated.Parent != before.Parent || updated.Title != before.Title || updated.Params != before.Params ||
+		!reflect.DeepEqual(updated.Rounds, before.Rounds) || updated.Locked != before.Locked || updated.Stale != before.Stale {
+		t.Fatalf("layout change mutated node content: before=%+v after=%+v", before, updated)
+	}
+	if h.session.saveCount != 1 || len(*h.changes) != 1 {
+		t.Fatalf("layout was not committed once: saves=%d changes=%d", h.session.saveCount, len(*h.changes))
+	}
+
+	beforeSaves := h.session.saveCount
+	project, err = h.service.SetNodeLayout(context.Background(), "n_a", 41, 42, 340, 260, "p_test")
+	if err != nil || project.Revision != 2 || h.session.saveCount != beforeSaves {
+		t.Fatalf("unchanged layout was not idempotent: err=%v revision=%d saves=%d", err, project.Revision, h.session.saveCount)
+	}
+
+	invalidSizes := []entity.NodeSize{
+		{Width: math.NaN(), Height: 200},
+		{Width: 200, Height: math.Inf(1)},
+		{Width: entity.MinNodeWidth - 1, Height: entity.MinNodeHeight},
+		{Width: entity.MaxNodeWidth + 1, Height: entity.MaxNodeHeight},
+		{Width: entity.MinNodeWidth, Height: entity.MinNodeHeight - 1},
+		{Width: entity.MaxNodeWidth, Height: entity.MaxNodeHeight + 1},
+	}
+	for _, size := range invalidSizes {
+		if _, err := h.service.SetNodeLayout(context.Background(), "n_a", 1, 2, size.Width, size.Height, "p_test"); !errors.Is(err, ErrInvalidNodeSize) {
+			t.Fatalf("size %+v error = %v, want INVALID_NODE_SIZE", size, err)
+		}
+	}
+	if _, err := h.service.SetNodeLayout(context.Background(), "n_a", math.NaN(), 2, 300, 200, "p_test"); !errors.Is(err, ErrInvalidPosition) {
+		t.Fatalf("invalid position error = %v, want INVALID_POSITION", err)
+	}
+	if _, err := h.service.SetNodeLayout(context.Background(), "n_missing", 1, 2, 300, 200, "p_test"); !errors.Is(err, ErrNodeNotFound) {
+		t.Fatalf("missing node error = %v, want NODE_NOT_FOUND", err)
+	}
+	if h.session.saveCount != beforeSaves {
+		t.Fatalf("invalid layouts were persisted: saves=%d", h.session.saveCount)
+	}
+
+	if err := h.service.AcquireRunLock(context.Background(), "r_run", "n_topic", "n_a", []string{"n_topic", "n_candidate", "n_a"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.service.SetNodeLayout(context.Background(), "n_a", 45, 46, 350, 270, "p_test"); err != nil {
+		t.Fatalf("layout change under run lock should be allowed: %v", err)
+	}
+
+	failed := newHarness(t, baseProject())
+	beforeFailure := failed.node(t, "n_a").Clone()
+	failed.session.saveErr = errors.New("disk write failed")
+	if _, err := failed.service.SetNodeLayout(context.Background(), "n_a", 5, 6, 360, 280, "p_test"); !errors.Is(err, failed.session.saveErr) {
+		t.Fatalf("write error = %v, want %v", err, failed.session.saveErr)
+	}
+	if failed.node(t, "n_a").Position != beforeFailure.Position || failed.node(t, "n_a").Size != beforeFailure.Size ||
+		failed.session.project.Revision != 1 || len(*failed.changes) != 0 {
+		t.Fatalf("failed layout left a partial mutation: node=%+v changes=%+v", failed.node(t, "n_a"), *failed.changes)
 	}
 }
 

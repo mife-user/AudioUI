@@ -92,6 +92,18 @@ func TestWorkflowHandlerAddMoveUpdateSelect(t *testing.T) {
 	if promptReceipt.ProjectID != topicReceipt.ProjectID || promptReceipt.ProjectRevision <= topicReceipt.ProjectRevision {
 		t.Fatalf("prompt receipt = %+v, topic receipt = %+v", promptReceipt, topicReceipt)
 	}
+	view, err := h.service.WorkspaceView(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, node := range view.Project.Nodes {
+		if node.ID == topicReceipt.NodeID && node.Size != entity.DefaultNodeSize(valueobject.NodeTypeTopic) {
+			t.Fatalf("topic size = %+v", node.Size)
+		}
+		if node.ID == promptID && node.Size != entity.DefaultNodeSize(valueobject.NodeTypePrompt) {
+			t.Fatalf("prompt size = %+v", node.Size)
+		}
+	}
 
 	selected, err := h.SelectNode(promptID, topicReceipt.ProjectID)
 	if err != nil {
@@ -105,7 +117,7 @@ func TestWorkflowHandlerAddMoveUpdateSelect(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	view, err := h.service.WorkspaceView(context.Background())
+	view, err = h.service.WorkspaceView(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,6 +132,23 @@ func TestWorkflowHandlerAddMoveUpdateSelect(t *testing.T) {
 	}
 	if prompt.Position != (entity.Position{X: 8, Y: 9}) {
 		t.Fatalf("moved prompt = %+v", prompt)
+	}
+
+	layout, err := h.SetNodeLayout(promptID, 10, 11, 340, 260, topicReceipt.ProjectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	view, err = h.service.WorkspaceView(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, node := range view.Project.Nodes {
+		if node.ID == promptID && (node.Position != (entity.Position{X: 10, Y: 11}) || node.Size != (entity.NodeSize{Width: 340, Height: 260})) {
+			t.Fatalf("layout result = %+v", node)
+		}
+	}
+	if layout.NodeID != promptID || layout.ProjectRevision <= moved.ProjectRevision {
+		t.Fatalf("layout receipt = %+v", layout)
 	}
 
 	updated, err := h.UpdateNodeParams(promptID, "新标题", entity.NodeParams{

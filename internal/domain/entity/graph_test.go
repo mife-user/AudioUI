@@ -25,6 +25,24 @@ func graphProject() Project {
 	}
 }
 
+func TestDefaultNodeSizes(t *testing.T) {
+	cases := []struct {
+		nodeType valueobject.NodeType
+		want     NodeSize
+	}{
+		{valueobject.NodeTypeTopic, NodeSize{Width: 280, Height: 250}},
+		{valueobject.NodeTypeCandidate, NodeSize{Width: 235, Height: 160}},
+		{valueobject.NodeTypePrompt, NodeSize{Width: 280, Height: 230}},
+		{valueobject.NodeTypeAgent, NodeSize{Width: 235, Height: 165}},
+		{valueobject.NodeTypeScript, NodeSize{Width: 270, Height: 205}},
+	}
+	for _, tc := range cases {
+		if got := DefaultNodeSize(tc.nodeType); got != tc.want || !got.Valid() {
+			t.Errorf("DefaultNodeSize(%s) = %+v, want %+v", tc.nodeType, got, tc.want)
+		}
+	}
+}
+
 func TestGraphValidate(t *testing.T) {
 	project := graphProject()
 	graph, err := NewGraph(&project)

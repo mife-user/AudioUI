@@ -130,7 +130,7 @@ func scopedMCPOptions(root string) Options {
 
 func TestSnapshotReplyRejectsKindOutsideOutputContract(t *testing.T) {
 	options := scopedMCPOptions(t.TempDir())
-	project := entity.Project{Version: 2, ID: "p_scoped", Nodes: []entity.Node{
+	project := entity.Project{Version: valueobject.ProjectFileVersion, ID: "p_scoped", Nodes: []entity.Node{
 		{ID: "n_topic", Type: valueobject.NodeTypeTopic, Rounds: []entity.Round{{N: 1, Kind: valueobject.OutputKindTopics, ArtifactID: "sha256:topics"}}},
 		{ID: "n_candidate", Type: valueobject.NodeTypeCandidate, Parent: "n_topic", CandidateSource: &entity.CandidateSource{TopicNodeID: "n_topic", ArtifactID: "sha256:topics", Index: 0}},
 		{ID: "n_prompt", Type: valueobject.NodeTypePrompt, Parent: "n_candidate"},

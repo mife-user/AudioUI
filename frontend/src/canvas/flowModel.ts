@@ -203,6 +203,7 @@ export function buildFlowModel(
       id: node.id,
       type: node.type as CanvasFlowNode['type'],
       position: { x: node.position.x, y: node.position.y },
+      style: { width: node.size.width, height: node.size.height },
       selected: node.id === snapshot.project?.activeNodeId,
       data: {
         node,

@@ -49,6 +49,10 @@ export function SelectNode(id: string, projectID: string): $CancellablePromise<e
     return $Call.ByID(2386440799, id, projectID);
 }
 
+export function SetNodeLayout(id: string, x: number, y: number, width: number, height: number, projectID: string): $CancellablePromise<entity$0.GraphMutationReceipt> {
+    return $Call.ByID(329130311, id, x, y, width, height, projectID);
+}
+
 export function UpdateNodeParams(id: string, title: string, params: entity$0.NodeParams, projectID: string): $CancellablePromise<entity$0.GraphMutationReceipt> {
     return $Call.ByID(4294809720, id, title, params, projectID);
 }

@@ -91,6 +91,24 @@ func (h *WorkflowService) MoveNode(id string, x, y float64, projectID string) (e
 	return mutationReceipt(projectValue, id), nil
 }
 
+func (h *WorkflowService) SetNodeLayout(id string, x, y, width, height float64, projectID string) (entity.GraphMutationReceipt, error) {
+	id = strings.TrimSpace(id)
+	projectID = strings.TrimSpace(projectID)
+	if id == "" {
+		return entity.GraphMutationReceipt{}, errors.New("节点 ID 不能为空")
+	}
+	if projectID == "" {
+		return entity.GraphMutationReceipt{}, errors.New("工程 ID 不能为空")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	projectValue, err := h.service.SetNodeLayout(ctx, id, x, y, width, height, projectID)
+	if err != nil {
+		return entity.GraphMutationReceipt{}, err
+	}
+	return mutationReceipt(projectValue, id), nil
+}
+
 func (h *WorkflowService) UpdateNodeParams(id, title string, params entity.NodeParams, projectID string) (entity.GraphMutationReceipt, error) {
 	id = strings.TrimSpace(id)
 	projectID = strings.TrimSpace(projectID)

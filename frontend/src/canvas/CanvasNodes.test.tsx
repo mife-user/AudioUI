@@ -33,6 +33,7 @@ function node(id: string, type: string, parent = '', overrides: Partial<Node> = 
     title: id,
     parent,
     position: { x: 0, y: 0 },
+    size: { width: 280, height: 230 },
     params: {},
     rounds: [],
     locked: false,

@@ -170,7 +170,7 @@ func snapshotFixture() (*Builder, *memoryArtifacts, entity.Project, entity.RunEx
 	scriptID := store.add(valueobject.OutputKindScript, `{"title":"祖先脚本版本","scenes":[{"narration":"不可变祖先正文","duration":12}]}`)
 	baselineID := store.add(valueobject.OutputKindScript, `{"title":"绑定脚本已有版本","scenes":[{"narration":"不应进入上下文","duration":15}]}`)
 	project := entity.Project{
-		Version: 2, ID: "p_test", Name: "快照工程", Revision: 9,
+		Version: valueobject.ProjectFileVersion, ID: "p_test", Name: "快照工程", Revision: 9,
 		Nodes: []entity.Node{
 			{ID: "n_topic", Type: valueobject.NodeTypeTopic, Title: "选题", Params: entity.NodeParams{Idea: "快照主题"}, Rounds: []entity.Round{{N: 1, Kind: valueobject.OutputKindTopics, ArtifactID: topicID}}},
 			{ID: "n_candidate", Type: valueobject.NodeTypeCandidate, Title: "候选乙", Parent: "n_topic", CandidateSource: &entity.CandidateSource{TopicNodeID: "n_topic", ArtifactID: topicID, Index: 1}},
@@ -420,6 +420,7 @@ func TestHashesIgnoreUnrelatedStateButTrackRelevantInputs(t *testing.T) {
 	f.input.Project.Revision++
 	f.input.Project.ActiveNodeID = "n_sibling"
 	fixtureNode(t, &f.input.Project, "n_mid").Position.X = 999
+	fixtureNode(t, &f.input.Project, "n_mid").Size = entity.NodeSize{Width: 400, Height: 300}
 	fixtureNode(t, &f.input.Project, "n_target").Title = "目标新标题"
 	fixtureNode(t, &f.input.Project, "n_target").Rounds = nil
 	fixtureNode(t, &f.input.Project, "n_sibling").Params.Instruction = "无关变化"

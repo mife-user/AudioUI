@@ -76,6 +76,7 @@ const scriptNode: Node = {
   title: '旁白脚本',
   parent: 'n_agent',
   position: { x: 0, y: 0 },
+  size: { width: 270, height: 205 },
   params: {},
   rounds: [],
   scriptVersions: [{ n: 1, artifactId: 'sha256:script-v1', runId: 'r_script_old' }],

@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"testing"
@@ -49,6 +51,28 @@ func TestProjectStoreCreateLoadList(t *testing.T) {
 	}
 }
 
+func TestProjectStorePersistsNodeLayout(t *testing.T) {
+	ctx := context.Background()
+	store := NewProjectStore(testLayout(t.TempDir()))
+	project := sampleProject("p_layout")
+	if err := store.Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	project.Nodes[0].Position = entity.Position{X: 37, Y: 48}
+	project.Nodes[0].Size = entity.NodeSize{Width: 345, Height: 275}
+	project.Revision++
+	if err := store.Save(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := store.Load(ctx, project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Nodes[0].Position != project.Nodes[0].Position || loaded.Nodes[0].Size != project.Nodes[0].Size {
+		t.Fatalf("loaded node layout = position %+v size %+v", loaded.Nodes[0].Position, loaded.Nodes[0].Size)
+	}
+}
+
 func TestProjectStoreNewProjectIsEmpty(t *testing.T) {
 	layout := testLayout(t.TempDir())
 	store := NewProjectStore(layout)
@@ -75,13 +99,15 @@ func TestProjectStorePersistedSchemaHasNoDerivedEdgesOrChains(t *testing.T) {
 	project.Nodes[0].Rounds = []entity.Round{{N: 1, Kind: valueobject.OutputKindTopics, ArtifactID: "sha256:x"}}
 	project.Nodes = append(project.Nodes,
 		entity.Node{
-			ID: "n_candidate", Type: valueobject.NodeTypeCandidate, Title: "候选",
+			ID: "n_candidate", Type: valueobject.NodeTypeCandidate, Title: "候选", Size: entity.DefaultNodeSize(valueobject.NodeTypeCandidate),
 			Parent: "n_root", CandidateSource: &entity.CandidateSource{TopicNodeID: "n_root", ArtifactID: "sha256:x", Index: 0},
 			Rounds: []entity.Round{},
 		},
 		entity.Node{
 			ID: "n_child", Type: valueobject.NodeTypePrompt, Title: "提示词",
-			Parent: "n_candidate", Params: entity.NodeParams{Instruction: "写脚本"}, Rounds: []entity.Round{},
+			Parent: "n_candidate", Params: entity.NodeParams{Instruction: "写脚本"},
+			Size:   entity.DefaultNodeSize(valueobject.NodeTypePrompt),
+			Rounds: []entity.Round{},
 		},
 	)
 	if err := store.Create(context.Background(), project); err != nil {
@@ -100,6 +126,14 @@ func TestProjectStorePersistedSchemaHasNoDerivedEdgesOrChains(t *testing.T) {
 			t.Fatalf("project.json contains derived field %q", forbidden)
 		}
 	}
+	persistedNodes, ok := raw["nodes"].([]any)
+	if !ok || len(persistedNodes) != 3 {
+		t.Fatalf("persisted nodes = %#v", raw["nodes"])
+	}
+	persistedSize, ok := persistedNodes[0].(map[string]any)["size"].(map[string]any)
+	if !ok || persistedSize["width"] != float64(entity.DefaultNodeSize(valueobject.NodeTypeTopic).Width) || persistedSize["height"] != float64(entity.DefaultNodeSize(valueobject.NodeTypeTopic).Height) {
+		t.Fatalf("persisted topic size = %#v", persistedNodes[0])
+	}
 	loaded, err := store.Load(context.Background(), "p_test")
 	if err != nil {
 		t.Fatal(err)
@@ -107,6 +141,46 @@ func TestProjectStorePersistedSchemaHasNoDerivedEdgesOrChains(t *testing.T) {
 	child := loaded.Nodes[2]
 	if child.Parent != "n_candidate" || child.ParentCandidate != nil {
 		t.Fatalf("child = %+v", child)
+	}
+}
+
+func TestProjectStoreRejectsInvalidNodeSizes(t *testing.T) {
+	invalidSizes := []entity.NodeSize{
+		{},
+		{Width: math.NaN(), Height: 200},
+		{Width: 200, Height: math.Inf(1)},
+		{Width: -1, Height: 200},
+		{Width: entity.MinNodeWidth - 1, Height: entity.MinNodeHeight},
+		{Width: entity.MaxNodeWidth + 1, Height: entity.MaxNodeHeight},
+		{Width: entity.MinNodeWidth, Height: entity.MinNodeHeight - 1},
+		{Width: entity.MaxNodeWidth, Height: entity.MaxNodeHeight + 1},
+	}
+	for _, size := range invalidSizes {
+		t.Run(fmt.Sprintf("%v-%v", size.Width, size.Height), func(t *testing.T) {
+			project := sampleProject("p_invalid")
+			project.Nodes[0].Size = size
+			if err := NewProjectStore(testLayout(t.TempDir())).Create(context.Background(), project); !errors.Is(err, ErrInvalidProject) {
+				t.Fatalf("Create() error = %v, want ErrInvalidProject", err)
+			}
+		})
+	}
+
+	layout := testLayout(t.TempDir())
+	project := sampleProject("p_missing_size")
+	project.Nodes[0].Size = entity.NodeSize{}
+	writeJSONFileForTest(t, filepath.Join(layout.ProjectsDir, project.ID, "project.json"), project)
+	if _, err := NewProjectStore(layout).Load(context.Background(), project.ID); !errors.Is(err, ErrCorruptProject) {
+		t.Fatalf("Load() error = %v, want ErrCorruptProject", err)
+	}
+}
+
+func TestProjectStoreRejectsPreviousLayoutVersion(t *testing.T) {
+	layout := testLayout(t.TempDir())
+	project := sampleProject("p_previous")
+	project.Version = 2
+	writeJSONFileForTest(t, filepath.Join(layout.ProjectsDir, project.ID, "project.json"), project)
+	if _, err := NewProjectStore(layout).Load(context.Background(), project.ID); !errors.Is(err, ErrUnsupportedVersion) {
+		t.Fatalf("Load() error = %v, want ErrUnsupportedVersion", err)
 	}
 }
 

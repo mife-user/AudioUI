@@ -4,7 +4,7 @@ import { allocateNodePosition } from './nodePosition'
 
 function node(id: string, x: number, y: number): Node {
   return {
-    id, type: 'topic' as Node['type'], title: id, position: { x, y }, params: {},
+    id, type: 'topic' as Node['type'], title: id, position: { x, y }, size: { width: 280, height: 230 }, params: {},
     rounds: [], locked: false, stale: false,
   }
 }

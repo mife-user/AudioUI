@@ -7,6 +7,7 @@ export type {
     Node,
     NodeConstraints,
     NodeParams,
+    NodeSize,
     Pending,
     PendingDetail,
     PendingSummary,

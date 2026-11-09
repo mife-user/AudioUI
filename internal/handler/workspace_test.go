@@ -109,19 +109,21 @@ func TestGetWorkspaceSnapshotReturnsSummariesDerivedChainsAndLocks(t *testing.T)
 	seededProject.Nodes = append(seededProject.Nodes,
 		entity.Node{
 			ID: candidateA, Type: valueobject.NodeTypeCandidate, Title: "候选甲", Parent: rootID,
+			Size:            entity.DefaultNodeSize(valueobject.NodeTypeCandidate),
 			CandidateSource: &entity.CandidateSource{TopicNodeID: rootID, ArtifactID: "sha256:topics-a", Index: 0}, Rounds: []entity.Round{},
 		},
 		entity.Node{
 			ID: firstID, Type: valueobject.NodeTypePrompt, Title: "分支甲", Parent: candidateA,
-			Position: entity.Position{X: 3, Y: 4}, Params: entity.NodeParams{Instruction: "draft"}, Rounds: []entity.Round{},
+			Position: entity.Position{X: 3, Y: 4}, Size: entity.DefaultNodeSize(valueobject.NodeTypePrompt), Params: entity.NodeParams{Instruction: "draft"}, Rounds: []entity.Round{},
 		},
 		entity.Node{
 			ID: candidateB, Type: valueobject.NodeTypeCandidate, Title: "候选乙", Parent: rootID,
+			Size:            entity.DefaultNodeSize(valueobject.NodeTypeCandidate),
 			CandidateSource: &entity.CandidateSource{TopicNodeID: rootID, ArtifactID: "sha256:topics-a", Index: 1}, Rounds: []entity.Round{},
 		},
 		entity.Node{
 			ID: secondID, Type: valueobject.NodeTypePrompt, Title: "分支乙", Parent: candidateB,
-			Position: entity.Position{X: 5, Y: 6}, Params: entity.NodeParams{Instruction: "draft"}, Rounds: []entity.Round{},
+			Position: entity.Position{X: 5, Y: 6}, Size: entity.DefaultNodeSize(valueobject.NodeTypePrompt), Params: entity.NodeParams{Instruction: "draft"}, Rounds: []entity.Round{},
 		},
 	)
 	seededProject.Revision++

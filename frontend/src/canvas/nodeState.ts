@@ -7,6 +7,10 @@ function hasCompleteMeasurement(node: CanvasFlowNode): boolean {
     && Number(node.measured?.height) > 0
 }
 
+function sameNodeStyle(left: CanvasFlowNode['style'], right: CanvasFlowNode['style']): boolean {
+  return left?.width === right?.width && left?.height === right?.height
+}
+
 function sameNodeData(left: CanvasFlowNode['data'], right: CanvasFlowNode['data']): boolean {
   const keys = Object.keys(left) as Array<keyof CanvasFlowNode['data']>
   return keys.length === Object.keys(right).length && keys.every((key) => Object.is(left[key], right[key]))
@@ -35,7 +39,7 @@ export function preserveCanvasNodeViewState(
     ) return node
 
     let next = node
-    if (hasCompleteMeasurement(previous) && node.measured !== previous.measured) {
+    if (sameNodeStyle(previous.style, node.style) && hasCompleteMeasurement(previous) && node.measured !== previous.measured) {
       next = { ...next, measured: previous.measured }
     }
     if (typeof previous.dragging === 'boolean' && next.dragging !== previous.dragging) {
@@ -51,6 +55,7 @@ export function preserveCanvasNodeViewState(
       && previous.measured === next.measured
       && previous.dragging === next.dragging
       && previous.resizing === next.resizing
+      && sameNodeStyle(previous.style, next.style)
       && sameNodeData(previous.data, next.data)
     ) return previous
     return next

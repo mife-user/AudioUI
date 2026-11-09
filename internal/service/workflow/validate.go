@@ -116,6 +116,14 @@ func validatePosition(x, y float64) error {
 	return nil
 }
 
+func validateNodeSize(size entity.NodeSize) error {
+	if !size.Valid() {
+		return fmt.Errorf("%w: dimensions must be finite and within %d×%d to %d×%d", ErrInvalidNodeSize,
+			entity.MinNodeWidth, entity.MinNodeHeight, entity.MaxNodeWidth, entity.MaxNodeHeight)
+	}
+	return nil
+}
+
 func validateParams(params entity.NodeParams) error {
 	if params.OutputKind != "" && !params.OutputKind.Valid() {
 		return fmt.Errorf("%w: outputKind %q", ErrInvalidInput, params.OutputKind)

@@ -4,10 +4,10 @@ import type { Node, WorkspaceChain } from '../../bindings/audio-ui/internal/doma
 import { ChainQuickBar } from './ChainQuickBar'
 
 const nodes: Node[] = [
-  { id: 'n_shared', type: 'prompt' as Node['type'], title: '共同提示词', parent: 'n_candidate', position: { x: 0, y: 0 }, params: {}, rounds: [], locked: false, stale: false },
-  { id: 'n_agent_a', type: 'agent' as Node['type'], title: 'Agent 甲', parent: 'n_shared', position: { x: 0, y: 0 }, params: {}, rounds: [], locked: false, stale: false },
-  { id: 'n_agent_b', type: 'agent' as Node['type'], title: 'Agent 乙', parent: 'n_shared', position: { x: 0, y: 0 }, params: {}, rounds: [], locked: false, stale: false },
-  { id: 'n_script_c', type: 'script' as Node['type'], title: '脚本丙', parent: 'n_shared', position: { x: 0, y: 0 }, params: {}, rounds: [], locked: false, stale: false },
+  { id: 'n_shared', type: 'prompt' as Node['type'], title: '共同提示词', parent: 'n_candidate', position: { x: 0, y: 0 }, size: { width: 280, height: 230 }, params: {}, rounds: [], locked: false, stale: false },
+  { id: 'n_agent_a', type: 'agent' as Node['type'], title: 'Agent 甲', parent: 'n_shared', position: { x: 0, y: 0 }, size: { width: 280, height: 230 }, params: {}, rounds: [], locked: false, stale: false },
+  { id: 'n_agent_b', type: 'agent' as Node['type'], title: 'Agent 乙', parent: 'n_shared', position: { x: 0, y: 0 }, size: { width: 280, height: 230 }, params: {}, rounds: [], locked: false, stale: false },
+  { id: 'n_script_c', type: 'script' as Node['type'], title: '脚本丙', parent: 'n_shared', position: { x: 0, y: 0 }, size: { width: 280, height: 230 }, params: {}, rounds: [], locked: false, stale: false },
 ]
 
 const chains: WorkspaceChain[] = [

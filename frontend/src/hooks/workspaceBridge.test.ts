@@ -161,7 +161,7 @@ describe('WorkspaceBridge', () => {
     const pendingSnapshot = deferred<WorkspaceSnapshotResult>()
     const createdNode: Node = {
       id: 'n_created', type: 'topic' as Node['type'], title: '新选题', parent: '',
-      position: { x: 0, y: 0 }, params: {}, rounds: [], locked: false, stale: false,
+      position: { x: 0, y: 0 }, size: { width: 280, height: 250 }, params: {}, rounds: [], locked: false, stale: false,
     }
     const refreshed = workspaceResult('p_one', 3)
     refreshed.snapshot.nodes = [createdNode]
@@ -197,7 +197,7 @@ describe('WorkspaceBridge', () => {
     if (latest.snapshot.project) latest.snapshot.project.revision = 3
     latest.snapshot.nodes = [{
       id: 'n_created', type: 'topic' as Node['type'], title: '新选题', parent: '',
-      position: { x: 0, y: 0 }, params: {}, rounds: [], locked: false, stale: false,
+      position: { x: 0, y: 0 }, size: { width: 280, height: 250 }, params: {}, rounds: [], locked: false, stale: false,
     }]
     setup.getWorkspaceSnapshot.mockResolvedValueOnce(stale).mockResolvedValueOnce(latest)
 

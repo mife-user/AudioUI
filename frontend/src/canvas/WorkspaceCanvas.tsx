@@ -67,6 +67,13 @@ type PendingPosition = {
   y: number
 }
 
+type PendingLayout = {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
 type CandidateReadEntry = {
   signature: string
   candidates?: TopicCandidateFixture[]
@@ -189,6 +196,7 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFl
   const moveQueues = useRef(new Map<string, Promise<void>>())
   const lastPersistedPositions = useRef(new Map<string, { x: number; y: number }>())
   const pendingPositions = useRef(new Map<string, PendingPosition>())
+  const pendingLayouts = useRef(new Map<string, PendingLayout>())
   const initialFit = useRef({ projectId: '', shouldFit: false, done: false })
   const createRequestId = useRef(0)
   const [nodes, setNodes] = useState<CanvasFlowNode[]>([])
@@ -371,6 +379,38 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFl
     moveTimers.current.set(key, timer)
   }, [api, projectId, syncMutation])
 
+  const saveNodeLayout = useCallback(async (nodeId: string, x: number, y: number, width: number, height: number) => {
+    if (!projectId || currentProjectId.current !== projectId) return
+    const ownerProjectId = projectId
+    const key = `${ownerProjectId}:${nodeId}`
+    const node = graphNodes.find((candidate) => candidate.id === nodeId)
+    if (!node) return
+    try {
+      const receipt = await api.setNodeLayout(nodeId, x, y, width, height, ownerProjectId)
+      if (currentProjectId.current !== ownerProjectId) return
+      if (receipt.projectId !== ownerProjectId) throw new Error('工程布局回执所属工程不一致。')
+      const synced = await syncMutation(receipt, '节点布局')
+      const pendingLayout = pendingLayouts.current.get(key)
+      if (synced && pendingLayout?.x === x && pendingLayout.y === y && pendingLayout.width === width && pendingLayout.height === height) {
+        pendingLayouts.current.delete(key)
+        pendingPositions.current.delete(key)
+        lastPersistedPositions.current.set(key, { x, y })
+      }
+    } catch (failure) {
+      if (currentProjectId.current !== ownerProjectId) return
+      pendingLayouts.current.delete(key)
+      pendingPositions.current.delete(key)
+      setNodes((current) => current.map((flowNode) => flowNode.id === nodeId
+        ? {
+            ...flowNode,
+            position: { x: node.position.x, y: node.position.y },
+            style: { ...flowNode.style, width: node.size.width, height: node.size.height },
+          }
+        : flowNode))
+      setError(`保存节点布局失败：${errorMessage(failure)}`)
+    }
+  }, [api, graphNodes, projectId, syncMutation])
+
   const createNode = useCallback(async (type: ChildNodeType, parentId: string, position: Node['position']) => {
     if (mutationBlockedRef.current || createInFlight.current) return
     createInFlight.current = true
@@ -505,6 +545,20 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFl
         lastPersistedPositions.current.set(key, { ...node.position })
         return node
       }
+      const pendingLayout = pendingLayouts.current.get(key)
+      if (pendingLayout?.x === node.position.x && pendingLayout.y === node.position.y
+        && pendingLayout.width === node.style?.width && pendingLayout.height === node.style?.height) {
+        pendingLayouts.current.delete(key)
+        lastPersistedPositions.current.set(key, { ...node.position })
+        return node
+      }
+      if (pendingLayout) {
+        return {
+          ...node,
+          position: { x: pendingLayout.x, y: pendingLayout.y },
+          style: { ...node.style, width: pendingLayout.width, height: pendingLayout.height },
+        }
+      }
       if (pending) return { ...node, position: pending }
       lastPersistedPositions.current.set(key, { ...node.position })
       return node
@@ -539,6 +593,9 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFl
       pendingPositions.current.delete(key)
       lastPersistedPositions.current.delete(key)
       moveQueues.current.delete(key)
+    }
+    for (const key of pendingLayouts.current.keys()) {
+      if (!key.startsWith(`${projectId}:`)) pendingLayouts.current.delete(key)
     }
   }, [projectId])
 
@@ -585,6 +642,12 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFl
 
   const onNodesChange = useCallback((changes: NodeChange<CanvasFlowNode>[]) => {
     setNodes((current) => applyNodeChanges(changes, current))
+    const positionChanges = new Map(changes.flatMap((change) => change.type === 'position' && change.position
+      ? [[change.id, { x: change.position.x, y: change.position.y }] as const]
+      : []))
+    const layoutChanges = new Set(changes.flatMap((change) => change.type === 'dimensions' && change.resizing === false && change.dimensions
+      ? [change.id]
+      : []))
     for (const change of changes) {
       if (change.type === 'select' && change.selected) {
         setError('')
@@ -598,13 +661,36 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFl
         })
       }
       if (change.type === 'position' && change.position) {
+        if (layoutChanges.has(change.id)) continue
         const key = `${projectId}:${change.id}`
         const position = { x: change.position.x, y: change.position.y }
         pendingPositions.current.set(key, position)
-        if (change.dragging !== true) schedulePositionSave(change.id, position)
+        if (change.dragging !== true && !layoutChanges.has(change.id)) schedulePositionSave(change.id, position)
+      }
+      if (change.type === 'dimensions' && change.resizing === false && change.dimensions) {
+        const flowNode = nodes.find((node) => node.id === change.id)
+        if (!flowNode) continue
+        const key = `${projectId}:${change.id}`
+        const position = positionChanges.get(change.id) ?? pendingPositions.current.get(key) ?? flowNode.position
+        const layout = { x: position.x, y: position.y, width: change.dimensions.width, height: change.dimensions.height }
+        pendingLayouts.current.set(key, layout)
+        const timer = moveTimers.current.get(key)
+        if (timer) {
+          window.clearTimeout(timer)
+          moveTimers.current.delete(key)
+        }
+        pendingPositions.current.delete(key)
+        setNodes((current) => current.map((node) => node.id === change.id
+          ? {
+              ...node,
+              position,
+              style: { ...node.style, width: change.dimensions?.width, height: change.dimensions?.height },
+            }
+          : node))
+        void saveNodeLayout(change.id, position.x, position.y, change.dimensions.width, change.dimensions.height)
       }
     }
-  }, [onSelectNode, projectId, schedulePositionSave, snapshot.project?.activeNodeId])
+  }, [nodes, onSelectNode, projectId, saveNodeLayout, schedulePositionSave, snapshot.project?.activeNodeId])
 
   const selectedNode = nodes.find((node) => node.selected)?.data.node
   const selectChain = useCallback((tailNodeId: string) => {

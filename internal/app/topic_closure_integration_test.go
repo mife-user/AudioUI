@@ -139,6 +139,9 @@ func TestTopicRunAndCandidateProjectionWithControlledAgentDriver(t *testing.T) {
 	for _, node := range beforeApply.Nodes {
 		if node.Type == valueobject.NodeTypeCandidate && node.Parent == topicReceipt.NodeID {
 			generatedCandidateIDs[node.ID] = true
+			if node.Size != entity.DefaultNodeSize(valueobject.NodeTypeCandidate) {
+				t.Fatalf("generated candidate size = %+v", node.Size)
+			}
 			if node.CandidateSource == nil || node.CandidateSource.Index < 0 || node.CandidateSource.Index >= len(candidates) ||
 				node.CandidateSource.ArtifactID != appliedTopic.Rounds[0].ArtifactID {
 				t.Fatalf("generated candidate provenance = %+v", node)
@@ -598,8 +601,8 @@ func TestLocalScriptClosureWithControlledAgentDriver(t *testing.T) {
 		t.Fatal("unbound Script reply did not create a direct output node")
 	}
 	firstOutput := topicClosureNode(t, current, firstOutputID)
-	if len(firstOutput.ScriptVersions) != 1 || firstOutput.ScriptVersions[0].RunID != firstAgentRun.ID {
-		t.Fatalf("automatically created Script versions = %+v", firstOutput.ScriptVersions)
+	if firstOutput.Size != entity.DefaultNodeSize(valueobject.NodeTypeScript) || len(firstOutput.ScriptVersions) != 1 || firstOutput.ScriptVersions[0].RunID != firstAgentRun.ID {
+		t.Fatalf("automatically created Script = %+v", firstOutput)
 	}
 	firstArtifactID := firstOutput.ScriptVersions[0].ArtifactID
 

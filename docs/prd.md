@@ -50,7 +50,7 @@
 
 **本阶段图契约**：节点类型为 `topic`、`candidate`、`prompt`、`agent`、`script`；允许的连接仅为 `topic → candidate`（仅应用自动生成）、`candidate → prompt`、`prompt → agent`、`agent → script`、`script → prompt`。候选与脚本结果可分别连接多个后续提示词分支；单父、无环、所有写入经 Go 命令层。Agent 的直接脚本输出最多一个。其他类型组合由后端拒绝，前端只呈现权威快照与命令结果。
 
-**版本与数据边界**：新工程使用 `project.json` v2；v1 工程不静默迁移，返回 `UNSUPPORTED_VERSION`，但不能阻止列出/新建/打开其他有效工程。M1 会话导入直接生成 v2 工程。候选身份由不可变 `topics` artifact ID 与 0 基索引共同确定；脚本版本追加引用内容寻址 artifact 与来源运行快照。`script` Schema 复用唯一的 `ValidateStructuredPayload`，不另复制 Schema。
+**版本与数据边界**：M2-11～13 首次引入 `project.json` v2；画布 U2 将当前开发格式演进为 v3，以必需的节点 `size` 保存卡片几何。v1/v2 工程不静默迁移，返回 `UNSUPPORTED_VERSION`，但不能阻止列出/新建/打开其他有效工程。M1 会话导入直接生成当前 v3 工程。候选身份由不可变 `topics` artifact ID 与 0 基索引共同确定；脚本版本追加引用内容寻址 artifact 与来源运行快照。`script` Schema 复用唯一的 `ValidateStructuredPayload`，不另复制 Schema。
 
 **边界**：不改变视频节点/产物、`scene_dsl`、渲染导出或云端执行；AC-T-04 视频专项仍待后续评估，不以脚本测试替代。当前实现能力与本目标设计分别记录，旧版 M2-00～10 验收不表示本节已实现。
 

@@ -34,6 +34,7 @@ export interface Node {
     "candidateSource"?: CandidateSource | null;
     "scriptVersions"?: ScriptVersion[] | null;
     "position": Position;
+    "size": NodeSize;
     "params": NodeParams;
     "rounds": Round[] | null;
     "locked": boolean;
@@ -60,6 +61,11 @@ export interface NodeParams {
     "instruction"?: string;
     "outputKind"?: valueobject$0.OutputKind;
     "constraints"?: NodeConstraints | null;
+}
+
+export interface NodeSize {
+    "width": number;
+    "height": number;
 }
 
 /**

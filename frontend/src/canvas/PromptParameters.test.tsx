@@ -10,6 +10,7 @@ function makeNode(overrides: Partial<Node> = {}): Node {
     title: '脚本任务',
     parent: 'n_candidate',
     position: { x: 0, y: 0 },
+    size: { width: 280, height: 230 },
     params: { instruction: '写一个解说脚本。', constraints: { scenes: 3, duration: 90 } },
     rounds: [],
     locked: false,

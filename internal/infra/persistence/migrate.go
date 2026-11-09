@@ -236,6 +236,7 @@ func migratedProject() entity.Project {
 			Type:     valueobject.NodeTypeTopic,
 			Title:    migratedName,
 			Position: entity.Position{},
+			Size:     entity.DefaultNodeSize(valueobject.NodeTypeTopic),
 			Params:   entity.NodeParams{},
 			Rounds:   []entity.Round{},
 		}},

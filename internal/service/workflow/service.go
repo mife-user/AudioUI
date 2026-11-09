@@ -79,6 +79,7 @@ func (s *Service) AddNode(ctx context.Context, input AddNodeInput) (entity.Proje
 		Type:     input.Type,
 		Title:    title,
 		Position: input.Position,
+		Size:     entity.DefaultNodeSize(input.Type),
 		Params:   input.Params,
 		Rounds:   []entity.Round{},
 	}
@@ -250,6 +251,42 @@ func (s *Service) MoveNode(ctx context.Context, id string, x, y float64, expecte
 		return project, nil
 	}
 	node.Position = entity.Position{X: x, Y: y}
+	project.Revision++
+	saved, err := s.opts.Project.Save(ctx, project)
+	if err != nil {
+		return entity.Project{}, err
+	}
+	s.changed(saved.ID, saved.Revision)
+	return saved, nil
+}
+
+func (s *Service) SetNodeLayout(ctx context.Context, id string, x, y, width, height float64, expectedProjectID ...string) (entity.Project, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return entity.Project{}, err
+	}
+	if err := validatePosition(x, y); err != nil {
+		return entity.Project{}, err
+	}
+	size := entity.NodeSize{Width: width, Height: height}
+	if err := validateNodeSize(size); err != nil {
+		return entity.Project{}, err
+	}
+	project, graph, err := s.loadCurrentForProject(ctx, firstExpectedProjectID(expectedProjectID))
+	if err != nil {
+		return entity.Project{}, err
+	}
+	node, err := requireNode(graph, id, "node")
+	if err != nil {
+		return entity.Project{}, err
+	}
+	position := entity.Position{X: x, Y: y}
+	if node.Position == position && node.Size == size {
+		return project, nil
+	}
+	node.Position = position
+	node.Size = size
 	project.Revision++
 	saved, err := s.opts.Project.Save(ctx, project)
 	if err != nil {

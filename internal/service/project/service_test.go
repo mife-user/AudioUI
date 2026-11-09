@@ -471,6 +471,7 @@ func TestServiceSaveReturnsDeepCopy(t *testing.T) {
 	}
 	projectValue.Nodes = []entity.Node{{
 		ID: "n_saved", Type: valueobject.NodeTypeTopic, Title: "保存值",
+		Size:   entity.DefaultNodeSize(valueobject.NodeTypeTopic),
 		Params: entity.NodeParams{Idea: "original"}, Rounds: []entity.Round{{N: 1, Kind: valueobject.OutputKindTopics, ArtifactID: "artifact"}},
 	}}
 	projectValue.Revision++

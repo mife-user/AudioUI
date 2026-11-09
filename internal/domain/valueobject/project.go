@@ -79,7 +79,7 @@ func (s PendingStatus) Valid() bool {
 }
 
 const (
-	ProjectFileVersion            = 2
+	ProjectFileVersion            = 3
 	RunsFileVersion               = 1
 	PendingFileVersion            = 1
 	PendingTransactionFileVersion = 1

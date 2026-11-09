@@ -535,7 +535,9 @@
 
 .canvas-node {
   position: relative;
-  width: 276px;
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
   overflow: visible;
   border: 1px solid var(--border-strong);
   border-radius: var(--radius);
@@ -629,7 +631,7 @@
 }
 
 .topic-node {
-  width: 320px;
+  width: 100%;
 }
 
 .topic-parameters {

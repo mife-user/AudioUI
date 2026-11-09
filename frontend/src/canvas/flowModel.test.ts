@@ -10,6 +10,7 @@ function makeNode(id: string, type: string, parent = '', overrides: Partial<Node
     title: id,
     parent,
     position: { x: 0, y: 0 },
+    size: { width: 280, height: 230 },
     params: {},
     rounds: [],
     locked: false,
@@ -30,6 +31,23 @@ function snapshot(nodes: Node[], activeNodeId = 'n_prompt'): WorkspaceSnapshot {
 }
 
 describe('flowModel', () => {
+  it('uses each persisted node size for its React Flow layout', () => {
+    const topic = makeNode('n_topic', 'topic', '', { size: { width: 280, height: 250 } })
+    const candidate = makeNode('n_candidate', 'candidate', topic.id, { size: { width: 235, height: 160 } })
+    const prompt = makeNode('n_prompt', 'prompt', candidate.id, { size: { width: 320, height: 240 } })
+    const agent = makeNode('n_agent', 'agent', prompt.id, { size: { width: 235, height: 165 } })
+    const script = makeNode('n_script', 'script', agent.id, { size: { width: 270, height: 205 } })
+    const model = buildFlowModel(snapshot([topic, candidate, prompt, agent, script]), vi.fn())
+
+    expect(model.nodes.map((node) => node.style)).toEqual([
+      { width: 280, height: 250 },
+      { width: 235, height: 160 },
+      { width: 320, height: 240 },
+      { width: 235, height: 165 },
+      { width: 270, height: 205 },
+    ])
+  })
+
   it('derives all v2 edges and handles from authoritative node relationships', () => {
     const topic = makeNode('n_topic', 'topic')
     const candidate = makeNode('n_candidate', 'candidate', topic.id, {

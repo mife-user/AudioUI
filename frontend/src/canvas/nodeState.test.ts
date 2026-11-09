@@ -10,6 +10,7 @@ function graphNode(id: string, type: 'topic' | 'prompt', title = id): Node {
     title,
     parent: '',
     position: { x: 10, y: 20 },
+    size: { width: 280, height: 230 },
     params: {},
     rounds: [],
     locked: false,
@@ -27,6 +28,7 @@ function flowNode(
     id,
     type,
     position: { x: 10, y: 20 },
+    style: { width: 280, height: 230 },
     data: {
       node: graphNode(id, type),
       runningLocked: false,
@@ -82,6 +84,21 @@ describe('preserveCanvasNodeViewState', () => {
     })
 
     expect(preserveCanvasNodeViewState([next], [previous], 'p_one')[0]).toBe(previous)
+  })
+
+  it('does not reuse stale measurements when the persisted node size changes', () => {
+    const previous = flowNode('n_prompt', 'prompt', 'p_one', {
+      measured: { width: 280, height: 230 },
+    })
+    const next = flowNode('n_prompt', 'prompt', 'p_one', {
+      style: { width: 340, height: 280 },
+      data: { ...flowNode('n_prompt', 'prompt', 'p_one').data },
+    })
+
+    const [result] = preserveCanvasNodeViewState([next], [previous], 'p_one')
+
+    expect(result.style).toEqual({ width: 340, height: 280 })
+    expect(result.measured).toBeUndefined()
   })
 
   it('does not carry measurements across projects, node ids, or node types', () => {
