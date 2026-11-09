@@ -26,6 +26,7 @@ type MockFlowProps = {
 const flowMocks = vi.hoisted(() => ({
   fitView: vi.fn(),
   setViewport: vi.fn(),
+  getNode: vi.fn((id: string) => ({ id })),
   screenToFlowPosition: vi.fn((position: { x: number; y: number }) => position),
 }))
 
@@ -145,6 +146,7 @@ vi.mock('@xyflow/react', async () => {
     useReactFlow: () => ({
       fitView: flowMocks.fitView,
       setViewport: flowMocks.setViewport,
+      getNode: flowMocks.getNode,
       screenToFlowPosition: flowMocks.screenToFlowPosition,
     }),
   }
@@ -216,6 +218,31 @@ describe('WorkspaceCanvas', () => {
   afterEach(() => {
     vi.useRealTimers()
     flowMocks.screenToFlowPosition.mockImplementation((position) => position)
+  })
+
+  it('registers a locator that selects the node and focuses its viewport', async () => {
+    let locateNode: ((nodeId: string) => boolean) | undefined
+    const onSelectNode = vi.fn().mockResolvedValue(undefined)
+    const onRegisterNodeLocator = vi.fn((locator: (nodeId: string) => boolean) => {
+      locateNode = locator
+      return () => { locateNode = undefined }
+    })
+    render(
+      <WorkspaceCanvas
+        snapshot={makeSnapshot()}
+        onSelectNode={onSelectNode}
+        onRegisterNodeLocator={onRegisterNodeLocator}
+        api={makeAPI()}
+      />,
+    )
+    await waitFor(() => expect(locateNode).toBeDefined())
+    flowMocks.fitView.mockClear()
+    const locate = locateNode
+    if (!locate) throw new Error('node locator was not registered')
+
+    expect(locate('n_agent')).toBe(true)
+    expect(onSelectNode).toHaveBeenCalledWith('n_agent')
+    expect(flowMocks.fitView).toHaveBeenCalledWith({ nodes: [{ id: 'n_agent' }], padding: 0.35, duration: 180 })
   })
 
   it('persists the final size and position together only after resizing ends', async () => {

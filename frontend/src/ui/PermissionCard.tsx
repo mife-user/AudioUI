@@ -22,6 +22,7 @@ function format(seconds: number) {
 export function PermissionCard({ request, onRespond }: Props) {
   const [seconds, setSeconds] = useState(() => remaining(request.expiresAt))
   const [busy, setBusy] = useState(false)
+  const [actionError, setActionError] = useState('')
 
   useEffect(() => {
     setSeconds(remaining(request.expiresAt))
@@ -31,8 +32,11 @@ export function PermissionCard({ request, onRespond }: Props) {
 
   const respond = async (decision: 'allow' | 'allow_session' | 'deny') => {
     setBusy(true)
+    setActionError('')
     try {
       await onRespond(request.id, decision)
+    } catch (failure) {
+      setActionError(failure instanceof Error ? failure.message : String(failure))
     } finally {
       setBusy(false)
     }
@@ -53,6 +57,7 @@ export function PermissionCard({ request, onRespond }: Props) {
         ) : null}
         {request.command ? <div className="agent-mono agent-command">{request.command}</div> : null}
         <div className="agent-risk">风险：{request.risk || '工具调用'}</div>
+        {actionError ? <div className="agent-action-error" role="alert">响应失败：{actionError}</div> : null}
         <div className="agent-card-actions">
           <button className="agent-mini-btn allow" disabled={busy || seconds <= 0} onClick={() => void respond('allow')}>允许一次</button>
           {request.allowSession ? (

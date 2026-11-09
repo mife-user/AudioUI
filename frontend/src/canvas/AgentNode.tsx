@@ -4,6 +4,8 @@ import type { RunStartError } from '../../bindings/audio-ui/internal/domain/enti
 import { formatRunStartError } from './runStartError'
 import { nodeHandleLayoutKey, type CanvasFlowNode } from './flowModel'
 import { NodeResizeHandles, NodeSizeControl } from './NodeLayoutControls'
+import { PendingNodeEntry } from '../ui/PendingNodeEntry'
+import { NodeRunRequestEntry } from '../ui/NodeRunRequestEntry'
 import { useMeasuredNodeHandles } from './useMeasuredNodeHandles'
 
 function runStatusLabel(status: string | undefined): string {
@@ -69,10 +71,11 @@ export const AgentNode = memo(function AgentNode({ id, data, selected }: NodePro
         aria-label={`连接到 ${node.title}`}
         className="node-input-handle"
       />
-      <header className="canvas-node-head">
+      <header className="canvas-node-head" tabIndex={-1}>
         <span className="canvas-node-kind agent-kind">AGENT</span>
         <strong title={node.title}>{node.title}</strong>
         <span className="canvas-node-status" role="status">{statusWithPending}</span>
+        <NodeRunRequestEntry nodeId={node.id} nodeTitle={node.title} />
         <NodeSizeControl node={node} disabled={mutationsDisabled} onApply={data.onSetNodeLayout} />
       </header>
       <div className="canvas-node-content agent-node-content nowheel">
@@ -99,6 +102,7 @@ export const AgentNode = memo(function AgentNode({ id, data, selected }: NodePro
         >
           {starting ? '正在启动…' : globalRunBusy ? '已有运行' : !hasParent ? '先连接提示词' : node.locked ? '节点已锁定' : '运行本地 Agent'}
         </button>
+        <PendingNodeEntry node={node} pendingIds={data.pendingResultIds ?? []} />
       </div>
       {node.parent ? (
         <Handle

@@ -19,6 +19,7 @@ import { graphAPI, type GraphAPI, type TopicCandidateFixture } from './graphApi'
 import { allocateNodePosition } from './nodePosition'
 import { buildFlowEdges, buildFlowModel, inputHandleId, nodeMap, outputHandleId, subtreeSize, topicRootId, type CanvasFlowNode, type ChildNodeType } from './flowModel'
 import { preserveCanvasNodeViewState } from './nodeState'
+import { type NodeLocator } from '../hooks/runRequests'
 import { CandidateNode } from './CandidateNode'
 import { CanvasContextMenu, type CanvasCreateType } from './CanvasContextMenu'
 import { ChainQuickBar } from './ChainQuickBar'
@@ -52,6 +53,7 @@ type Props = {
   onSelectNode: (id: string) => Promise<void>
   onGraphMutation?: (receipt: GraphMutationReceipt) => void | Promise<void>
   onRegisterDraftFlush?: (flush: (projectId: string) => Promise<boolean>) => () => void
+  onRegisterNodeLocator?: (locator: NodeLocator) => () => void
   api?: GraphAPI
   candidateFixtures?: Record<string, TopicCandidateFixture[]>
   onStartRun?: (nodeId: string, projectId: string) => Promise<RunStartResult>
@@ -138,7 +140,7 @@ function candidateQueryKey(nodes: Node[] | undefined): string {
   return JSON.stringify(queries)
 }
 
-function CanvasBody({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFlush, api, candidateFixtures, onStartRun }: Props & { api: GraphAPI }) {
+function CanvasBody({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFlush, onRegisterNodeLocator, api, candidateFixtures, onStartRun }: Props & { api: GraphAPI }) {
   const projectId = snapshot.project?.id ?? ''
   const graphNodes = snapshot.nodes ?? []
   const [candidateState, setCandidateState] = useState<CandidateReadState>({ projectId: '', entries: {} })
@@ -247,6 +249,18 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFl
   runStartBlockedRef.current = busy || connectSubmitting || pendingSync !== null
   const confirmCancelRef = useRef<HTMLButtonElement>(null)
   const confirmReturnFocus = useRef<HTMLElement | null>(null)
+  const locateNode = useCallback((nodeId: string) => {
+    if (currentProjectId.current !== projectId || !flowRef.current.getNode(nodeId)) return false
+    setError('')
+    setNotice('')
+    void onSelectNode(nodeId).catch((failure) => {
+      if (currentProjectId.current === projectId) setError(`保存节点选择失败：${errorMessage(failure)}`)
+    })
+    void flowRef.current.fitView({ nodes: [{ id: nodeId }], padding: 0.35, duration: 180 })
+    return true
+  }, [onSelectNode, projectId])
+
+  useEffect(() => onRegisterNodeLocator?.(locateNode), [locateNode, onRegisterNodeLocator])
 
   const flushWorkspaceDrafts = useCallback(async (ownerProjectId: string) => {
     if (currentProjectId.current !== ownerProjectId) throw new Error('PROJECT_CHANGED: 工程已切换，未保存旧工程草稿。')
@@ -1127,10 +1141,10 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFl
   )
 }
 
-export function WorkspaceCanvas({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFlush, api = graphAPI, candidateFixtures, onStartRun = startRunAPI }: Props) {
+export function WorkspaceCanvas({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFlush, onRegisterNodeLocator, api = graphAPI, candidateFixtures, onStartRun = startRunAPI }: Props) {
   return (
     <ReactFlowProvider>
-      <CanvasBody snapshot={snapshot} onSelectNode={onSelectNode} onGraphMutation={onGraphMutation} onRegisterDraftFlush={onRegisterDraftFlush} api={api} candidateFixtures={candidateFixtures} onStartRun={onStartRun} />
+      <CanvasBody snapshot={snapshot} onSelectNode={onSelectNode} onGraphMutation={onGraphMutation} onRegisterDraftFlush={onRegisterDraftFlush} onRegisterNodeLocator={onRegisterNodeLocator} api={api} candidateFixtures={candidateFixtures} onStartRun={onStartRun} />
     </ReactFlowProvider>
   )
 }

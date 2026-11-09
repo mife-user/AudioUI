@@ -122,7 +122,8 @@ describe('flowModel', () => {
     const model = buildFlowModel(view, vi.fn())
     expect(model.nodes.find((node) => node.id === agent.id)?.data).toMatchObject({
       runStatus: 'succeeded',
-      pendingCount: 1,
+      pendingCount: 0,
+      pendingResultIds: [],
       globalRunBusy: false,
       outputScript: script,
     })
@@ -151,6 +152,28 @@ describe('flowModel', () => {
     expect(model.nodes.find((node) => node.id === frozenScript.id)?.data.pendingOutputCount).toBe(1)
     expect(model.nodes.find((node) => node.id === frozenScript.id)?.data.pendingOutputIds).toEqual(['pending_frozen'])
     expect(model.nodes.find((node) => node.id === currentScript.id)?.data.pendingOutputCount).toBe(0)
+  })
+
+  it('routes Topic results and unlocated Script results to their source nodes', () => {
+    const topic = makeNode('n_topic', 'topic')
+    const agent = makeNode('n_agent', 'agent', 'n_prompt')
+    const view = snapshot([topic, agent])
+    view.pending = [
+      {
+        id: 'pending_topics', nodeId: topic.id, runId: 'r_topics', chainId: 'c_topic',
+        kind: OutputKind.OutputKindTopics, status: PendingStatus.PendingInvalid,
+      },
+      {
+        id: 'pending_script', nodeId: agent.id, runId: 'r_script', chainId: 'c_agent',
+        kind: OutputKind.OutputKindScript, status: PendingStatus.PendingInvalid,
+        outputBinding: { bound: true, nodeId: 'n_missing_script', parentNodeId: agent.id, baselineVersion: 1 },
+        resultNodeId: 'n_missing_script',
+      },
+    ]
+
+    const model = buildFlowModel(view, vi.fn())
+    expect(model.nodes.find((node) => node.id === topic.id)?.data.pendingResultIds).toEqual(['pending_topics'])
+    expect(model.nodes.find((node) => node.id === agent.id)?.data.pendingResultIds).toEqual(['pending_script'])
   })
 
   it('locks only the in-flight target path and its direct Script output', () => {

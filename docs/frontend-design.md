@@ -480,7 +480,7 @@ Topic ──应用校验 topics──> Candidate A ──> Prompt ──> Agent 
 
 ### 4.9 工作台交互优化（独立批次，U0 已确认）
 
-本批次位于 M2 验收之后、M3 开始之前。U5 已实现并于 2026-11-09 经用户确认验收；U6～U9 尚未实施。助手未完成 U5 真实浏览器实测或截图/viewport 归档。设计原型为[画布交互优化单文件演示](design/canvas-workbench-redesign-demo.html)；U4 新建菜单交互另见[单文件演示](design/u4-canvas-context-menu-demo.html)。演示仅使用模拟数据，不连接 Agent、不访问工程或网络，不代表实现或验收证据。
+本批次位于 M2 验收之后、M3 开始之前。U5 已实现并于 2026-11-09 经用户确认验收；U6 已于 2026-11-10 完成用户界面验收，定向测试、类型检查、lint、令牌检查和生产构建通过；全量前端测试因 Node.js 堆上限退出，不能视为全量通过；U7～U9 尚未实施。U6 的 Vite 页面缺少 Wails 后端，不能验证真实工程和运行请求，不作为产品验收证据。U5 未完成真实浏览器实测或截图/viewport 归档。设计原型为[画布交互优化单文件演示](design/canvas-workbench-redesign-demo.html)；U4 新建菜单交互另见[单文件演示](design/u4-canvas-context-menu-demo.html)。演示仅使用模拟数据，不连接 Agent、不访问工程或网络，不代表实现或验收证据。
 
 **卡片尺寸与布局**：五类节点支持四角与四边八向缩放，缩放范围为 200 × 140 至 1200 × 900；固定标题栏是唯一拖动区，正文在卡片内部滚动且滚轮不缩放画布。标题栏提供键盘可达的尺寸设置与恢复默认尺寸入口；输入、拖动、端口和缩放命中区相互隔离。下表为建议的逻辑画布尺寸，真实页面验收后可调整。
 
@@ -504,7 +504,7 @@ Topic ──应用校验 topics──> Candidate A ──> Prompt ──> Agent 
 
 **输入与运行前保存**：自动保存不禁用正在输入的控件；IME 组合结束后再保存，旧响应不能覆盖新草稿。启动 Agent 只 flush 根到目标节点的路径前缀及受保护输出；下游和无关分支不得误锁或阻止运行。工程切换、失败与仅重试快照均保留明确状态。
 
-详细行为与 AC-U-01～19 见[优化计划](plans/active/canvas-workbench-optimization-plan.md)和[验收标准](acceptance.md)。U5 已实现并经用户确认验收；U6～U9 尚未实施。助手未完成 U5 真实浏览器实测或归档截图/viewport，不能以构建结果替代页面实测。
+详细行为与 AC-U-01～19 见[优化计划](plans/active/canvas-workbench-optimization-plan.md)和[验收标准](acceptance.md)。U5 已实现并经用户确认验收；U6 已于 2026-11-10 完成用户界面验收；全量前端测试因 Node.js 堆上限退出，不能视为全量通过；U7～U9 尚未实施。
 
 ---
 

@@ -210,6 +210,7 @@
 
 ### U6：悬浮运行栏与节点待处理
 
+- **状态**：用户于 2026-11-10 完成界面验收。定向测试、类型检查、lint、令牌检查和生产构建通过；全量前端测试因 Node.js 约 4 GiB 堆上限退出（一次在 7/8 个文件、71/74 项后，另一次在 CanvasNodes 14/18 项后），不能视为全量通过。Vite 页面缺少 Wails 后端，未验证真实工程和运行请求。
 - **涉及**：`App.tsx`、`ui/AgentConsole.tsx`、`PermissionCard.tsx`、`QuestionCard.tsx`、`RunList.tsx`、`Transcript.tsx`、`stores/runStore.ts`、`WorkspacePage.tsx`、各节点、`agent.css` / `workspace.css`。
 - 把当前占列侧栏重排为悬浮入口与有界窗口；抽离状态和请求映射，保证关闭/展开不重建或丢失 run 事件、scroll 和 pending。
 - 用冻结 `projectId/runId/requestId/pendingId` 定位节点与操作；结果、权限和问题入口放对应卡片右上角。保留无法定位时的恢复路径，不新增自动授权。

@@ -22,6 +22,7 @@ function format(seconds: number) {
 export function QuestionCard({ request, onAnswer }: Props) {
   const [other, setOther] = useState('')
   const [busy, setBusy] = useState(false)
+  const [actionError, setActionError] = useState('')
   const [seconds, setSeconds] = useState(() => remaining(request.expiresAt))
 
   useEffect(() => {
@@ -35,8 +36,11 @@ export function QuestionCard({ request, onAnswer }: Props) {
   const answer = async (value: string, via: string) => {
     if (!value.trim() || busy || expired) return
     setBusy(true)
+    setActionError('')
     try {
       await onAnswer(request.id, value.trim(), via)
+    } catch (failure) {
+      setActionError(failure instanceof Error ? failure.message : String(failure))
     } finally {
       setBusy(false)
     }
@@ -50,6 +54,7 @@ export function QuestionCard({ request, onAnswer }: Props) {
       </div>
       <div className="agent-card-body">
         <div className="agent-question-text">{request.question}</div>
+        {actionError ? <div className="agent-action-error" role="alert">回答失败：{actionError}</div> : null}
         <div className="agent-option-list">
           {request.options?.map((option) => (
             <button className="agent-option" key={option} disabled={busy || expired} onClick={() => void answer(option, 'option')}>

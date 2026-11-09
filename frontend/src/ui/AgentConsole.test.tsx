@@ -166,7 +166,7 @@ function ConsoleHarness({ props }: { props: ConsoleHarnessProps }) {
     onDiscardPending,
     onRefreshWorkspace,
   })
-  return <AgentConsole {...consoleProps} pendingController={pendingController} />
+  return <AgentConsole {...consoleProps} nodes={nodes} pendingController={pendingController} />
 }
 
 function renderConsole(overrides: Partial<ConsoleHarnessProps> = {}) {
@@ -331,36 +331,45 @@ describe('AgentConsole', () => {
     expect(onPermission).toHaveBeenCalledWith('r_active', 'permission-1', 'allow')
   })
 
-  it('shows the collapsed rail with the selected run identity', () => {
-    renderConsole({ collapsed: true })
-    expect(screen.getByText('c_n_topic')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '展开控制台' })).toBeInTheDocument()
+  it('shows a collapsed floating status with unresolved counts', () => {
+    const { container } = renderConsole({ collapsed: true })
+    expect(container.querySelector('.agent-rail-state')).toHaveTextContent('完成')
+    expect(container.querySelector('.agent-rail-count')).toHaveTextContent('请求 0')
+    expect(container.querySelector('.agent-rail-pending')).toHaveTextContent('结果 0')
+    expect(screen.getByRole('button', { name: '展开运行面板' })).toBeInTheDocument()
+    expect(document.getElementById('agent-console-panel')).toHaveAttribute('hidden')
   })
 
-  it('shows the bound Script target, frozen base version, original source, and new result preview', async () => {
+  it('keeps the run panel mounted with its scroll position while collapsed', () => {
+    const { container, rerender, props } = renderConsole()
+    const body = container.querySelector<HTMLElement>('.agent-console-body')
+    if (!body) throw new Error('run panel body is missing')
+    body.scrollTop = 120
+
+    rerender(<ConsoleHarness props={{ ...props, collapsed: true }} />)
+
+    expect(container.querySelector('.agent-console-body')).toBe(body)
+    expect(body.scrollTop).toBe(120)
+    expect(document.getElementById('agent-console-panel')).toHaveAttribute('hidden')
+  })
+
+  it('shows a notice when a pending Script result is already assigned to its frozen target node', () => {
     renderConsole({
       pending: [scriptPendingSummary],
       nodes: [scriptNode],
       onGetPending: vi.fn().mockResolvedValue(scriptPendingDetail()),
     })
     fireEvent.click(screen.getByRole('tab', { name: /待处理/ }))
-    fireEvent.click(screen.getByRole('button', { name: /n_agent/ }))
 
-    expect(await screen.findByText('旁白脚本修订版')).toBeInTheDocument()
-    expect(screen.getByText('目标 Script')).toBeInTheDocument()
-    expect(screen.getByText('v1')).toBeInTheDocument()
-    expect(screen.getByText('r_script_old')).toBeInTheDocument()
-    expect(screen.getByText('sha256:script-v1')).toBeInTheDocument()
-    expect(screen.getByText('r_script_new')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '确认追加' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '丢弃结果' })).toBeInTheDocument()
+    expect(screen.getByText('待处理结果已归属到画布节点')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /n_agent/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '确认追加' })).not.toBeInTheDocument()
   })
 
-  it('confirms a Script result through ApplyPending and never offers force on a version conflict', async () => {
+  it('confirms Script results from the recovery path and never offers force on a version conflict', async () => {
     const onApplyPending = vi.fn().mockRejectedValue(new Error('OUTPUT_VERSION_CONFLICT'))
     renderConsole({
       pending: [scriptPendingSummary],
-      nodes: [scriptNode],
       onGetPending: vi.fn().mockResolvedValue(scriptPendingDetail()),
       onApplyPending,
     })
@@ -381,7 +390,6 @@ describe('AgentConsole', () => {
     invalid.pending.error = 'SCHEMA_INVALID: script scenes are invalid'
     renderConsole({
       pending: [{ ...scriptPendingSummary, status: PendingStatus.PendingInvalid, error: invalid.pending.error }],
-      nodes: [scriptNode],
       onGetPending: vi.fn().mockResolvedValue(invalid),
     })
     fireEvent.click(screen.getByRole('tab', { name: /待处理/ }))
@@ -398,14 +406,13 @@ describe('AgentConsole', () => {
     const onDiscardPending = vi.fn().mockResolvedValue(undefined)
     renderConsole({
       pending: [scriptPendingSummary],
-      nodes: [scriptNode],
       onGetPending: vi.fn().mockResolvedValue(scriptPendingDetail()),
       onApplyPending,
       onDiscardPending,
     })
     fireEvent.click(screen.getByRole('tab', { name: /待处理/ }))
     fireEvent.click(screen.getByRole('button', { name: /n_agent/ }))
-    await screen.findByText('r_script_old')
+    await screen.findByText('目标 Script')
     fireEvent.click(screen.getByRole('button', { name: '丢弃结果' }))
 
     await waitFor(() => expect(onDiscardPending).toHaveBeenCalledWith('pending_script', 'p_demo'))
@@ -419,7 +426,6 @@ describe('AgentConsole', () => {
     const onRefreshWorkspace = vi.fn().mockRejectedValueOnce(new Error('快照读取失败')).mockResolvedValueOnce(undefined)
     renderConsole({
       pending: [scriptPendingSummary],
-      nodes: [scriptNode],
       onGetPending: vi.fn().mockResolvedValue(scriptPendingDetail()),
       onApplyPending,
       onRefreshWorkspace,

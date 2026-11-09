@@ -21,6 +21,14 @@ describe('QuestionCard', () => {
     expect(onAnswer).toHaveBeenCalledWith('q1', '174', 'option')
   })
 
+  it('shows a retryable error when answering fails', async () => {
+    const onAnswer = vi.fn().mockRejectedValue(new Error('QUESTION_EXPIRED'))
+    render(<QuestionCard request={request} onAnswer={onAnswer} />)
+    fireEvent.click(screen.getByRole('button', { name: '174' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('回答失败：QUESTION_EXPIRED')
+    expect(screen.getByRole('button', { name: '87' })).toBeEnabled()
+  })
+
   it('submits a typed answer as "other"', () => {
     const onAnswer = vi.fn().mockResolvedValue(undefined)
     render(<QuestionCard request={request} onAnswer={onAnswer} />)

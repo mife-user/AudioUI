@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef } from 'react'
 import type { GraphMutationReceipt, RunStartResult, WorkspaceSnapshot } from '../../bindings/audio-ui/internal/domain/entity'
 import type { WorkspaceStatus } from '../api/workspace'
 import { useWorkspaceStore } from '../stores/workspaceStore'
+import { useRunRequestContext } from '../hooks/runRequests'
 import { graphAPI, type GraphAPI } from '../canvas/graphApi'
 import { WorkspaceCanvas } from '../canvas/WorkspaceCanvas'
 
@@ -18,6 +19,7 @@ type Props = {
 
 export function WorkspacePage({ status, snapshot, error, onRetry, onGraphMutation, onRegisterDraftFlush, onStartRun, api = graphAPI }: Props) {
   const projectId = snapshot?.project?.id ?? ''
+  const runRequestContext = useRunRequestContext()
   const currentProjectId = useRef(projectId)
   currentProjectId.current = projectId
   const selectionSequence = useRef(0)
@@ -96,7 +98,7 @@ export function WorkspacePage({ status, snapshot, error, onRetry, onGraphMutatio
           <button className="agent-mini-btn" type="button" onClick={onRetry}>重试</button>
         </div>
       ) : null}
-      <WorkspaceCanvas snapshot={snapshot} onSelectNode={selectNode} onGraphMutation={onGraphMutation} onRegisterDraftFlush={onRegisterDraftFlush} onStartRun={onStartRun} api={api} />
+      <WorkspaceCanvas snapshot={snapshot} onSelectNode={selectNode} onGraphMutation={onGraphMutation} onRegisterDraftFlush={onRegisterDraftFlush} onRegisterNodeLocator={runRequestContext?.registerNodeLocator} onStartRun={onStartRun} api={api} />
     </main>
   )
 }

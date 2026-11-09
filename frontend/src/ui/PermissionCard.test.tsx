@@ -16,4 +16,12 @@ describe('PermissionCard', () => {
     fireEvent.click(screen.getByRole('button', { name: '允许一次' }))
     expect(onRespond).toHaveBeenCalledWith('p1', 'allow')
   })
+
+  it('shows a retryable error when responding fails', async () => {
+    const onRespond = vi.fn().mockRejectedValue(new Error('REQUEST_EXPIRED'))
+    render(<PermissionCard request={request} onRespond={onRespond} />)
+    fireEvent.click(screen.getByRole('button', { name: '允许一次' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('响应失败：REQUEST_EXPIRED')
+    expect(screen.getByRole('button', { name: '拒绝' })).toBeEnabled()
+  })
 })

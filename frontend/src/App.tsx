@@ -4,6 +4,7 @@ import { pendingAPI } from './api/pending'
 import type { GraphMutationReceipt } from '../bindings/audio-ui/internal/domain/entity'
 import { useWorkspaceBridge } from './hooks/useWorkspaceBridge'
 import { PendingControllerProvider, usePendingController } from './hooks/usePendingController'
+import { RunRequestProvider } from './hooks/RunRequestContext'
 import { useRunStore } from './stores/runStore'
 import { useWorkspaceStore } from './stores/workspaceStore'
 import { AboutDialog } from './ui/AboutDialog'
@@ -36,7 +37,7 @@ function App() {
   const [logs, setLogs] = useState<LogEntryDTO[]>([])
   const [systemOpen, setSystemOpen] = useState(false)
   const [aboutOpen, setAboutOpen] = useState(false)
-  const [consoleCollapsed, setConsoleCollapsed] = useState(false)
+  const [consoleCollapsed, setConsoleCollapsed] = useState(true)
   const [cliBannerDismissed, setCliBannerDismissed] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const [logsLoading, setLogsLoading] = useState(false)
@@ -143,6 +144,7 @@ function App() {
       await bridge.respondPermission(runId, requestId, decision)
     } catch (err) {
       setConsoleError(`权限响应失败：${messageOf(err)}`)
+      throw err
     }
   }, [bridge])
 
@@ -152,6 +154,7 @@ function App() {
       await bridge.respondQuestion(runId, requestId, answer, via)
     } catch (err) {
       setConsoleError(`问题回答失败：${messageOf(err)}`)
+      throw err
     }
   }, [bridge])
 
@@ -181,35 +184,43 @@ function App() {
       />
       {environmentError ? <div className="workspace-banner" role="alert">{environmentError}</div> : null}
       {env && !env.cli.installed && !cliBannerDismissed ? <CLIInstallBanner onDismiss={() => setCliBannerDismissed(true)} /> : null}
-      <PendingControllerProvider controller={pendingController}>
-        <div className="workspace-layout">
-        <WorkspacePage
-          status={workspaceStatus}
-          snapshot={workspaceSnapshot}
-          error={workspaceError}
-          onRetry={() => bridge.retryWorkspace()}
-          onGraphMutation={refreshGraph}
-          onRegisterDraftFlush={registerDraftFlush}
-          onStartRun={startNodeRun}
-        />
-        <AgentConsole
-          runs={runSummaries}
-          projectId={workspaceSnapshot?.project?.id ?? null}
-          runViews={runViews}
-          selectedRunId={selectedRunId}
-          selectedRun={selectedRun}
-          actionError={consoleError}
-          collapsed={consoleCollapsed}
-          onToggle={() => setConsoleCollapsed((value) => !value)}
-          onSelectRun={onSelectRun}
-          onRetryRun={onRetryRun}
-          onPermission={onPermission}
-          onQuestion={onQuestion}
-          onInterrupt={onInterrupt}
-          pendingController={pendingController}
-        />
-        </div>
-      </PendingControllerProvider>
+      <RunRequestProvider
+        projectId={workspaceSnapshot?.project?.id ?? null}
+        runViews={runViews}
+        onPermission={onPermission}
+        onQuestion={onQuestion}
+      >
+        <PendingControllerProvider controller={pendingController}>
+          <div className="workspace-layout">
+            <WorkspacePage
+              status={workspaceStatus}
+              snapshot={workspaceSnapshot}
+              error={workspaceError}
+              onRetry={() => bridge.retryWorkspace()}
+              onGraphMutation={refreshGraph}
+              onRegisterDraftFlush={registerDraftFlush}
+              onStartRun={startNodeRun}
+            />
+            <AgentConsole
+              runs={runSummaries}
+              projectId={workspaceSnapshot?.project?.id ?? null}
+              nodes={workspaceSnapshot?.nodes ?? []}
+              runViews={runViews}
+              selectedRunId={selectedRunId}
+              selectedRun={selectedRun}
+              actionError={consoleError}
+              collapsed={consoleCollapsed}
+              onToggle={() => setConsoleCollapsed((value) => !value)}
+              onSelectRun={onSelectRun}
+              onRetryRun={onRetryRun}
+              onPermission={onPermission}
+              onQuestion={onQuestion}
+              onInterrupt={onInterrupt}
+              pendingController={pendingController}
+            />
+          </div>
+        </PendingControllerProvider>
+      </RunRequestProvider>
       <SystemDrawer
         open={systemOpen}
         env={env}

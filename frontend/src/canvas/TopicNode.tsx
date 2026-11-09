@@ -3,6 +3,8 @@ import { Handle, Position, type NodeProps } from '@xyflow/react'
 import { TopicParameters } from './TopicParameters'
 import { candidateAt, nodeHandleLayoutKey, type CanvasFlowNode } from './flowModel'
 import { NodeResizeHandles, NodeSizeControl } from './NodeLayoutControls'
+import { PendingNodeEntry } from '../ui/PendingNodeEntry'
+import { NodeRunRequestEntry } from '../ui/NodeRunRequestEntry'
 import { useMeasuredNodeHandles } from './useMeasuredNodeHandles'
 
 function runStatusLabel(status: string | undefined): string {
@@ -32,6 +34,7 @@ export const TopicNode = memo(function TopicNode({ id, data, selected }: NodePro
     runSubmitting,
     runStatus,
     pendingCount = 0,
+    pendingResultIds = [],
     onUpdateTopicParams,
     onStartRun,
   } = data
@@ -50,10 +53,11 @@ export const TopicNode = memo(function TopicNode({ id, data, selected }: NodePro
     <>
       <NodeResizeHandles nodeId={id} visible={selected} disabled={mutationsDisabled} />
       <article className={`canvas-node topic-node${pathHighlighted ? ' is-path' : ''}${runningLocked ? ' is-running-locked' : ''}${node.locked ? ' is-content-locked' : ''}`}>
-      <header className="canvas-node-head">
+      <header className="canvas-node-head" tabIndex={-1}>
         <span className="canvas-node-kind topic-kind">选题</span>
         <strong title={node.title}>{node.title}</strong>
         {status ? <span className="canvas-node-status">{status}</span> : null}
+        <NodeRunRequestEntry nodeId={node.id} nodeTitle={node.title} />
         <NodeSizeControl node={node} disabled={mutationsDisabled} onApply={data.onSetNodeLayout} />
       </header>
       <div className="canvas-node-content nowheel">
@@ -67,9 +71,7 @@ export const TopicNode = memo(function TopicNode({ id, data, selected }: NodePro
           onRun={onStartRun ?? (async () => ({}))}
           onRegisterFlush={data.onRegisterTopicFlush}
         />
-        {pendingCount > 0 ? (
-          <p className="canvas-node-hint topic-pending-hint" role="status">有待处理的选题结果，请在控制台查看。</p>
-        ) : null}
+        <PendingNodeEntry node={node} pendingIds={pendingResultIds} />
         {candidateError ? <p className="canvas-node-hint topic-candidate-error" role="alert">候选读取失败：{candidateError}</p> : null}
         {candidateLoading ? <p className="canvas-node-hint topic-candidate-hint" role="status">正在读取候选内容…</p> : null}
         {topicCandidateIndexes.length ? (
