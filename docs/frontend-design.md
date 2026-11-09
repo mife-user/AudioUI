@@ -2,9 +2,9 @@
 
 | 项 | 内容 |
 |---|---|
-| 版本 | 0.2.8 |
-| 状态 | 待评审（M2-11A 设计已验收；M2-12A 实现已于 2026-11-08 通过用户验收；M2-12B 已于 2026-11-08 通过用户验收，真实浏览器交互未执行；M2-13 集成与验收已于 2026-11-08 通过用户确认） |
-| 更新 | 2026-11-08 |
+| 版本 | 0.2.9 |
+| 状态 | 待评审（M2-11A 设计已验收；M2-12A 实现已于 2026-11-08 通过用户验收；M2-12B 已于 2026-11-08 通过用户验收，真实浏览器交互未执行；M2-13 集成与验收已于 2026-11-08 通过用户确认；U5 于 2026-11-09 通过用户验收，助手未完成浏览器实测） |
+| 更新 | 2026-11-09 |
 | 作者 | 待填 |
 | 评审 | 待填 |
 | 设计依据 | [`design/style-directions.html`](design/style-directions.html) |
@@ -32,6 +32,7 @@
 | 0.2.6 | 2026-11-06 | M2-11A 评审稿：本地候选节点→提示词→Agent→script 输出；无输出自动创建、已有版本确认追加；云端/视频不在本阶段 |
 | 0.2.7 | 2026-11-08 | M2-12A 实现记录：五类快照节点、Prompt 参数保存与 Agent 运行入口；用户确认验收完成 |
 | 0.2.8 | 2026-11-08 | M2-12B 实现记录：Script 待确认追加与版本来源、可折叠叶子链快捷栏与运行状态；用户已验收，真实浏览器交互未执行 |
+| 0.2.9 | 2026-11-09 | U5 实现记录：Script 正文与历史版本按需读取、待确认结果按冻结目标定位，Script 卡片与控制台共用工程作用域 Pending 控制器；用户已确认验收，助手未完成浏览器实测 |
 
 ---
 
@@ -479,7 +480,7 @@ Topic ──应用校验 topics──> Candidate A ──> Prompt ──> Agent 
 
 ### 4.9 工作台交互优化（独立批次，U0 已确认）
 
-本批次位于 M2 验收之后、M3 开始之前。设计原型为[画布交互优化单文件演示](design/canvas-workbench-redesign-demo.html)；U4 新建菜单交互另见[单文件演示](design/u4-canvas-context-menu-demo.html)。演示仅使用模拟数据，不连接 Agent、不访问工程或网络，不代表实现或验收证据。
+本批次位于 M2 验收之后、M3 开始之前。U5 已实现并于 2026-11-09 经用户确认验收；U6～U9 尚未实施。助手未完成 U5 真实浏览器实测或截图/viewport 归档。设计原型为[画布交互优化单文件演示](design/canvas-workbench-redesign-demo.html)；U4 新建菜单交互另见[单文件演示](design/u4-canvas-context-menu-demo.html)。演示仅使用模拟数据，不连接 Agent、不访问工程或网络，不代表实现或验收证据。
 
 **卡片尺寸与布局**：五类节点支持四角与四边八向缩放，缩放范围为 200 × 140 至 1200 × 900；固定标题栏是唯一拖动区，正文在卡片内部滚动且滚轮不缩放画布。标题栏提供键盘可达的尺寸设置与恢复默认尺寸入口；输入、拖动、端口和缩放命中区相互隔离。下表为建议的逻辑画布尺寸，真实页面验收后可调整。
 
@@ -497,13 +498,13 @@ Topic ──应用校验 topics──> Candidate A ──> Prompt ──> Agent 
 
 **Agent 栏和请求归属**：Agent 栏默认收起为悬浮状态入口；展开面板有界且可滚动，不占画布列宽。运行控制与历史仍可用。权限、问题及待确认结果按冻结的 project/run/request/pending 身份定位到关联节点；面板收起不自动授权或丢弃请求，无法定位时提供异常恢复入口。
 
-**Script 预览**：已有 Script 的新结果归属由发送时冻结的输出绑定决定，不按实时连线推断。Script 卡片展示待确认入口，先读取并完整预览新内容、来源和基准版本，再确认追加或丢弃；版本冲突不提供 force。无绑定自动创建节点及空 Script 自动写入首版的规则不变。正文查询必须由 Go 校验工程、节点、版本及 CAS 引用，不接受任意 artifact hash。
+**Script 预览（U5 已实现并通过用户验收）**：已有 Script 的新结果归属由发送时冻结的输出绑定决定，不按实时连线推断。Script 卡片显示待确认入口，先读取并完整预览新内容、来源和基准版本，再确认追加或丢弃；版本冲突不提供 force。无绑定自动创建节点及空 Script 自动写入首版的规则不变。最新正文摘要由工程/节点/版本作用域查询取得，全文和历史版本按需读取；返回内容只作为转义文本显示，工程切换后忽略迟到响应。服务端校验工程、Script 节点、版本与 CAS 关系，并验证大小、UTF-8 和 `script@1` Schema，不接受任意 artifact hash。待确认预览、确认、丢弃、冲突和仅重试同步共用工程作用域控制器。助手未完成真实浏览器实测或归档截图/viewport；真实 Agent 与 WebView2 平台行为未覆盖。
 
 **连线与排布**：当前叶子链完整路径强调、非当前分支仍可辨识；边的命中区域大于可见线宽。自动 Candidate/Script 位置按节点矩形、尺寸和间距确定，互不覆盖且不移动用户已有节点。所有连接与改挂仍由 Go 校验。
 
 **输入与运行前保存**：自动保存不禁用正在输入的控件；IME 组合结束后再保存，旧响应不能覆盖新草稿。启动 Agent 只 flush 根到目标节点的路径前缀及受保护输出；下游和无关分支不得误锁或阻止运行。工程切换、失败与仅重试快照均保留明确状态。
 
-详细行为与 AC-U-01～19 见[优化计划](plans/active/canvas-workbench-optimization-plan.md)和[验收标准](acceptance.md)。本节描述目标，不表示产品功能已实现。
+详细行为与 AC-U-01～19 见[优化计划](plans/active/canvas-workbench-optimization-plan.md)和[验收标准](acceptance.md)。U5 已实现并经用户确认验收；U6～U9 尚未实施。助手未完成 U5 真实浏览器实测或归档截图/viewport，不能以构建结果替代页面实测。
 
 ---
 
@@ -530,11 +531,11 @@ Topic ──应用校验 topics──> Candidate A ──> Prompt ──> Agent 
 | `PromptNode` | 编辑任务与约束，不提供运行入口；连接后可创建 Agent | draft/saved/dirty/saving/save-error/locked/error | `--panel` `--accent` `--danger` |
 | `PromptParameters` | Prompt 任务与约束、320ms 保存、失败保留/重试及 Agent 启动前 flush | saved/dirty/saving/save-error/sync-pending/invalid/disabled | `--panel-2` `--accent` `--danger` |
 | `AgentNode` | 本地运行入口、输出绑定与运行状态 | idle/starting/running/succeeded/failed/interrupted/busy/error | `--panel` `--accent` `--ok` `--danger` |
-| `ScriptNode` | 展示脚本当前版本、来源及待确认结果 | empty/ready/pending/conflict/invalid/error | `--panel` `--warn` `--danger` |
+| `ScriptNode` | 展示最新正文摘要、全文/历史按需读取及冻结目标待确认入口 | empty/ready/pending/conflict/invalid/error | `--panel` `--warn` `--danger` |
 | `ScriptVersionList` | 展示不可变脚本版本与来源运行 | empty/ready/selected | `--panel-2` `--muted` |
 | `ScriptResultConfirmation` | 确认追加版本或取消，不覆盖旧版本 | pending/confirming/confirmed/cancelled/conflict | `--warn` `--ok` `--danger` |
 | `DraftNode` | 未连接提示词节点 | default/hover/invalid-target | `--border-strong` `--muted` |
-| `PendingArtifactCard` | 待应用预览/应用/丢弃 | pending/invalid/applied/discarded | `--warn` `--ok` `--danger` |
+| `PendingArtifactCard` | 由工程作用域控制器驱动待应用预览/应用/丢弃，供控制台与 Script 卡片复用 | pending/invalid/applied/discarded | `--warn` `--ok` `--danger` |
 | `SystemDrawer` | 环境/日志/关于 | closed/open | `--bg-elev` `--border-strong` |
 | `AgentStatusBadge` | Agent 状态点 | idle/running/pending/error/unavailable | `--ok` `--warn` `--danger` |
 | `NoticeList` | 一般通知/错误 | empty/info/error | `--muted` `--danger` |

@@ -13,14 +13,16 @@ type WorkspaceProject struct {
 
 // PendingSummary is the payload-free view used by the workspace list.
 type PendingSummary struct {
-	ID      string                    `json:"id"`
-	NodeID  string                    `json:"nodeId"`
-	RunID   string                    `json:"runId"`
-	ChainID string                    `json:"chainId"`
-	Kind    valueobject.OutputKind    `json:"kind"`
-	Status  valueobject.PendingStatus `json:"status"`
-	Summary string                    `json:"summary,omitempty"`
-	Error   string                    `json:"error,omitempty"`
+	ID            string                    `json:"id"`
+	NodeID        string                    `json:"nodeId"`
+	RunID         string                    `json:"runId"`
+	ChainID       string                    `json:"chainId"`
+	Kind          valueobject.OutputKind    `json:"kind"`
+	Status        valueobject.PendingStatus `json:"status"`
+	Summary       string                    `json:"summary,omitempty"`
+	Error         string                    `json:"error,omitempty"`
+	OutputBinding *RunOutputBinding         `json:"outputBinding,omitempty"`
+	ResultNodeID  string                    `json:"resultNodeId,omitempty"`
 }
 
 // WorkspaceRunSummary is the payload-free view used by the workspace list.

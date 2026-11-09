@@ -200,6 +200,40 @@ func TestGetWorkspaceSnapshotReturnsSummariesDerivedChainsAndLocks(t *testing.T)
 	}
 }
 
+func TestMakeWorkspaceSnapshotPreservesFrozenPendingTargetWithoutPayload(t *testing.T) {
+	binding := &entity.RunOutputBinding{
+		Bound: true, NodeID: "n_script", ParentNodeID: "n_agent", BaselineVersion: 2,
+		BaselineArtifactID: "sha256:baseline",
+	}
+	view := workflow.WorkspaceView{
+		Project: entity.Project{ID: "p_test", Name: "工程"},
+		Pending: []entity.Pending{{
+			ID: "pending_script", NodeID: "n_agent", RunID: "r_agent", ChainID: "c_n_agent",
+			Kind: valueobject.OutputKindScript, Status: valueobject.PendingPending,
+			OutputBinding: binding, ResultNodeID: "n_script", Payload: "private payload",
+		}},
+	}
+	snapshot := makeWorkspaceSnapshot(view, nil)
+	if len(snapshot.Pending) != 1 {
+		t.Fatalf("pending summaries = %+v", snapshot.Pending)
+	}
+	summary := snapshot.Pending[0]
+	if summary.ResultNodeID != "n_script" || summary.OutputBinding == nil || *summary.OutputBinding != *binding {
+		t.Fatalf("frozen pending target = %+v", summary)
+	}
+	view.Pending[0].OutputBinding.NodeID = "n_reparented"
+	if summary.OutputBinding.NodeID != "n_script" {
+		t.Fatalf("summary binding was not copied: %+v", summary.OutputBinding)
+	}
+	encoded, err := json.Marshal(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if containsAny(string(encoded), "private payload", "rawPayload") {
+		t.Fatalf("workspace snapshot contains pending payload: %s", encoded)
+	}
+}
+
 func TestWorkspaceSnapshotEmptyAndRetryableOnRevisionRace(t *testing.T) {
 	service, workflowService, revision, layout := newWorkspaceFixture(t, false)
 	manager := runservice.New(runservice.Options{Projects: service, RunStores: persistence.NewRunStoreProvider(layout)})

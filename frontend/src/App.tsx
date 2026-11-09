@@ -3,6 +3,7 @@ import { fetchEnvironment, fetchRecentLogs, type EnvironmentDTO, type LogEntryDT
 import { pendingAPI } from './api/pending'
 import type { GraphMutationReceipt } from '../bindings/audio-ui/internal/domain/entity'
 import { useWorkspaceBridge } from './hooks/useWorkspaceBridge'
+import { PendingControllerProvider, usePendingController } from './hooks/usePendingController'
 import { useRunStore } from './stores/runStore'
 import { useWorkspaceStore } from './stores/workspaceStore'
 import { AboutDialog } from './ui/AboutDialog'
@@ -126,6 +127,15 @@ function App() {
     await pendingAPI.discardPending(id, projectId)
   }, [])
   const onRefreshWorkspace = useCallback(() => bridge.retryWorkspace(), [bridge])
+  const pendingController = usePendingController({
+    projectId: workspaceSnapshot?.project?.id ?? null,
+    nodes: workspaceSnapshot?.nodes ?? [],
+    pending: workspaceSnapshot?.pending ?? [],
+    onGetPending,
+    onApplyPending,
+    onDiscardPending,
+    onRefreshWorkspace,
+  })
 
   const onPermission = useCallback(async (runId: string, requestId: string, decision: 'allow' | 'allow_session' | 'deny') => {
     setConsoleError('')
@@ -171,7 +181,8 @@ function App() {
       />
       {environmentError ? <div className="workspace-banner" role="alert">{environmentError}</div> : null}
       {env && !env.cli.installed && !cliBannerDismissed ? <CLIInstallBanner onDismiss={() => setCliBannerDismissed(true)} /> : null}
-      <div className="workspace-layout">
+      <PendingControllerProvider controller={pendingController}>
+        <div className="workspace-layout">
         <WorkspacePage
           status={workspaceStatus}
           snapshot={workspaceSnapshot}
@@ -184,8 +195,6 @@ function App() {
         <AgentConsole
           runs={runSummaries}
           projectId={workspaceSnapshot?.project?.id ?? null}
-          nodes={workspaceSnapshot?.nodes ?? []}
-          pending={workspaceSnapshot?.pending ?? []}
           runViews={runViews}
           selectedRunId={selectedRunId}
           selectedRun={selectedRun}
@@ -197,12 +206,10 @@ function App() {
           onPermission={onPermission}
           onQuestion={onQuestion}
           onInterrupt={onInterrupt}
-          onGetPending={onGetPending}
-          onApplyPending={onApplyPending}
-          onDiscardPending={onDiscardPending}
-          onRefreshWorkspace={onRefreshWorkspace}
+          pendingController={pendingController}
         />
-      </div>
+        </div>
+      </PendingControllerProvider>
       <SystemDrawer
         open={systemOpen}
         env={env}

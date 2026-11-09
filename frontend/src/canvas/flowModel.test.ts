@@ -115,6 +115,8 @@ describe('flowModel', () => {
     view.pending = [{
       id: 'pending_one', nodeId: agent.id, runId: 'r_new', chainId: 'c_new', kind: OutputKind.OutputKindScript,
       status: PendingStatus.PendingPending,
+      outputBinding: { bound: true, nodeId: script.id, parentNodeId: agent.id, baselineVersion: 0 },
+      resultNodeId: script.id,
     }]
 
     const model = buildFlowModel(view, vi.fn())
@@ -125,6 +127,30 @@ describe('flowModel', () => {
       outputScript: script,
     })
     expect(model.nodes.find((node) => node.id === script.id)?.data.pendingOutputCount).toBe(1)
+  })
+
+  it('keeps pending Script results on the frozen output after the Agent is rebound', () => {
+    const topic = makeNode('n_topic', 'topic')
+    const candidate = makeNode('n_candidate', 'candidate', topic.id, {
+      candidateSource: { topicNodeId: topic.id, artifactId: 'sha256:topics', index: 0 },
+    })
+    const prompt = makeNode('n_prompt', 'prompt', candidate.id)
+    const agent = makeNode('n_agent', 'agent', prompt.id)
+    const movedAgent = makeNode('n_moved_agent', 'agent', candidate.id)
+    const currentScript = makeNode('n_script_current', 'script', agent.id)
+    const frozenScript = makeNode('n_script_frozen', 'script', movedAgent.id)
+    const view = snapshot([topic, candidate, prompt, agent, movedAgent, currentScript, frozenScript])
+    view.pending = [{
+      id: 'pending_frozen', nodeId: agent.id, runId: 'r_old', chainId: 'c_old', kind: OutputKind.OutputKindScript,
+      status: PendingStatus.PendingPending,
+      outputBinding: { bound: true, nodeId: frozenScript.id, parentNodeId: agent.id, baselineVersion: 1 },
+      resultNodeId: frozenScript.id,
+    }]
+
+    const model = buildFlowModel(view, vi.fn())
+    expect(model.nodes.find((node) => node.id === frozenScript.id)?.data.pendingOutputCount).toBe(1)
+    expect(model.nodes.find((node) => node.id === frozenScript.id)?.data.pendingOutputIds).toEqual(['pending_frozen'])
+    expect(model.nodes.find((node) => node.id === currentScript.id)?.data.pendingOutputCount).toBe(0)
   })
 
   it('locks only the in-flight target path and its direct Script output', () => {

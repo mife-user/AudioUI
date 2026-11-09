@@ -33,6 +33,10 @@ export function GetPending(id: string, projectID: string): $CancellablePromise<e
     return $Call.ByID(395943744, id, projectID);
 }
 
+export function GetScriptVersion(nodeID: string, version: number, projectID: string): $CancellablePromise<entity$0.ScriptVersionDetail> {
+    return $Call.ByID(2729634474, nodeID, version, projectID);
+}
+
 export function GetTopicCandidates(nodeID: string, projectID: string): $CancellablePromise<entity$0.TopicCandidate[] | null> {
     return $Call.ByID(3599379162, nodeID, projectID);
 }

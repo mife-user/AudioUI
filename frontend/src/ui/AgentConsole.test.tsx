@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { OutputKind, PendingStatus, PermissionTier, RunStatus, TranscriptKind } from '../../bindings/audio-ui/internal/domain/valueobject'
 import type { Node, PendingDetail, PendingSummary, RunSnapshot, WorkspaceRunSummary } from '../../bindings/audio-ui/internal/domain/entity'
 import type { RunView } from '../stores/runStore'
+import { usePendingController } from '../hooks/usePendingController'
 import { AgentConsole } from './AgentConsole'
 
 const summary: WorkspaceRunSummary = {
@@ -68,6 +69,14 @@ const scriptPendingSummary: PendingSummary = {
   kind: OutputKind.OutputKindScript,
   status: PendingStatus.PendingPending,
   summary: '追加到 v1',
+  outputBinding: {
+    bound: true,
+    nodeId: 'n_script',
+    parentNodeId: 'n_agent',
+    baselineVersion: 1,
+    baselineArtifactId: 'sha256:script-v1',
+  },
+  resultNodeId: 'n_script',
 }
 
 const scriptNode: Node = {
@@ -137,8 +146,31 @@ function scriptPendingDetail(): PendingDetail {
   }
 }
 
-function renderConsole(overrides: Partial<React.ComponentProps<typeof AgentConsole>> = {}) {
-  const props: React.ComponentProps<typeof AgentConsole> = {
+type ConsoleHarnessProps = Omit<React.ComponentProps<typeof AgentConsole>, 'pendingController'> & {
+  nodes: Node[]
+  pending: PendingSummary[]
+  onGetPending: (id: string, projectId: string) => Promise<PendingDetail>
+  onApplyPending: (id: string, force: boolean, projectId: string) => Promise<void>
+  onDiscardPending: (id: string, projectId: string) => Promise<void>
+  onRefreshWorkspace: () => Promise<void>
+}
+
+function ConsoleHarness({ props }: { props: ConsoleHarnessProps }) {
+  const { nodes, pending, onGetPending, onApplyPending, onDiscardPending, onRefreshWorkspace, ...consoleProps } = props
+  const pendingController = usePendingController({
+    projectId: props.projectId,
+    nodes,
+    pending,
+    onGetPending,
+    onApplyPending,
+    onDiscardPending,
+    onRefreshWorkspace,
+  })
+  return <AgentConsole {...consoleProps} pendingController={pendingController} />
+}
+
+function renderConsole(overrides: Partial<ConsoleHarnessProps> = {}) {
+  const props: ConsoleHarnessProps = {
     runs: [summary],
     projectId: 'p_demo',
     nodes: [],
@@ -160,7 +192,7 @@ function renderConsole(overrides: Partial<React.ComponentProps<typeof AgentConso
     onRefreshWorkspace: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   }
-  return { ...render(<AgentConsole {...props} />), props }
+  return { ...render(<ConsoleHarness props={props} />), props }
 }
 
 describe('AgentConsole', () => {
@@ -273,7 +305,7 @@ describe('AgentConsole', () => {
     const { rerender, props } = renderConsole({ pending: [pendingSummary], onGetPending: vi.fn(() => pendingLoad) })
     fireEvent.click(screen.getByRole('tab', { name: /待处理/ }))
     fireEvent.click(screen.getByRole('button', { name: /n_topic/ }))
-    rerender(<AgentConsole {...props} projectId="p_other" pending={[]} />)
+    rerender(<ConsoleHarness props={{ ...props, projectId: 'p_other', pending: [] }} />)
     resolveDetail(pendingDetail())
     await waitFor(() => expect(screen.queryByText('候选甲')).not.toBeInTheDocument())
     expect(screen.getByText('暂无待处理结果')).toBeInTheDocument()

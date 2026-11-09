@@ -63,6 +63,7 @@ describe('WorkspacePage', () => {
       selectNode: vi.fn(() => selected.promise),
       updateNodeParams: vi.fn().mockResolvedValue({ projectId: 'p_one', projectRevision: 4, nodeId: 'n_selected' }),
       getTopicCandidates: vi.fn().mockResolvedValue([]),
+      getScriptVersion: vi.fn().mockResolvedValue({ nodeId: 'n_script', version: { n: 1, artifactId: 'sha256:script', runId: 'r_script' }, payload: '{"title":"脚本","scenes":[{"narration":"正文","duration":1}]}' }),
     }
     render(<WorkspacePage status="ready" snapshot={projectSnapshot} error="" onRetry={vi.fn()} api={api} />)
 
@@ -88,6 +89,7 @@ describe('WorkspacePage', () => {
       selectNode: vi.fn().mockRejectedValue(new Error('select failed')),
       updateNodeParams: vi.fn().mockResolvedValue({ projectId: 'p_one', projectRevision: 4, nodeId: 'n_selected' }),
       getTopicCandidates: vi.fn().mockResolvedValue([]),
+      getScriptVersion: vi.fn().mockResolvedValue({ nodeId: 'n_script', version: { n: 1, artifactId: 'sha256:script', runId: 'r_script' }, payload: '{"title":"脚本","scenes":[{"narration":"正文","duration":1}]}' }),
     }
     render(<WorkspacePage status="ready" snapshot={projectSnapshot} error="" onRetry={vi.fn()} api={api} />)
 

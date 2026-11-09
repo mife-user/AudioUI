@@ -1231,6 +1231,159 @@
   font-family: var(--mono);
 }
 
+.script-version-preview {
+  display: grid;
+  gap: var(--s1);
+  padding: var(--s2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+}
+
+.script-version-preview > strong {
+  color: var(--text);
+  font-size: 10px;
+}
+
+.script-version-preview p {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 9px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.script-version-read {
+  min-height: 24px;
+  width: fit-content;
+  padding: 0 var(--s2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 9px;
+}
+
+.script-version-read:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.script-version-read-error,
+.script-version-read-message {
+  margin: 0;
+  color: var(--danger);
+  font-size: 9px;
+  overflow-wrap: anywhere;
+}
+
+.script-version-read-error {
+  display: grid;
+  gap: var(--s1);
+}
+
+.script-version-read-message {
+  color: var(--muted);
+}
+
+.script-version-reader {
+  display: grid;
+  gap: var(--s2);
+  padding: var(--s2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+}
+
+.script-version-full-body {
+  display: grid;
+  gap: var(--s2);
+}
+
+.script-version-full-body > strong {
+  color: var(--text);
+  font-size: 10px;
+}
+
+.script-version-full-body ol {
+  display: grid;
+  gap: var(--s2);
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text-dim);
+  font-size: 9px;
+}
+
+.script-version-full-body li {
+  padding-left: var(--s1);
+  overflow-wrap: anywhere;
+}
+
+.script-version-full-body pre {
+  margin: 0;
+  color: var(--text-dim);
+  font: inherit;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.script-version-full-body li > span {
+  color: var(--muted);
+}
+
+.script-pending-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s1);
+}
+
+.script-pending-backdrop {
+  position: fixed;
+  z-index: 1000;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: var(--s4);
+  background: var(--glass);
+}
+
+.script-pending-dialog {
+  width: min(620px, 100%);
+  max-height: min(84vh, 760px);
+  overflow: auto;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-elev);
+  box-shadow: var(--shadow);
+  outline: none;
+}
+
+.script-pending-dialog-head {
+  position: sticky;
+  z-index: 1;
+  top: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s2);
+  padding: var(--s3);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elev);
+}
+
+.script-pending-dialog-head > strong {
+  color: var(--text);
+  font-size: 12px;
+}
+
+.script-pending-dialog > .console-pending-card {
+  margin: var(--s3);
+}
+
 .script-pending-hint {
   margin: 0;
   color: var(--warn);

@@ -2,8 +2,9 @@ import { vi, describe, expect, it } from 'vitest'
 import type { ReactElement } from 'react'
 import type { HandleProps, NodeProps, NodeResizerProps } from '@xyflow/react'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import type { Node } from '../../bindings/audio-ui/internal/domain/entity'
-import { NodeType } from '../../bindings/audio-ui/internal/domain/valueobject'
+import type { Node, PendingDetail, PendingSummary, ScriptVersionDetail } from '../../bindings/audio-ui/internal/domain/entity'
+import { NodeType, OutputKind, PendingStatus } from '../../bindings/audio-ui/internal/domain/valueobject'
+import { PendingControllerProvider, usePendingController } from '../hooks/usePendingController'
 import type { CanvasFlowNode } from './flowModel'
 import { AgentNode } from './AgentNode'
 import { CandidateNode } from './CandidateNode'
@@ -80,6 +81,37 @@ function nodeProps(nodeValue: Node, data = nodeData(nodeValue), selected = false
     positionAbsoluteX: 0,
     positionAbsoluteY: 0,
   } as NodeProps<CanvasFlowNode>
+}
+
+type PendingScriptHarnessProps = {
+  script: Node
+  pending: PendingSummary
+  onGetPending: (id: string, projectId: string) => Promise<PendingDetail>
+  onApplyPending: (id: string, force: boolean, projectId: string) => Promise<void>
+  onDiscardPending: (id: string, projectId: string) => Promise<void>
+  onRefreshWorkspace: () => Promise<void>
+}
+
+function PendingScriptHarness(props: PendingScriptHarnessProps) {
+  const controller = usePendingController({
+    projectId: 'p_demo',
+    nodes: [props.script],
+    pending: [props.pending],
+    onGetPending: props.onGetPending,
+    onApplyPending: props.onApplyPending,
+    onDiscardPending: props.onDiscardPending,
+    onRefreshWorkspace: props.onRefreshWorkspace,
+  })
+  const data = nodeData(props.script, {
+    projectId: 'p_demo',
+    pendingOutputCount: 1,
+    pendingOutputIds: [props.pending.id],
+  })
+  return (
+    <PendingControllerProvider controller={controller}>
+      <ScriptNode {...nodeProps(props.script, data)} />
+    </PendingControllerProvider>
+  )
 }
 
 type CanvasNodeView = {
@@ -237,16 +269,117 @@ describe('M2-12A canvas nodes', () => {
       ],
     })
     const onAddChild = vi.fn()
-    render(<ScriptNode {...nodeProps(script, nodeData(script, { onAddChild, pendingOutputCount: 1 }))} />)
+    render(<ScriptNode {...nodeProps(script, nodeData(script, { onAddChild, pendingOutputCount: 1, pendingOutputIds: ['pending_one'] }))} />)
 
     expect(screen.getByText('2 个不可变版本 · 最新 v2')).toBeInTheDocument()
     expect(screen.getAllByText('r_two')).toHaveLength(2)
-    expect(screen.getByText('1 个结果待处理，可在运行控制台查看。')).toBeInTheDocument()
+    expect(screen.getByText('待处理 1')).toBeInTheDocument()
     fireEvent.click(screen.getByText('版本历史 · 2'))
     expect(screen.getByText('r_one')).toBeInTheDocument()
     expect(screen.getByText('sha256:script-v1')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '从 n_script 新增提示词' }))
     expect(onAddChild).toHaveBeenCalledWith('n_script', 'prompt')
+  })
+
+  it('reads the latest Script body and fetches historical versions only when selected', async () => {
+    const script = node('n_script', 'script', 'n_agent', {
+      scriptVersions: [
+        { n: 1, artifactId: 'sha256:script-v1', runId: 'r_one' },
+        { n: 2, artifactId: 'sha256:script-v2', runId: 'r_two' },
+      ],
+    })
+    const onGetScriptVersion = vi.fn(async (_nodeId: string, version: number, _projectId: string) => ({
+      nodeId: script.id,
+      version: script.scriptVersions?.find((item) => item.n === version) ?? { n: version, artifactId: '', runId: '' },
+      payload: JSON.stringify({
+        title: version === 2 ? '最新标题' : '历史标题',
+        scenes: [{ narration: version === 2 ? '第一行\\n<img src=x onerror=alert(1)>' : '历史正文', duration: 12 }],
+      }),
+    }))
+    render(<ScriptNode {...nodeProps(script, nodeData(script, { projectId: 'p_demo', onGetScriptVersion }))} />)
+
+    expect(await screen.findByText('最新标题')).toBeInTheDocument()
+    expect(onGetScriptVersion).toHaveBeenCalledWith(script.id, 2, 'p_demo')
+    fireEvent.click(screen.getByRole('button', { name: '查看完整正文' }))
+    const latestBody = screen.getByLabelText('脚本 v2 正文')
+    expect(latestBody.querySelector('pre')?.textContent).toBe('第一行\\n<img src=x onerror=alert(1)>')
+    expect(latestBody.querySelector('img')).toBeNull()
+
+    fireEvent.click(screen.getByText('版本历史 · 2'))
+    fireEvent.click(screen.getByRole('button', { name: '查看 v1 正文' }))
+    expect(await screen.findByText('历史标题')).toBeInTheDocument()
+    expect(onGetScriptVersion).toHaveBeenCalledWith(script.id, 1, 'p_demo')
+    expect(screen.getByLabelText('脚本 v1 正文').querySelector('pre')).toHaveTextContent('历史正文')
+  })
+
+  it('ignores a late Script body response after the project changes', async () => {
+    const script = node('n_script', 'script', 'n_agent', {
+      scriptVersions: [{ n: 1, artifactId: 'sha256:script-v1', runId: 'r_one' }],
+    })
+    let resolveOld!: (detail: ScriptVersionDetail) => void
+    const oldRequest = new Promise<ScriptVersionDetail>((resolve) => { resolveOld = resolve })
+    const detailFor = (nodeId: string, title: string): ScriptVersionDetail => ({
+      nodeId,
+      version: { n: 1, artifactId: 'sha256:script-v1', runId: 'r_one' },
+      payload: JSON.stringify({ title, scenes: [{ narration: title, duration: 1 }] }),
+    })
+    const onGetScriptVersion = vi.fn((_nodeId: string, _version: number, ownerProjectId: string) => (
+      ownerProjectId === 'p_one' ? oldRequest : Promise.resolve(detailFor(script.id, '新工程脚本'))
+    ))
+    const { rerender } = render(<ScriptNode {...nodeProps(script, nodeData(script, { projectId: 'p_one', onGetScriptVersion }))} />)
+    await waitFor(() => expect(onGetScriptVersion).toHaveBeenCalledWith(script.id, 1, 'p_one'))
+
+    rerender(<ScriptNode {...nodeProps(script, nodeData(script, { projectId: 'p_two', onGetScriptVersion }))} />)
+    expect(await screen.findByText('新工程脚本', { selector: 'strong' })).toBeInTheDocument()
+    resolveOld(detailFor(script.id, '旧工程脚本'))
+    await waitFor(() => expect(screen.getByText('新工程脚本', { selector: 'strong' })).toBeInTheDocument())
+    expect(screen.queryByText('旧工程脚本')).not.toBeInTheDocument()
+  })
+
+  it('opens and applies a frozen Script result through the shared project-scoped controller', async () => {
+    const script = node('n_script', 'script', 'n_agent', {
+      scriptVersions: [{ n: 1, artifactId: 'sha256:script-v1', runId: 'r_old' }],
+    })
+    const pending: PendingSummary = {
+      id: 'pending_script',
+      nodeId: 'n_agent',
+      runId: 'r_new',
+      chainId: 'c_n_agent',
+      kind: OutputKind.OutputKindScript,
+      status: PendingStatus.PendingPending,
+      outputBinding: { bound: true, nodeId: script.id, parentNodeId: 'n_agent', baselineVersion: 1, baselineArtifactId: 'sha256:script-v1' },
+      resultNodeId: script.id,
+    }
+    const payload = JSON.stringify({ title: '待追加脚本', scenes: [{ narration: '新增旁白。', duration: 8 }] })
+    const rawPayload = btoa(Array.from(new TextEncoder().encode(payload), (byte) => String.fromCharCode(byte)).join(''))
+    const onGetPending = vi.fn().mockResolvedValue({
+      pending: {
+        ...pending,
+        payload: 'pending/pending_script.json',
+        chainPath: ['n_agent'],
+        outputSchemaVersion: 1,
+        createdAt: '2026-11-09T10:00:00Z',
+      },
+      rawPayload,
+    })
+    const onApplyPending = vi.fn().mockResolvedValue(undefined)
+    const onRefreshWorkspace = vi.fn().mockResolvedValue(undefined)
+    render(<PendingScriptHarness
+      script={script}
+      pending={pending}
+      onGetPending={onGetPending}
+      onApplyPending={onApplyPending}
+      onDiscardPending={vi.fn().mockResolvedValue(undefined)}
+      onRefreshWorkspace={onRefreshWorkspace}
+    />)
+
+    fireEvent.click(screen.getByRole('button', { name: '查看待确认结果' }))
+    expect(await screen.findByText('待追加脚本')).toBeInTheDocument()
+    expect(screen.getByRole('dialog', { name: '脚本结果 pending_script' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '确认追加' }))
+    await waitFor(() => expect(onApplyPending).toHaveBeenCalledWith('pending_script', false, 'p_demo'))
+    expect(onGetPending).toHaveBeenCalledWith('pending_script', 'p_demo')
+    expect(onRefreshWorkspace).toHaveBeenCalledOnce()
   })
 
   it('disables path operations while allowing content-locked topic topology to remain separate', () => {

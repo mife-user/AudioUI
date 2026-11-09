@@ -25,6 +25,7 @@ export type {
     RunStartResult,
     RunSummary,
     ScriptVersion,
+    ScriptVersionDetail,
     TopicCandidate,
     WorkspaceChain,
     WorkspaceProject,

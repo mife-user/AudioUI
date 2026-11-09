@@ -88,6 +88,12 @@ type ScriptVersion struct {
 	RunID      string `json:"runId"`
 }
 
+type ScriptVersionDetail struct {
+	NodeID  string        `json:"nodeId"`
+	Version ScriptVersion `json:"version"`
+	Payload string        `json:"payload"`
+}
+
 // Node is one persisted graph node. Edges are derived from Parent.
 type Node struct {
 	ID              string               `json:"id"`

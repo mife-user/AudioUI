@@ -20,6 +20,8 @@ var (
 	ErrTopicRootParent          = errors.New("TOPIC_ROOT_PARENT")
 	ErrNotInChain               = errors.New("NOT_IN_CHAIN")
 	ErrCandidateInvalid         = errors.New("CANDIDATE_INVALID")
+	ErrScriptVersionNotFound    = errors.New("SCRIPT_VERSION_NOT_FOUND")
+	ErrScriptVersionCorrupt     = errors.New("SCRIPT_VERSION_CORRUPT")
 	ErrUnknownNodeType          = errors.New("UNKNOWN_NODE_TYPE")
 	ErrWorkspaceMoveFailed      = errors.New("WORKSPACE_MOVE_FAILED")
 	ErrInvalidPosition          = errors.New("INVALID_POSITION")

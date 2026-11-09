@@ -1,6 +1,6 @@
 # 画布、节点与 Agent 交互整体优化计划
 
-> **状态：U0 范围与文档决策已于 2026-11-08 确认；U1 代码、自动化与真实 Wails/WebView2 页面自检完成，待用户验收；Windows 原生 IME 与真实 Agent 未测；U2 已于 2026-11-09 完成实现、自检及前端交互验收；U3 已于 2026-11-09 通过用户验收（助手未执行真实浏览器页面实测）；U4 已于 2026-11-09 通过用户验收（助手 Edge 页面实测边界见 U4）；U5～U9 尚未实施。**
+> **状态：U0 范围与文档决策已于 2026-11-08 确认；U1 代码、自动化与真实 Wails/WebView2 页面自检完成，待用户验收；Windows 原生 IME 与真实 Agent 未测；U2 已于 2026-11-09 完成实现、自检及前端交互验收；U3 已于 2026-11-09 通过用户验收（助手未执行真实浏览器页面实测）；U4 已于 2026-11-09 通过用户验收（助手 Edge 页面实测边界见 U4）；U5 已于 2026-11-09 通过用户验收（助手未完成浏览器实测，未归档截图/viewport）；U6～U9 尚未实施。**
 >
 > **范围**：在已验收的 M2 本地 `script` 闭环基础上，优化卡片尺寸、输入、悬浮运行面板、节点确认、链路与新建交互，同时核对指定会话的当前阶段需求。
 >
@@ -199,12 +199,14 @@
 
 ### U5：Script 正文读取与冻结目标定位
 
-- **涉及**：`internal/domain/entity/workspace.go`、工作台快照装配、`internal/service/workflow/`、`internal/handler/workflow.go`、artifact store、生成 bindings、`frontend/src/api/`、`flowModel.ts`、`ScriptNode.tsx`、`PendingArtifactCard.tsx`、相关测试。
+- **状态**：用户于 2026-11-09 确认验收。Go 全量测试、vet 与 Wails 构建通过；前端全量测试因 Node 约 4 GiB 堆耗尽退出，退出前 164/166 项通过。修正重复文本断言后，单文件测试 120 秒无输出并被停止；前端测试套件未完整通过。助手未完成真实浏览器实测或归档截图/viewport；WebView2 平台行为与真实 Agent 未覆盖。
+- **实现**：Pending 摘要只携带冻结的输出绑定和结果节点 ID、不含正文；新增按工程、Script 节点和版本读取正文的 Workflow 查询，服务端校验节点类型、版本、CAS、256 KiB 上限、UTF-8 与 `script@1` Schema，并对 artifact 有界读取。Script 卡片显示最新正文摘要，全文和历史版本按需读取并丢弃切工程后的迟到响应；Pending 的预览、确认、丢弃、冲突处理和仅重试同步由控制台与 Script 卡片共用的工程作用域控制器管理。
+- **涉及**：`internal/domain/entity/workspace.go`、工作台快照装配、`internal/service/workflow/scripts.go`、`internal/handler/workflow.go`、`internal/infra/persistence/artifacts.go`、生成 bindings、`frontend/src/hooks/usePendingController.tsx`、`flowModel.ts`、`ScriptNode.tsx`、`AgentConsole.tsx` 与相关测试。
 - 为 `PendingSummary` 增加足够且不含正文的冻结目标摘要，如 `resultNodeId` 和必要的绑定标识；由后端从 Pending 生成，保留原 `nodeId`、`runId`。不能用 Agent 当前子节点推测历史结果归属。
 - 为 UI 增加工程作用域只读查询：输入 `projectId + scriptNodeId + version`，在 Go 检查当前工程、节点类型、版本确实引用该 artifact，再从 CAS 读取并按 `script@1` 安全解析/返回；禁止通过任意 hash 越权读取其他工程产物。复用现有大小上限，不静默截断；缺失、损坏、版本不存在及切工程有明确错误。
 - 卡片先显示最新版本正文摘要；查看全文/历史时按需读取，只读展示，长内容滚动、保留换行、转义文本；切换版本和项目时丢弃过期响应。
 - `PendingArtifactCard` 的预览、确认、丢弃、冲突和“仅重试同步”逻辑抽成可复用的工程作用域控制器，供节点使用；不能在浮层和卡片分别维护两份提交状态。
-- **出口**：AC-U-11/12/15，及 AC-T-03/05/07/09/18；旧版本内容可回读，新版本确认失败时旧版本不变。
+- **出口**：AC-U-11/12/15，及 AC-T-03/05/07/09/18；旧版本内容可回读，新版本确认失败时旧版本不变。用户已确认本阶段验收；浏览器实测边界如上。
 
 ### U6：悬浮运行栏与节点待处理
 

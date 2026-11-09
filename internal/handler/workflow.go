@@ -213,3 +213,17 @@ func (h *WorkflowService) GetTopicCandidates(nodeID, projectID string) ([]entity
 	defer cancel()
 	return h.service.GetTopicCandidates(ctx, nodeID, projectID)
 }
+
+func (h *WorkflowService) GetScriptVersion(nodeID string, version int, projectID string) (entity.ScriptVersionDetail, error) {
+	nodeID = strings.TrimSpace(nodeID)
+	projectID = strings.TrimSpace(projectID)
+	if nodeID == "" {
+		return entity.ScriptVersionDetail{}, errors.New("节点 ID 不能为空")
+	}
+	if projectID == "" {
+		return entity.ScriptVersionDetail{}, errors.New("工程 ID 不能为空")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	return h.service.GetScriptVersion(ctx, nodeID, version, projectID)
+}

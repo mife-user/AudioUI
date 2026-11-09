@@ -617,12 +617,13 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFl
       onUpdateTopicParams: saveNodeParams,
       onUpdateNodeParams: saveNodeParams,
       onStartRun: startNodeRun,
+      onGetScriptVersion: api.getScriptVersion,
       onRegisterPromptFlush: registerPromptFlush,
       onRegisterTopicFlush: registerTopicFlush,
       onNodeHandlesMeasured,
       onSetNodeLayout: applyNodeLayout,
     }),
-    [snapshot, addChild, candidateMap, candidateErrors, candidateLoading, mutationBlocked, paramsEditingDisabled, runSubmittingNodeId, saveNodeParams, startNodeRun, registerPromptFlush, registerTopicFlush, onNodeHandlesMeasured, applyNodeLayout],
+    [snapshot, addChild, candidateMap, candidateErrors, candidateLoading, mutationBlocked, paramsEditingDisabled, runSubmittingNodeId, saveNodeParams, startNodeRun, api.getScriptVersion, registerPromptFlush, registerTopicFlush, onNodeHandlesMeasured, applyNodeLayout],
   )
 
   useEffect(() => {

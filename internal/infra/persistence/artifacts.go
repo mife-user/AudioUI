@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -83,12 +84,20 @@ func (s *ArtifactStore) Get(ctx context.Context, id string) (entity.Artifact, []
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	payload, err := os.ReadFile(s.payloadPath(hexHash))
+	payloadFile, err := os.Open(s.payloadPath(hexHash))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return entity.Artifact{}, nil, fmt.Errorf("%w: %s", ErrArtifactNotFound, id)
 		}
 		return entity.Artifact{}, nil, err
+	}
+	defer payloadFile.Close()
+	payload, err := io.ReadAll(io.LimitReader(payloadFile, int64(valueobject.MaxPendingPayloadSize)+1))
+	if err != nil {
+		return entity.Artifact{}, nil, err
+	}
+	if len(payload) > valueobject.MaxPendingPayloadSize {
+		return entity.Artifact{}, nil, fmt.Errorf("%w: payload exceeds %d bytes", ErrArtifactCorrupt, valueobject.MaxPendingPayloadSize)
 	}
 	artifact, err := s.loadLocked(hexHash)
 	if err != nil {

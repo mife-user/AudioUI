@@ -84,9 +84,15 @@ func makeWorkspaceSnapshot(view workflow.WorkspaceView, runs []entity.RunSummary
 	}
 	pending := make([]entity.PendingSummary, 0, len(view.Pending))
 	for _, item := range view.Pending {
+		var outputBinding *entity.RunOutputBinding
+		if item.OutputBinding != nil {
+			binding := *item.OutputBinding
+			outputBinding = &binding
+		}
 		pending = append(pending, entity.PendingSummary{
 			ID: item.ID, NodeID: item.NodeID, RunID: item.RunID, ChainID: item.ChainID,
 			Kind: item.Kind, Status: item.Status, Summary: item.Summary, Error: item.Error,
+			OutputBinding: outputBinding, ResultNodeID: item.ResultNodeID,
 		})
 	}
 	runSummaries := make([]entity.WorkspaceRunSummary, 0, len(runs))

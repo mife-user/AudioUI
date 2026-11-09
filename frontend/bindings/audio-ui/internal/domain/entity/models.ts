@@ -113,6 +113,8 @@ export interface PendingSummary {
     "status": valueobject$0.PendingStatus;
     "summary"?: string;
     "error"?: string;
+    "outputBinding"?: RunOutputBinding | null;
+    "resultNodeId"?: string;
 }
 
 /**
@@ -285,6 +287,12 @@ export interface ScriptVersion {
     "n": number;
     "artifactId": string;
     "runId": string;
+}
+
+export interface ScriptVersionDetail {
+    "nodeId": string;
+    "version": ScriptVersion;
+    "payload": string;
 }
 
 /**

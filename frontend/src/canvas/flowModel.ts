@@ -1,5 +1,5 @@
 import type { Edge, Node as FlowNode } from '@xyflow/react'
-import type { CandidateSource, Node, NodeParams, RunStartResult, WorkspaceSnapshot } from '../../bindings/audio-ui/internal/domain/entity'
+import type { CandidateSource, Node, NodeParams, RunStartResult, ScriptVersionDetail, WorkspaceSnapshot } from '../../bindings/audio-ui/internal/domain/entity'
 import { OutputKind, PendingStatus } from '../../bindings/audio-ui/internal/domain/valueobject'
 import type { TopicCandidateFixture } from './graphApi'
 
@@ -21,11 +21,13 @@ export type CanvasNodeData = {
   runStatus?: string
   pendingCount?: number
   pendingOutputCount?: number
+  pendingOutputIds?: string[]
   globalRunBusy?: boolean
   runSubmitting?: boolean
   onUpdateTopicParams?: (nodeId: string, title: string, params: NodeParams, projectId: string) => Promise<boolean | void>
   onUpdateNodeParams?: (nodeId: string, title: string, params: NodeParams, projectId: string) => Promise<boolean | void>
   onStartRun?: (nodeId: string, projectId: string) => Promise<RunStartResult>
+  onGetScriptVersion?: (nodeId: string, version: number, projectId: string) => Promise<ScriptVersionDetail>
   onRegisterPromptFlush?: (nodeId: string, projectId: string, flush: () => Promise<boolean>) => () => void
   onRegisterTopicFlush?: (nodeId: string, projectId: string, flush: () => Promise<boolean>) => () => void
   onNodeHandlesMeasured?: (nodeId: string, layoutKey: string, projectId: string) => void
@@ -51,6 +53,7 @@ type CanvasCallbacks = {
   onUpdateTopicParams?: CanvasNodeData['onUpdateTopicParams']
   onUpdateNodeParams?: CanvasNodeData['onUpdateNodeParams']
   onStartRun?: CanvasNodeData['onStartRun']
+  onGetScriptVersion?: CanvasNodeData['onGetScriptVersion']
   onRegisterPromptFlush?: CanvasNodeData['onRegisterPromptFlush']
   onRegisterTopicFlush?: CanvasNodeData['onRegisterTopicFlush']
   onNodeHandlesMeasured?: CanvasNodeData['onNodeHandlesMeasured']
@@ -187,14 +190,18 @@ export function buildFlowModel(
     const startedAt = run.startedAt ?? ''
     if (!previous || startedAt >= previous.startedAt) latestRunByNode.set(run.nodeId, { status: run.status, startedAt })
   }
+  const projectNodeById = new Map(projectNodes.map((node) => [node.id, node]))
   const pendingCountByNode = new Map<string, number>()
-  const pendingOutputCountByScript = new Map<string, number>()
+  const pendingOutputIdsByScript = new Map<string, string[]>()
   for (const pending of snapshot.pending ?? []) {
     if (pending.status !== PendingStatus.PendingPending && pending.status !== PendingStatus.PendingInvalid) continue
     pendingCountByNode.set(pending.nodeId, (pendingCountByNode.get(pending.nodeId) ?? 0) + 1)
     if (pending.kind !== OutputKind.OutputKindScript) continue
-    const output = scriptByAgent.get(pending.nodeId)
-    if (output) pendingOutputCountByScript.set(output.id, (pendingOutputCountByScript.get(output.id) ?? 0) + 1)
+    const targetId = pending.resultNodeId || (pending.outputBinding?.bound ? pending.outputBinding.nodeId : '')
+    if (!targetId || projectNodeById.get(targetId)?.type !== 'script') continue
+    const ids = pendingOutputIdsByScript.get(targetId) ?? []
+    ids.push(pending.id)
+    pendingOutputIdsByScript.set(targetId, ids)
   }
   const globalRunBusy = Boolean(callbacks.runSubmittingNodeId)
     || (snapshot.runs ?? []).some((run) => run.status === 'starting' || run.status === 'running')
@@ -223,12 +230,14 @@ export function buildFlowModel(
         projectId,
         runStatus: latestRunByNode.get(node.id)?.status,
         pendingCount: pendingCountByNode.get(node.id) ?? 0,
-        pendingOutputCount: pendingOutputCountByScript.get(node.id) ?? 0,
+        pendingOutputCount: pendingOutputIdsByScript.get(node.id)?.length ?? 0,
+        pendingOutputIds: pendingOutputIdsByScript.get(node.id) ?? [],
         globalRunBusy,
         runSubmitting: callbacks.runSubmittingNodeId === node.id,
         onUpdateTopicParams: callbacks.onUpdateTopicParams,
         onUpdateNodeParams: callbacks.onUpdateNodeParams,
         onStartRun: callbacks.onStartRun,
+        onGetScriptVersion: callbacks.onGetScriptVersion,
         onRegisterPromptFlush: callbacks.onRegisterPromptFlush,
         onRegisterTopicFlush: callbacks.onRegisterTopicFlush,
         onNodeHandlesMeasured: callbacks.onNodeHandlesMeasured,
