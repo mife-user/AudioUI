@@ -21,6 +21,7 @@ import { buildFlowEdges, buildFlowModel, inputHandleId, nodeMap, outputHandleId,
 import { preserveCanvasNodeViewState } from './nodeState'
 import { type NodeLocator } from '../hooks/runRequests'
 import { CanvasEdge } from './CanvasEdge'
+import { CanvasConnectionLine } from './CanvasConnectionLine'
 import { CandidateNode } from './CandidateNode'
 import { CanvasContextMenu, type CanvasCreateType } from './CanvasContextMenu'
 import { ChainQuickBar } from './ChainQuickBar'
@@ -1059,6 +1060,7 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFl
           panOnDrag
           zoomOnDoubleClick={false}
           defaultEdgeOptions={{ type: 'workspace', focusable: false, selectable: false }}
+          connectionLineComponent={CanvasConnectionLine}
           proOptions={{ hideAttribution: false }}
           aria-label="工作台节点画布；使用鼠标平移与缩放，双击节点聚焦。"
         >

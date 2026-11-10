@@ -615,6 +615,8 @@
 .workspace-edge .react-flow__edge-path {
   stroke: var(--edge);
   stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
   transition: stroke 140ms ease-out, stroke-width 140ms ease-out;
 }
 
@@ -647,6 +649,10 @@
 .canvas-flow-root .react-flow__connection-path {
   stroke: var(--accent);
   stroke-dasharray: 5 4;
+}
+
+.canvas-flow-root .react-flow__connection-path.canvas-connection-invalid {
+  stroke: var(--danger);
 }
 
 .node-input-handle.connectingto.valid {

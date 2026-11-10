@@ -2,7 +2,8 @@ import { MarkerType, type Edge, type Node as FlowNode } from '@xyflow/react'
 import type { CandidateSource, Node, NodeParams, PendingSummary, RunStartResult, ScriptVersionDetail, WorkspaceSnapshot } from '../../bindings/audio-ui/internal/domain/entity'
 import { OutputKind, PendingStatus } from '../../bindings/audio-ui/internal/domain/valueobject'
 import type { TopicCandidateFixture } from './graphApi'
-import type { CanvasEdgeData, CanvasNodeRect } from './edgeRouting'
+import type { CanvasEdgeData } from './edgeRouting'
+import { canvasNodeRects } from './nodeRects'
 
 export type ChildNodeType = 'prompt' | 'agent' | 'script'
 
@@ -138,13 +139,7 @@ export function buildFlowEdges(
   measuredHandleLayouts?: Record<string, string>,
 ): Edge<CanvasEdgeData, 'workspace'>[] {
   const byId = new Map(nodes.map((node) => [node.id, node]))
-  const obstacles: CanvasNodeRect[] = nodes.map((node) => ({
-    nodeId: node.id,
-    x: node.position.x,
-    y: node.position.y,
-    width: typeof node.style?.width === 'number' ? node.style.width : node.data.node.size.width,
-    height: typeof node.style?.height === 'number' ? node.style.height : node.data.node.size.height,
-  }))
+  const obstacles = canvasNodeRects(nodes)
   return nodes.flatMap((childFlowNode) => {
     const child = childFlowNode.data.node
     if (!child.parent) return []

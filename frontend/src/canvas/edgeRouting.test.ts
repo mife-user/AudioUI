@@ -11,13 +11,21 @@ describe('routeCanvasEdge', () => {
     expect(route.path).toContain(' C ')
   })
 
-  it('routes around an intervening card with a bounded orthogonal detour', () => {
+  it('routes around an intervening card with rounded corners', () => {
     const obstacle: CanvasNodeRect = { nodeId: 'blocker', x: 260, y: 40, width: 80, height: 120 }
     const route = routeCanvasEdge({ x: 100, y: 100 }, { x: 500, y: 100 }, [obstacle], 'source', 'target')
 
     expect(route.kind).toBe('detour')
-    expect(route.path).not.toContain(' C ')
-    expect(route.path).toContain('L')
+    expect(route.path).toContain(' Q ')
+    expect(route.path).toMatch(/^M 100 100 /)
+    expect(route.path).toMatch(/500 100$/)
+  })
+
+  it('uses a smooth curve for a short forward connection', () => {
+    const route = routeCanvasEdge({ x: 100, y: 100 }, { x: 120, y: 100 }, empty, 'source', 'target')
+
+    expect(route.kind).toBe('curve')
+    expect(route.path).toContain(' C ')
   })
 
   it('does not skip cards along a long connection', () => {
@@ -25,13 +33,16 @@ describe('routeCanvasEdge', () => {
     const route = routeCanvasEdge({ x: 0, y: 0 }, { x: 20000, y: 0 }, [obstacle], 'source', 'target')
 
     expect(route.kind).toBe('detour')
+    expect(route.path).toContain(' Q ')
   })
 
-  it('routes reverse connections around the endpoints instead of folding through them', () => {
+  it('routes reverse connections around the endpoints with a rounded path', () => {
     const route = routeCanvasEdge({ x: 500, y: 100 }, { x: 100, y: 160 }, empty, 'source', 'target')
 
     expect(route.kind).toBe('detour')
-    expect(route.path).not.toContain(' C ')
+    expect(route.path).toContain(' Q ')
+    expect(route.path).toMatch(/^M 500 100 /)
+    expect(route.path).toMatch(/100 160$/)
   })
 
   it('handles routing across a 200-node layout', () => {
@@ -55,6 +66,15 @@ describe('routeCanvasEdge', () => {
 
     expect(routes).toHaveLength(199)
     expect(routes.every((route) => route.path.startsWith('M '))).toBe(true)
+  })
+
+  it('keeps real endpoints in a smooth fallback when no route can avoid a blocker', () => {
+    const blocker: CanvasNodeRect = { nodeId: 'blocker', x: 86, y: -100000, width: 128, height: 200200 }
+    const route = routeCanvasEdge({ x: 100, y: 100 }, { x: 500, y: 100 }, [blocker], 'source', 'target')
+
+    expect(route.kind).toBe('fallback')
+    expect(route.path).toMatch(/^M 100 100 C /)
+    expect(route.path).toMatch(/500 100$/)
   })
 
   it('ignores the connected node rectangles when testing a forward curve', () => {

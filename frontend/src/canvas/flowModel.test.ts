@@ -124,6 +124,22 @@ describe('flowModel', () => {
     })
   })
 
+  it('uses live measurements before saved dimensions while a node is resizing', () => {
+    const topic = makeNode('n_topic', 'topic')
+    const candidate = makeNode('n_candidate', 'candidate', topic.id, {
+      candidateSource: { topicNodeId: topic.id, artifactId: 'sha256:topics', index: 0 },
+    })
+    const model = buildFlowModel(snapshot([topic, candidate]), vi.fn())
+    const resizingNodes = model.nodes.map((node) => node.id === candidate.id
+      ? { ...node, measured: { width: 420, height: 260 } }
+      : node)
+    const edge = buildFlowEdges(resizingNodes)[0]
+
+    expect(edge?.data?.obstacles).toContainEqual({
+      nodeId: candidate.id, x: 0, y: 0, width: 420, height: 260,
+    })
+  })
+
   it('exposes Agent run state and its direct Script binding without deriving extra graph rules', () => {
     const topic = makeNode('n_topic', 'topic')
     const candidate = makeNode('n_candidate', 'candidate', topic.id, {

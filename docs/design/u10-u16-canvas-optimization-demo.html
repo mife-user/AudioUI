@@ -9,7 +9,7 @@
     *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:13px/1.55 "Segoe UI","Microsoft YaHei",sans-serif}button,textarea{font:inherit}button{color:inherit;cursor:pointer}button:focus-visible,textarea:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
     .top{min-height:55px;padding:0 24px;display:flex;align-items:center;gap:13px;background:#10191d;border-bottom:1px solid var(--line)}.brand{font-weight:750;letter-spacing:.15em;color:var(--accent)}.top-title{color:var(--text)}.top-note{margin-left:auto;color:var(--warn);font-size:11px}
     main{max-width:1510px;margin:0 auto;padding:22px 24px 32px}.intro{display:flex;align-items:end;justify-content:space-between;gap:22px;margin-bottom:16px}.eyebrow{color:var(--accent);font-size:10px;letter-spacing:.15em;font-weight:700}.intro h1{margin:4px 0;font-size:22px;letter-spacing:.02em}.intro p{margin:0;color:var(--muted)}.toolbar{display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end}.toolbar button,.link-button{padding:7px 10px;border:1px solid var(--line);border-radius:7px;background:var(--panel-alt);color:var(--text)}.toolbar button:hover,.link-button:hover{background:var(--raised)}
-    .stage{position:relative;overflow:hidden;border:1px solid var(--line);border-radius:12px;background:var(--panel-alt);box-shadow:var(--shadow)}.canvas{height:690px;overflow:auto;overscroll-behavior:contain;background-image:radial-gradient(#263b42 1px,transparent 1px);background-size:22px 22px}.world{position:relative;width:1400px;height:760px}svg.wires{position:absolute;inset:0;width:100%;height:100%;overflow:visible;pointer-events:none}.wire{fill:none;stroke:var(--edge);stroke-width:2;stroke-linecap:round}.wire.task{stroke:var(--accent);stroke-width:2.4}.wire.draft{stroke:var(--warn);stroke-dasharray:6 5}
+    .stage{position:relative;overflow:hidden;border:1px solid var(--line);border-radius:12px;background:var(--panel-alt);box-shadow:var(--shadow)}.canvas{height:690px;overflow:auto;overscroll-behavior:contain;background-image:radial-gradient(#263b42 1px,transparent 1px);background-size:22px 22px}.world{position:relative;width:1400px;height:760px}svg.wires{position:absolute;inset:0;width:100%;height:100%;overflow:visible;pointer-events:none}.wire{fill:none;stroke:var(--edge);stroke-width:2;stroke-linecap:round}.wire.task{stroke:var(--accent);stroke-width:2.4}.wire.draft{stroke:var(--warn);stroke-dasharray:6 5}.route-blocker{position:absolute;z-index:4;left:665px;top:94px;width:72px;height:76px;display:grid;place-items:center;padding:8px;border:1px dashed var(--warn);border-radius:8px;background:#30291f;color:var(--warn);font-size:10px;text-align:center;pointer-events:none}.route-blocker[hidden]{display:none}
     .card{position:absolute;display:flex;flex-direction:column;overflow:visible;border:1px solid var(--line);border-radius:10px;background:var(--panel);box-shadow:0 8px 24px #0005;color:var(--text)}.card.is-selected{background:#1a3035}.card.is-selected:not(.collapsed)::after{content:"";position:absolute;inset:-5px;z-index:3;pointer-events:none;background:radial-gradient(circle,var(--accent) 0 3px,transparent 3.5px) 0 0/8px 8px no-repeat,radial-gradient(circle,var(--accent) 0 3px,transparent 3.5px) 50% 0/8px 8px no-repeat,radial-gradient(circle,var(--accent) 0 3px,transparent 3.5px) 100% 0/8px 8px no-repeat,radial-gradient(circle,var(--accent) 0 3px,transparent 3.5px) 0 50%/8px 8px no-repeat,radial-gradient(circle,var(--accent) 0 3px,transparent 3.5px) 100% 50%/8px 8px no-repeat,radial-gradient(circle,var(--accent) 0 3px,transparent 3.5px) 0 100%/8px 8px no-repeat,radial-gradient(circle,var(--accent) 0 3px,transparent 3.5px) 50% 100%/8px 8px no-repeat,radial-gradient(circle,var(--accent) 0 3px,transparent 3.5px) 100% 100%/8px 8px no-repeat}.card-head{min-height:56px;display:flex;align-items:center;gap:8px;padding:9px 11px;cursor:grab;touch-action:none;user-select:none}.card-head:active{cursor:grabbing}.card-title{min-width:0;flex:1}.card-title strong{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}.card-title small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted);font-size:10px}.kind{flex:none;min-width:40px;padding:4px 6px;border-radius:6px;background:#223a40;color:var(--accent);text-align:center;font-size:10px;font-weight:650}.card-body{min-height:0;flex:1;overflow:auto;overscroll-behavior:contain;padding:0 12px 12px;color:var(--muted)}.card-body p{margin:7px 0}.card.collapsed .card-body{display:none}.icon-button{width:28px;height:28px;flex:none;border:0;border-radius:6px;background:transparent;color:var(--muted);font-size:17px}.icon-button:hover{background:var(--raised);color:var(--text)}.summary{padding:8px 10px;border-radius:7px;background:var(--panel-alt);color:var(--text);font-size:11px}.candidate-list{display:grid;gap:6px;margin:8px 0}.candidate-row{display:flex;align-items:center;gap:6px;padding:7px 8px;border-radius:6px;background:var(--panel-alt);color:var(--text);font-size:11px}.candidate-row span{flex:1;min-width:0}.candidate-row button{border:0;background:none;color:var(--accent);font-size:10px}.task-input{width:100%;min-height:72px;margin-top:6px;padding:8px;border:1px solid var(--line);border-radius:6px;background:var(--panel-alt);color:var(--text);resize:none}.hint{color:var(--subtle);font-size:10px}.pill{display:inline-block;margin-top:5px;padding:3px 7px;border-radius:999px;background:#29382d;color:var(--ok);font-size:10px}.pill.warn{background:#3a3223;color:var(--warn)}
     .port{position:absolute;z-index:3;top:23px;width:12px;height:12px;padding:0;border:2px solid var(--panel);border-radius:50%;background:var(--edge)}.port.in{left:-6px}.port.out{right:-6px;background:var(--accent)}button.port:hover,button.port.is-connecting{transform:scale(1.35);box-shadow:0 0 0 4px #66d0de33}.topic-port{pointer-events:none}.tip{position:absolute;left:24px;bottom:16px;color:var(--subtle);font-size:11px}.canvas-caption{display:flex;align-items:center;gap:9px;padding:10px 15px;background:#111c20;color:var(--muted);font-size:11px}.canvas-caption strong{color:var(--accent)}.canvas-caption .grow{flex:1}
     .floating{position:absolute;z-index:6;left:12px;top:12px;max-width:calc(100% - 24px);border:1px solid var(--line);border-radius:9px;background:#17262b;box-shadow:var(--shadow)}.floating-head{min-height:43px;display:flex;align-items:center;gap:8px;padding:8px 10px;cursor:grab;touch-action:none;user-select:none}.floating-head:active{cursor:grabbing}.floating .dot{width:8px;height:8px;border-radius:50%;background:var(--ok)}.floating .label{font-size:11px;font-weight:700;letter-spacing:.05em}.floating .stat{color:var(--muted);font-size:10px}.floating .filler{flex:1}.floating .toggle{width:25px;height:25px;border:0;border-radius:5px;background:transparent;color:var(--text);font-size:16px}.floating .toggle:hover{background:var(--raised)}.floating[data-mode="small"]{width:225px}.floating[data-mode="panel"]{width:310px}.floating-body{padding:0 13px 14px;color:var(--muted)}.floating-body p{margin:6px 0}.floating[data-mode="small"] .floating-body{display:none}
@@ -25,12 +25,12 @@
   <main>
     <div class="intro">
       <div><div class="eyebrow">WORKBENCH / INTERACTION STUDY</div><h1>更自由地搭建，让关系始终清晰</h1><p>拖动卡片与 Agent 小窗；试试将候选和提示词分别连接到同一个 Agent。</p></div>
-      <div class="toolbar"><button id="size-toggle" type="button" aria-pressed="false">模拟选题小卡片</button><button id="reverse-toggle" type="button" aria-pressed="false">模拟反向连线</button><button id="reset" type="button">重置示例</button></div>
+      <div class="toolbar"><button id="size-toggle" type="button" aria-pressed="false">模拟选题小卡片</button><button id="reverse-toggle" type="button" aria-pressed="false">模拟反向连线</button><button id="blocker-toggle" type="button" aria-pressed="false">显示阻挡卡</button><button id="preview-toggle" type="button" aria-pressed="false">开启拖线预览</button><button id="reset" type="button">重置示例</button></div>
     </div>
     <div class="stage" id="stage">
       <div class="canvas" id="canvas" aria-label="可滚动的模拟画布">
         <div class="world" id="world">
-          <svg class="wires" id="wires" aria-hidden="true"><defs><marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M1 1L9 5L1 9Z" fill="context-stroke"/></marker></defs><g id="paths"></g></svg>
+          <svg class="wires" id="wires" aria-hidden="true"><defs><marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M1 1L9 5L1 9Z" fill="context-stroke"/></marker></defs><g id="paths"></g></svg><div class="route-blocker" id="route-blocker" aria-hidden="true" hidden>阻挡卡片</div>
           <article class="card" data-card="topic" data-left="55" data-top="125" data-width="270" data-height="290" aria-label="选题卡片">
             <header class="card-head" tabindex="0" aria-label="选题卡片，可拖动或按方向键移动"><span class="kind">选题</span><span class="card-title"><strong>关于节奏的选题</strong><small>已生成 3 个候选 · 内容已锁定</small></span><button class="icon-button collapse" type="button" aria-label="折叠选题内容" aria-expanded="true">⌃</button></header>
             <div class="card-body"><div class="summary">候选已生成 · 点击“定位”查看对应节点</div><div class="candidate-list"><div class="candidate-row"><span>01 · 节奏与情绪</span><button type="button" data-locate="candidate1">定位</button></div><div class="candidate-row"><span>02 · 编曲的层次</span><button type="button" data-locate="candidate2">定位</button></div><div class="candidate-row"><span>03 · 声音里的故事</span><button type="button" data-locate="candidate3">定位</button></div></div><p class="hint">小卡片内可以滚动；出线点固定在标题附近，不随列表滚出卡片。</p></div><span class="port out topic-port" data-port="topic-out" aria-hidden="true"></span>
@@ -89,15 +89,20 @@
       const floatToggle = document.getElementById('float-toggle')
       const sizeToggle = document.getElementById('size-toggle')
       const reverseToggle = document.getElementById('reverse-toggle')
+      const blockerToggle = document.getElementById('blocker-toggle')
+      const previewToggle = document.getElementById('preview-toggle')
+      const routeBlocker = document.getElementById('route-blocker')
       const message = document.getElementById('message')
       const sources = [...document.querySelectorAll('[data-connect-source]')]
       const targets = [...document.querySelectorAll('[data-connect-target]')]
       const initial = new Map(cards.map(card => [card.dataset.card, {left: Number(card.dataset.left), top: Number(card.dataset.top), width: Number(card.dataset.width), height: Number(card.dataset.height)}]))
-      const generatedLinks = [['topic-out','candidate1-in'],['topic-out','candidate2-in'],['topic-out','candidate3-in']]
+      const generatedLinks = [['topic-out','candidate1-in'],['topic-out','candidate2-in'],['topic-out','candidate3-in'],['candidate1-out','prompt-in']]
       let extraLinks = []
       let connecting = null
       let small = false
       let reverse = false
+      let previewEnabled = false
+      let previewPoint = null
       let floatPosition = null
 
       function cardById(id) { return cards.find(card => card.dataset.card === id) }
@@ -115,24 +120,93 @@
         const bounds = world.getBoundingClientRect()
         return {x: port.left + port.width / 2 - bounds.left, y: port.top + port.height / 2 - bounds.top}
       }
-      function curve(a, b) {
-        if (b.x >= a.x + 55) {
-          const d = Math.max(45, Math.min(150, (b.x - a.x) * .45))
-          return `M ${a.x} ${a.y} C ${a.x+d} ${a.y}, ${b.x-d} ${b.y}, ${b.x} ${b.y}`
+      function worldRect(element) {
+        const bounds = element.getBoundingClientRect()
+        const worldBounds = world.getBoundingClientRect()
+        return {x:bounds.left - worldBounds.left,y:bounds.top - worldBounds.top,width:bounds.width,height:bounds.height}
+      }
+      function obstaclesFor(from, to) {
+        const sourceNode = nodeForPort(from)
+        const targetNode = to ? nodeForPort(to) : ''
+        const obstacles = cards.filter(card => card.dataset.card !== sourceNode && card.dataset.card !== targetNode).map(worldRect)
+        if (!routeBlocker.hidden) obstacles.push(worldRect(routeBlocker))
+        return obstacles.map(rect => ({x:rect.x - 14,y:rect.y - 14,width:rect.width + 28,height:rect.height + 28}))
+      }
+      function cubicPath(a, b) {
+        const d = Math.min(150,Math.abs(b.x - a.x) * .45)
+        return `M ${a.x} ${a.y} C ${a.x+d} ${a.y}, ${b.x-d} ${b.y}, ${b.x} ${b.y}`
+      }
+      function pathIsClear(d, obstacles) {
+        if (!obstacles.length) return true
+        const probe = document.createElementNS('http://www.w3.org/2000/svg','path')
+        probe.setAttribute('d',d)
+        paths.append(probe)
+        const length = probe.getTotalLength()
+        let clear = true
+        for (let offset = 0; offset <= length; offset += 8) {
+          const point = probe.getPointAtLength(offset)
+          if (obstacles.some(rect => point.x > rect.x && point.x < rect.x + rect.width && point.y > rect.y && point.y < rect.y + rect.height)) {
+            clear = false
+            break
+          }
         }
-        const y = Math.min(world.clientHeight - 35, Math.max(a.y, b.y) + 210)
-        return `M ${a.x} ${a.y} C ${a.x+80} ${a.y}, ${a.x+100} ${y}, ${a.x+35} ${y} C ${a.x-45} ${y}, ${b.x+45} ${y}, ${b.x-35} ${y} C ${b.x-100} ${y}, ${b.x-80} ${b.y}, ${b.x} ${b.y}`
+        probe.remove()
+        return clear
+      }
+      function roundedPath(points) {
+        let path = `M ${points[0].x} ${points[0].y}`
+        let cursor = points[0]
+        const line = to => {
+          if (cursor.x === to.x && cursor.y === to.y) return
+          path += ` L ${to.x} ${to.y}`
+          cursor = to
+        }
+        for (let index = 1; index < points.length - 1; index += 1) {
+          const previous = points[index - 1], corner = points[index], next = points[index + 1]
+          const incoming = Math.hypot(corner.x - previous.x,corner.y - previous.y)
+          const outgoing = Math.hypot(next.x - corner.x,next.y - corner.y)
+          const radius = Math.min(22,incoming / 2,outgoing / 2)
+          const before = {x:corner.x + (previous.x - corner.x) / incoming * radius,y:corner.y + (previous.y - corner.y) / incoming * radius}
+          const after = {x:corner.x + (next.x - corner.x) / outgoing * radius,y:corner.y + (next.y - corner.y) / outgoing * radius}
+          line(before)
+          path += ` Q ${corner.x} ${corner.y} ${after.x} ${after.y}`
+          cursor = after
+        }
+        line(points[points.length - 1])
+        return path
+      }
+      function route(a, b, obstacles) {
+        const direct = cubicPath(a,b)
+        if (b.x > a.x && pathIsClear(direct,obstacles)) return direct
+        const nearby = obstacles.filter(rect => rect.x <= Math.max(a.x,b.x) + 92 && rect.x + rect.width >= Math.min(a.x,b.x) - 92)
+        const top = Math.min(a.y,b.y,...nearby.map(rect => rect.y)) - 28
+        const bottom = Math.max(a.y,b.y,...nearby.map(rect => rect.y + rect.height)) + 28
+        for (const lane of [top,bottom]) {
+          for (const exit of [24,40,64]) {
+            const entryA = {x:a.x + exit,y:a.y}, entryB = {x:b.x - exit,y:b.y}
+            const candidate = roundedPath([a,entryA,{x:entryA.x,y:lane},{x:entryB.x,y:lane},entryB,b])
+            if (pathIsClear(candidate,obstacles)) return candidate
+          }
+        }
+        return direct
       }
       function draw() {
         paths.replaceChildren()
-        const links = [...generatedLinks, ...extraLinks]
+        const links = [...generatedLinks, ...extraLinks, ...(reverse ? [['agent-out','candidate2-in']] : [])]
         links.forEach(([from,to]) => {
           const path = document.createElementNS('http://www.w3.org/2000/svg','path')
-          path.setAttribute('d',curve(point(from),point(to)))
+          path.setAttribute('d',route(point(from),point(to),obstaclesFor(from,to)))
           path.setAttribute('class',generatedLinks.some(([a,b]) => a === from && b === to) ? 'wire' : 'wire task')
           path.setAttribute('marker-end','url(#arrow)')
           paths.append(path)
         })
+        if (previewEnabled && previewPoint) {
+          const preview = document.createElementNS('http://www.w3.org/2000/svg','path')
+          preview.setAttribute('d',route(point('candidate2-out'),previewPoint,obstaclesFor('candidate2-out','')))
+          preview.setAttribute('class','wire draft')
+          preview.setAttribute('marker-end','url(#arrow)')
+          paths.append(preview)
+        }
       }
       function setMessage(text) { message.textContent = text }
       function select(card) { cards.forEach(item => item.classList.toggle('is-selected',item === card)) }
@@ -160,7 +234,7 @@
         const from = connecting.dataset.port, to = targetPort.dataset.port
         clearConnecting()
         if (wouldCycle(from,to)) { setMessage('连接未创建：这会形成环或自连。'); return }
-        if (extraLinks.some(([a,b]) => a === from && b === to)) { setMessage('这两个端口已连接，未重复创建。'); return }
+        if ([...generatedLinks, ...extraLinks].some(([a,b]) => a === from && b === to)) { setMessage('这两个端口已连接，未重复创建。'); return }
         extraLinks.push([from,to])
         const count = extraLinks.filter(([,b]) => nodeForPort(b) === 'agent').length
         document.getElementById('agent-state').textContent = count ? `已连接 ${count} 个上游` : '尚未连接上游'
@@ -230,7 +304,27 @@
       reverseToggle.addEventListener('click', () => {
         reverse = !reverse; reverseToggle.setAttribute('aria-pressed',String(reverse)); reverseToggle.textContent = reverse ? '恢复顺向布局' : '模拟反向连线'
         const card = cardById('agent'); placeCard(card,reverse ? 675 : 1100,reverse ? 495 : 210); draw()
-        setMessage(reverse ? '反向连线用曲线绕行；点击两个端口可先建立示意连线。' : '已恢复顺向布局。')
+        setMessage(reverse ? '反向连接也使用连续曲线；点击两个端口可建立示意连接。' : '已恢复顺向布局。')
+      })
+      blockerToggle.addEventListener('click', () => {
+        const visible = routeBlocker.hidden
+        routeBlocker.hidden = !visible
+        blockerToggle.setAttribute('aria-pressed',String(visible)); blockerToggle.textContent = visible ? '移除阻挡卡' : '显示阻挡卡'
+        draw()
+        setMessage(visible ? '路径绕开阻挡卡；拥挤到无法绕行时仍保留真实端点。' : '已移除阻挡卡。')
+      })
+      previewToggle.addEventListener('click', () => {
+        previewEnabled = !previewEnabled
+        previewPoint = previewEnabled ? point('prompt-in') : null
+        previewToggle.setAttribute('aria-pressed',String(previewEnabled)); previewToggle.textContent = previewEnabled ? '关闭拖线预览' : '开启拖线预览'
+        draw()
+        setMessage(previewEnabled ? '虚线预览从候选二出发，随指针移动并复用平滑路由。' : '已关闭拖线预览。')
+      })
+      canvas.addEventListener('pointermove', event => {
+        if (!previewEnabled) return
+        const bounds = world.getBoundingClientRect()
+        previewPoint = {x:event.clientX - bounds.left,y:event.clientY - bounds.top}
+        draw()
       })
       function placeFloat(left, top) {
         const maxLeft = Math.max(12,stage.clientWidth - floating.offsetWidth - 12)
@@ -261,7 +355,7 @@
       })
       window.addEventListener('resize', () => { if (floatPosition) placeFloat(floatPosition.left,floatPosition.top); draw() })
       document.getElementById('reset').addEventListener('click', () => {
-        extraLinks = []; clearConnecting(); document.getElementById('agent-state').textContent = '尚未连接上游'
+        extraLinks = []; clearConnecting(); routeBlocker.hidden = true; previewEnabled = false; previewPoint = null; blockerToggle.setAttribute('aria-pressed','false'); blockerToggle.textContent = '显示阻挡卡'; previewToggle.setAttribute('aria-pressed','false'); previewToggle.textContent = '开启拖线预览'; document.getElementById('agent-state').textContent = '尚未连接上游'
         small = false; reverse = false; sizeToggle.setAttribute('aria-pressed','false'); sizeToggle.textContent = '模拟选题小卡片'; reverseToggle.setAttribute('aria-pressed','false'); reverseToggle.textContent = '模拟反向连线'
         cards.forEach(card => {const start = initial.get(card.dataset.card); card.classList.remove('collapsed','is-selected'); setDimensions(card,start.width,start.height); placeCard(card,start.left,start.top); const button = card.querySelector('.collapse'); button.setAttribute('aria-expanded','true'); button.setAttribute('aria-label',button.getAttribute('aria-label').replace('展开','折叠')); button.textContent = '⌃'})
         document.getElementById('task').value = '写一段关于声音与情绪的短视频解说。'
