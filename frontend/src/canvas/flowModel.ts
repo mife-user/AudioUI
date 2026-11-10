@@ -1,7 +1,8 @@
-import type { Edge, Node as FlowNode } from '@xyflow/react'
+import { MarkerType, type Edge, type Node as FlowNode } from '@xyflow/react'
 import type { CandidateSource, Node, NodeParams, PendingSummary, RunStartResult, ScriptVersionDetail, WorkspaceSnapshot } from '../../bindings/audio-ui/internal/domain/entity'
 import { OutputKind, PendingStatus } from '../../bindings/audio-ui/internal/domain/valueobject'
 import type { TopicCandidateFixture } from './graphApi'
+import type { CanvasEdgeData, CanvasNodeRect } from './edgeRouting'
 
 export type ChildNodeType = 'prompt' | 'agent' | 'script'
 
@@ -135,8 +136,15 @@ export function nodeHandleLayoutKey(type: CanvasFlowNode['type'], data: CanvasNo
 export function buildFlowEdges(
   nodes: CanvasFlowNode[],
   measuredHandleLayouts?: Record<string, string>,
-): Edge[] {
+): Edge<CanvasEdgeData, 'workspace'>[] {
   const byId = new Map(nodes.map((node) => [node.id, node]))
+  const obstacles: CanvasNodeRect[] = nodes.map((node) => ({
+    nodeId: node.id,
+    x: node.position.x,
+    y: node.position.y,
+    width: typeof node.style?.width === 'number' ? node.style.width : node.data.node.size.width,
+    height: typeof node.style?.height === 'number' ? node.style.height : node.data.node.size.height,
+  }))
   return nodes.flatMap((childFlowNode) => {
     const child = childFlowNode.data.node
     if (!child.parent) return []
@@ -150,16 +158,28 @@ export function buildFlowEdges(
       || measuredHandleLayouts[childFlowNode.id] !== nodeHandleLayoutKey(childFlowNode.type, childFlowNode.data)
     )) return []
     const highlightedEdge = parentFlowNode.data.pathHighlighted && childFlowNode.data.pathHighlighted
+    const runningLockedEdge = parentFlowNode.data.runningLocked && childFlowNode.data.runningLocked
+    const className = [
+      'workspace-edge',
+      highlightedEdge && 'workspace-edge-highlighted',
+      runningLockedEdge && 'workspace-edge-running-locked',
+    ].filter(Boolean).join(' ')
     return [{
       id: `edge-${parentFlowNode.id}-${childFlowNode.id}`,
       source: parentFlowNode.id,
       sourceHandle,
       target: childFlowNode.id,
       targetHandle,
-      type: 'smoothstep',
+      type: 'workspace',
       selectable: false,
       focusable: false,
-      className: highlightedEdge ? 'workspace-edge-highlighted' : 'workspace-edge',
+      interactionWidth: 20,
+      className,
+      markerEnd: {
+        type: MarkerType.ArrowClosed,
+        color: runningLockedEdge ? 'var(--warn)' : highlightedEdge ? 'var(--accent)' : 'var(--edge)',
+      },
+      data: { sourceNodeId: parentFlowNode.id, targetNodeId: childFlowNode.id, obstacles },
       ariaLabel: `${parentFlowNode.data.node.title} 到 ${child.title}`,
     }]
   })

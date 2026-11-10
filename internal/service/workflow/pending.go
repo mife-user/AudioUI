@@ -179,6 +179,7 @@ func (s *Service) SubmitRunReply(ctx context.Context, scope port.RunScope, kind 
 			}
 			nodeIDs := make([]string, len(candidates))
 			candidateNodes := make([]entity.Node, len(candidates))
+			candidateSize := entity.DefaultNodeSize(valueobject.NodeTypeCandidate)
 			topicID := target.ID
 			for index, candidate := range candidates {
 				id, err := valueobject.NewID(valueobject.NodeIDPrefix)
@@ -186,13 +187,17 @@ func (s *Service) SubmitRunReply(ctx context.Context, scope port.RunScope, kind 
 					return err
 				}
 				nodeIDs[index] = id
+				position := generatedNodePosition(append(append([]entity.Node(nil), project.Nodes...), candidateNodes[:index]...), entity.Position{
+					X: target.Position.X + target.Size.Width + generatedNodeGap,
+					Y: target.Position.Y + float64(index)*(candidateSize.Height+generatedNodeGap),
+				}, valueobject.NodeTypeCandidate)
 				candidateNodes[index] = entity.Node{
 					ID: id, Type: valueobject.NodeTypeCandidate,
 					Title:           generatedNodeTitle(candidate.Title, fmt.Sprintf("候选 %d", index+1)),
 					Parent:          topicID,
 					CandidateSource: &entity.CandidateSource{TopicNodeID: topicID, ArtifactID: pending.ArtifactID, Index: index},
-					Position:        entity.Position{X: target.Position.X + 420, Y: target.Position.Y + float64(index)*160},
-					Size:            entity.DefaultNodeSize(valueobject.NodeTypeCandidate),
+					Position:        position,
+					Size:            candidateSize,
 					Rounds:          []entity.Round{},
 				}
 			}
@@ -217,7 +222,10 @@ func (s *Service) SubmitRunReply(ctx context.Context, scope port.RunScope, kind 
 				}
 				project.Nodes = append(project.Nodes, entity.Node{
 					ID: id, Type: valueobject.NodeTypeScript, Title: generatedNodeTitle(title, "新脚本"),
-					Parent: target.ID, Position: entity.Position{X: target.Position.X + 420, Y: target.Position.Y},
+					Parent: target.ID, Position: generatedNodePosition(project.Nodes, entity.Position{
+						X: target.Position.X + target.Size.Width + generatedNodeGap,
+						Y: target.Position.Y,
+					}, valueobject.NodeTypeScript),
 					Size:           entity.DefaultNodeSize(valueobject.NodeTypeScript),
 					ScriptVersions: []entity.ScriptVersion{}, Rounds: []entity.Round{},
 				})

@@ -11,6 +11,57 @@ import (
 	"audio-ui/internal/domain/valueobject"
 )
 
+func TestSubmitTopicsReplyPlacesCandidatesAroundResizedNodes(t *testing.T) {
+	topicSize := entity.NodeSize{Width: 500, Height: 250}
+	blockerSize := entity.NodeSize{Width: 900, Height: 800}
+	project := entity.Project{
+		Version: valueobject.ProjectFileVersion, ID: "p_test", Name: "测试工程", Revision: 1, ActiveNodeID: "n_topic",
+		Nodes: []entity.Node{
+			{
+				ID: "n_topic", Type: valueobject.NodeTypeTopic, Title: "选题",
+				Position: entity.Position{X: 0, Y: 0}, Size: topicSize,
+				Params: entity.NodeParams{Idea: "想法", CandidateCount: 3}, Rounds: []entity.Round{},
+			},
+			{
+				ID: "n_blocker", Type: valueobject.NodeTypeTopic, Title: "调整过的选题",
+				Position: entity.Position{X: topicSize.Width + generatedNodeGap, Y: 0}, Size: blockerSize,
+				Params: entity.NodeParams{Idea: "其他想法", CandidateCount: 3}, Rounds: []entity.Round{},
+			},
+		},
+	}
+	h := newPendingHarness(t, project)
+	scope := beginReplyScope(t, h, "r_topics_layout", "n_topic")
+	payload := []byte(`{"topics":[{"title":"甲","angle":"角度甲","hook":"开头甲"},{"title":"乙","angle":"角度乙","hook":"开头乙"},{"title":"丙","angle":"角度丙","hook":"开头丙"}]}`)
+
+	reply, err := h.service.SubmitRunReply(context.Background(), scope, valueobject.OutputKindTopics, payload, "req_topics_layout")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reply.CreatedNodeIDs) != 3 {
+		t.Fatalf("generated candidates = %d, want 3", len(reply.CreatedNodeIDs))
+	}
+	if h.session.project.Nodes[0].Position != project.Nodes[0].Position || h.session.project.Nodes[1].Position != project.Nodes[1].Position {
+		t.Fatal("automatic placement moved an existing node")
+	}
+
+	allNodes := append([]entity.Node(nil), project.Nodes...)
+	for _, id := range reply.CreatedNodeIDs {
+		candidate := pendingReplyNode(t, h.session.project, id)
+		if candidate.Type != valueobject.NodeTypeCandidate || candidate.Size != entity.DefaultNodeSize(valueobject.NodeTypeCandidate) {
+			t.Fatalf("generated node = %+v", candidate)
+		}
+		for _, other := range allNodes {
+			if candidate.Position.X < other.Position.X+other.Size.Width+generatedNodeGap &&
+				candidate.Position.X+candidate.Size.Width+generatedNodeGap > other.Position.X &&
+				candidate.Position.Y < other.Position.Y+other.Size.Height+generatedNodeGap &&
+				candidate.Position.Y+candidate.Size.Height+generatedNodeGap > other.Position.Y {
+				t.Fatalf("generated node %s overlaps %s", candidate.ID, other.ID)
+			}
+		}
+		allNodes = append(allNodes, candidate)
+	}
+}
+
 func TestSubmitRunReplyAutomaticallyWritesFirstVersionToBoundEmptyScript(t *testing.T) {
 	h := newBoundScriptReplyHarness(t, 0)
 	scope := beginReplyScope(t, h, "r_empty_script", "n_b")

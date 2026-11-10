@@ -25,7 +25,6 @@ export function ChainQuickBar({ chains, nodes, activeNodeId, onSelectNode, onCre
   const [collapsed, setCollapsed] = useState(() => window.localStorage.getItem(COLLAPSED_STORAGE_KEY) === 'true')
   const titleByNodeId = new Map(nodes.map((node) => [node.id, node.title]))
   const selectedChain = chains.find((chain) => chain.tailNodeId === activeNodeId)
-    ?? chains.find((chain) => chain.path?.includes(activeNodeId))
   const runningCount = chains.filter((chain) => chain.status === 'running').length
   const pendingCount = chains.filter((chain) => chain.status === 'pending').length
   const summary = chains.length ? [

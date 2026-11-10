@@ -353,6 +353,51 @@ describe('AgentConsole', () => {
     expect(document.getElementById('agent-console-panel')).toHaveAttribute('hidden')
   })
 
+  it('moves the panel by its titlebar, clamps it to the viewport, and preserves position when collapsed', () => {
+    const { container, rerender, props } = renderConsole()
+    const panel = container.querySelector<HTMLElement>('#agent-console-panel')
+    const header = container.querySelector<HTMLElement>('.agent-console-head')
+    if (!panel || !header) throw new Error('run panel is missing')
+    const rect = new DOMRect(100, 64, 360, 400)
+    vi.spyOn(panel, 'getBoundingClientRect').mockReturnValue(rect)
+
+    fireEvent.pointerDown(header, { pointerId: 1, button: 0, clientX: 120, clientY: 80 })
+    fireEvent.pointerMove(window, { pointerId: 1, clientX: window.innerWidth + 100, clientY: window.innerHeight + 100 })
+    fireEvent.pointerUp(window, { pointerId: 1 })
+
+    const left = `${window.innerWidth - rect.width - 12}px`
+    const top = `${window.innerHeight - rect.height - 12}px`
+    expect(panel.style.left).toBe(left)
+    expect(panel.style.top).toBe(top)
+
+    rerender(<ConsoleHarness props={{ ...props, collapsed: true }} />)
+    rerender(<ConsoleHarness props={{ ...props, collapsed: false }} />)
+    expect(panel.style.left).toBe(left)
+    expect(panel.style.top).toBe(top)
+
+    const closeButton = screen.getByRole('button', { name: '收起运行面板' })
+    fireEvent.pointerDown(closeButton, { pointerId: 2, button: 0, clientX: 20, clientY: 20 })
+    fireEvent.pointerMove(window, { pointerId: 2, clientX: 100, clientY: 100 })
+    fireEvent.pointerUp(window, { pointerId: 2 })
+    expect(panel.style.left).toBe(left)
+    fireEvent.click(closeButton)
+    expect(props.onToggle).toHaveBeenCalledOnce()
+  })
+
+  it('moves the panel with arrow keys from its focusable titlebar', () => {
+    const { container } = renderConsole()
+    const panel = container.querySelector<HTMLElement>('#agent-console-panel')
+    const header = container.querySelector<HTMLElement>('.agent-console-head')
+    if (!panel || !header) throw new Error('run panel is missing')
+    vi.spyOn(panel, 'getBoundingClientRect').mockReturnValue(new DOMRect(100, 64, 360, 400))
+
+    fireEvent.keyDown(header, { key: 'ArrowRight' })
+    fireEvent.keyDown(header, { key: 'ArrowDown', shiftKey: true })
+
+    expect(panel.style.left).toBe('108px')
+    expect(panel.style.top).toBe('96px')
+  })
+
   it('shows a notice when a pending Script result is already assigned to its frozen target node', () => {
     renderConsole({
       pending: [scriptPendingSummary],

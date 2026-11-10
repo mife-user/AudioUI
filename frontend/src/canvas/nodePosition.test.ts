@@ -1,12 +1,34 @@
 import { describe, expect, it } from 'vitest'
-import type { Node } from '../../bindings/audio-ui/internal/domain/entity'
-import { allocateNodePosition } from './nodePosition'
+import type { Node, Position } from '../../bindings/audio-ui/internal/domain/entity'
+import { allocateNodePosition, NODE_LAYOUT_GAP } from './nodePosition'
 
-function node(id: string, x: number, y: number): Node {
+const defaultSizes = {
+  topic: { width: 280, height: 250 },
+  candidate: { width: 235, height: 160 },
+  prompt: { width: 280, height: 230 },
+  agent: { width: 235, height: 165 },
+  script: { width: 270, height: 205 },
+} as const
+
+type NodeKind = keyof typeof defaultSizes
+
+function node(
+  id: string,
+  position: Position,
+  type: NodeKind = 'topic',
+  size: { width: number; height: number } = defaultSizes[type],
+): Node {
   return {
-    id, type: 'topic' as Node['type'], title: id, position: { x, y }, size: { width: 280, height: 230 }, params: {},
+    id, type: type as Node['type'], title: id, position, size, params: {},
     rounds: [], locked: false, stale: false,
   }
+}
+
+function isSeparated(position: Position, size: { width: number; height: number }, other: Node): boolean {
+  return position.x >= other.position.x + other.size.width + NODE_LAYOUT_GAP
+    || position.x + size.width + NODE_LAYOUT_GAP <= other.position.x
+    || position.y >= other.position.y + other.size.height + NODE_LAYOUT_GAP
+    || position.y + size.height + NODE_LAYOUT_GAP <= other.position.y
 }
 
 describe('allocateNodePosition', () => {
@@ -14,33 +36,44 @@ describe('allocateNodePosition', () => {
     expect(allocateNodePosition([], { x: 400, y: 300 })).toEqual({ x: 400, y: 300 })
   })
 
-  it('moves later nodes to non-overlapping positions even when siblings share an origin', () => {
-    const existing = [node('one', 400, 300)]
-    const second = allocateNodePosition(existing, { x: 400, y: 300 })
-    const third = allocateNodePosition([...existing, node('two', second.x, second.y)], { x: 400, y: 300 })
+  it('uses persisted node sizes and the requested node type size', () => {
+    const resized = node('resized', { x: 100, y: 100 }, 'script', { width: 1000, height: 850 })
+    const position = allocateNodePosition([resized], resized.position, 'candidate')
 
-    expect(second).not.toEqual(existing[0].position)
-    expect(third).not.toEqual(second)
-    expect([second, third].every((position) => Math.abs(position.x - 400) >= 300 || Math.abs(position.y - 300) >= 220)).toBe(true)
+    expect(position).not.toEqual(resized.position)
+    expect(isSeparated(position, defaultSizes.candidate, resized)).toBe(true)
   })
 
-  it('keeps expanded topic cards separated when they share an origin', () => {
-    const first = node('one', 400, 300)
-    const secondPosition = allocateNodePosition([first], first.position, 'topic')
-    const second = node('two', secondPosition.x, secondPosition.y)
-    const overlaps = second.position.x < first.position.x + 320 + 36
-      && second.position.x + 320 + 36 > first.position.x
-      && second.position.y < first.position.y + 480 + 36
-      && second.position.y + 480 + 36 > first.position.y
+  it('keeps automatically placed siblings apart using their default dimensions', () => {
+    const topic = node('topic', { x: 0, y: 0 })
+    const origin = { x: topic.position.x + topic.size.width + NODE_LAYOUT_GAP, y: topic.position.y }
+    const placed = [topic]
+    const positions: Position[] = []
 
-    expect(overlaps).toBe(false)
+    for (let index = 0; index < 4; index += 1) {
+      const requested = { x: origin.x, y: origin.y + index * (defaultSizes.candidate.height + NODE_LAYOUT_GAP) }
+      const position = allocateNodePosition(placed, requested, 'candidate')
+      positions.push(position)
+      placed.push(node(`candidate-${index}`, position, 'candidate'))
+    }
+
+    for (let index = 0; index < positions.length; index += 1) {
+      expect(placed.slice(0, index + 1).every((other) => isSeparated(positions[index], defaultSizes.candidate, other))).toBe(true)
+    }
+    expect(positions).toEqual([
+      { x: origin.x, y: origin.y },
+      { x: origin.x, y: origin.y + defaultSizes.candidate.height + NODE_LAYOUT_GAP },
+      { x: origin.x, y: origin.y + 2 * (defaultSizes.candidate.height + NODE_LAYOUT_GAP) },
+      { x: origin.x, y: origin.y + 3 * (defaultSizes.candidate.height + NODE_LAYOUT_GAP) },
+    ])
   })
 
-  it('avoids old nodes that were placed close together', () => {
-    const existing = [node('one', 535, 362), node('two', 579, 381)]
-    const next = allocateNodePosition(existing, { x: 535, y: 362 })
+  it('returns a deterministic non-overlapping position', () => {
+    const existing = [node('one', { x: 535, y: 362 }), node('two', { x: 579, y: 381 })]
+    const origin = { x: 535, y: 362 }
+    const position = allocateNodePosition(existing, origin)
 
-    expect(next).not.toEqual(existing[0].position)
-    expect(next).not.toEqual(existing[1].position)
+    expect(position).toEqual(allocateNodePosition(existing, origin))
+    expect(existing.every((other) => isSeparated(position, defaultSizes.prompt, other))).toBe(true)
   })
 })

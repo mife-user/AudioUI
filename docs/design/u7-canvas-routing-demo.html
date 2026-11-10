@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AudioUI · U7 连线与自动排布演示</title>
+  <style>
+    :root { color-scheme: dark; --bg:#0a0e11; --panel:#101a1f; --panel2:#0c1216; --border:#263940; --text:#dfe7ea; --sub:#9fb2b9; --muted:#6f828a; --accent:#5ad1e6; --edge:#3d6b78; --warn:#d8b27a; --ok:#6fd3a4; --danger:#d98a8a; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg); color:var(--text); font:13px/1.5 "Segoe UI","Microsoft YaHei",sans-serif; }
+    button { color:inherit; font:inherit; cursor:pointer; }
+    button:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+    header { display:flex; align-items:center; gap:14px; min-height:54px; padding:0 22px; border-bottom:1px solid var(--border); background:var(--panel2); }
+    header strong { color:var(--accent); letter-spacing:.12em; }
+    header small { color:var(--muted); }
+    .badge { margin-left:auto; padding:4px 9px; border:1px solid var(--border); border-radius:999px; color:var(--warn); font-size:11px; }
+    main { max-width:1440px; margin:auto; padding:20px; }
+    .intro { display:flex; justify-content:space-between; gap:18px; align-items:end; margin-bottom:14px; }
+    h1,h2,p { margin:0; }
+    h1 { font-size:18px; }
+    .intro p,.note { margin-top:4px; color:var(--sub); }
+    .actions,.branch-switch { display:flex; gap:8px; }
+    .actions button,.branch-switch button { padding:7px 11px; border:1px solid var(--border); border-radius:6px; background:var(--panel); }
+    .branch-switch button[aria-pressed="true"] { border-color:var(--accent); background:#123038; color:var(--accent); }
+    .canvas { overflow:auto; border:1px solid var(--border); border-radius:10px; background-image:radial-gradient(#1e2a30 1px,transparent 1px); background-size:22px 22px; }
+    .world { position:relative; width:1580px; height:690px; }
+    svg { position:absolute; inset:0; width:100%; height:100%; overflow:visible; pointer-events:none; }
+    .wire { fill:none; stroke:var(--edge); stroke-width:1.5; opacity:.76; }
+    .wire.active { stroke:var(--accent); stroke-width:2.4; opacity:1; }
+    .wire.locked { stroke:var(--warn); stroke-width:2.2; stroke-dasharray:5 4; opacity:1; }
+    .wire-hit { fill:none; stroke:transparent; stroke-width:18; pointer-events:stroke; cursor:pointer; }
+    .wire-group:hover .wire { stroke:var(--accent); stroke-width:2.2; opacity:1; }
+    .node { position:absolute; display:flex; flex-direction:column; overflow:hidden; padding:10px; border:1px solid var(--border); border-radius:9px; background:var(--panel); box-shadow:0 6px 20px #0004; }
+    .node strong { font-size:12px; }
+    .node small { margin-top:6px; color:var(--sub); }
+    .node .kind { color:var(--muted); font-size:10px; letter-spacing:.08em; }
+    .port { position:absolute; top:50%; width:10px; height:10px; border:2px solid var(--bg); border-radius:50%; background:var(--edge); transform:translateY(-50%); }
+    .port.in { left:-5px; }.port.out { right:-5px; background:var(--accent); }
+    .legend { position:absolute; top:14px; left:15px; display:flex; gap:14px; padding:6px 9px; border:1px solid var(--border); border-radius:6px; background:var(--panel2); color:var(--sub); font-size:11px; }
+    .legend span::before { content:""; display:inline-block; width:18px; margin:0 6px 3px 0; border-top:2px solid var(--edge); vertical-align:middle; }
+    .legend .current::before { border-color:var(--accent); }.legend .runlock::before { border-color:var(--warn); border-top-style:dashed; }
+    .chains { position:absolute; left:20px; bottom:16px; display:flex; gap:8px; padding:7px; border:1px solid var(--border); border-radius:8px; background:var(--panel2); }
+    .layout-demo { margin-top:22px; padding:16px; border:1px solid var(--border); border-radius:10px; background:var(--panel2); }
+    .layout-demo h2 { font-size:15px; }.layout-demo .toolbar { display:flex; justify-content:space-between; align-items:center; gap:12px; }
+    .layout-demo button { padding:7px 10px; border:1px solid var(--border); border-radius:6px; background:var(--panel); }
+    .placement { position:relative; width:min(680px,100%); height:220px; margin-top:12px; overflow:hidden; border:1px dashed var(--border); border-radius:7px; background-image:radial-gradient(#1e2a30 1px,transparent 1px); background-size:18px 18px; }
+    .placement-card { position:absolute; display:grid; place-content:center; padding:8px; border:1px solid var(--border); border-radius:6px; background:var(--panel); color:var(--sub); font-size:10px; text-align:center; }
+    .placement-card.topic { border-color:var(--edge); color:var(--accent); }.placement-card.candidate { border-color:#40636a; color:var(--text); }
+    .placement-card.blocker { border-style:dashed; color:var(--warn); background:#292316; }
+    @media(max-width:760px) { main { padding:12px; }.intro { align-items:flex-start; flex-direction:column; }.badge { display:none; }.actions { flex-wrap:wrap; } }
+  </style>
+</head>
+<body>
+  <header><strong>AUDIOUI</strong><span>U7 · 连线、叶子链与自动排布</span><small>独立交互示意</small><span class="badge">模拟数据 · 不连接工程或 Agent</span></header>
+  <main>
+    <section class="intro">
+      <div><h1>让分支关系一眼可读</h1><p>常规相邻节点用曲线；反向或拥挤链路绕开卡片；叶子链只高亮当前完整路径。</p></div>
+      <nav class="branch-switch" aria-label="切换示例叶子链">
+        <button type="button" data-branch="a" aria-pressed="true">脚本分支</button>
+        <button type="button" data-branch="b" aria-pressed="false">备用分支</button>
+      </nav>
+    </section>
+    <div class="canvas" aria-label="模拟画布">
+      <div class="world">
+        <svg viewBox="0 0 1580 690" aria-hidden="true">
+          <defs><marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M1 1L9 5L1 9Z" fill="context-stroke"/></marker></defs>
+          <g class="wire-group path-a"><path class="wire" d="M280 185 C310 185 320 175 350 175" marker-end="url(#arrow)"/><path class="wire-hit" d="M280 185 C310 185 320 175 350 175"/></g>
+          <g class="wire-group path-a"><path class="wire" d="M555 175 C600 175 605 175 650 175" marker-end="url(#arrow)"/><path class="wire-hit" d="M555 175 C600 175 605 175 650 175"/></g>
+          <g class="wire-group path-a"><path class="wire" d="M880 175 C920 175 940 190 980 190" marker-end="url(#arrow)"/><path class="wire-hit" d="M880 175 C920 175 940 190 980 190"/></g>
+          <g class="wire-group path-a"><path class="wire locked" d="M1185 190 C1220 190 1225 200 1260 200" marker-end="url(#arrow)"/><path class="wire-hit" d="M1185 190 C1220 190 1225 200 1260 200"/></g>
+          <g class="wire-group path-b"><path class="wire" d="M280 185 C315 185 315 490 350 490" marker-end="url(#arrow)"/><path class="wire-hit" d="M280 185 C315 185 315 490 350 490"/></g>
+          <g class="wire-group path-b"><path class="wire" d="M555 490 C600 490 605 500 650 500" marker-end="url(#arrow)"/><path class="wire-hit" d="M555 490 C600 490 605 500 650 500"/></g>
+          <g class="wire-group path-reverse"><path class="wire" d="M1480 200 L1515 200 L1515 610 L1025 610 L1025 500 L1050 500" marker-end="url(#arrow)"/><path class="wire-hit" d="M1480 200 L1515 200 L1515 610 L1025 610 L1025 500 L1050 500"/></g>
+        </svg>
+        <div class="legend"><span class="current">当前叶子链</span><span>其他分支</span><span class="runlock">运行锁</span><span>线条可悬停</span></div>
+        <article class="node" style="left:60px;top:105px;width:220px;height:160px"><span class="kind">TOPIC</span><strong>从节奏变化讲情绪</strong><small>已生成 2 个候选</small><span class="port out"></span></article>
+        <article class="node candidate-a" style="left:350px;top:105px;width:205px;height:140px"><span class="kind">CANDIDATE</span><strong>节奏与叙事</strong><small>方向：鼓点推动情绪</small><span class="port in"></span><span class="port out"></span></article>
+        <article class="node candidate-b" style="left:350px;top:420px;width:205px;height:140px"><span class="kind">CANDIDATE</span><strong>编曲与音色对照</strong><small>候选 2</small><span class="port in"></span><span class="port out"></span></article>
+        <article class="node prompt-a" style="left:650px;top:90px;width:230px;height:170px"><span class="kind">PROMPT</span><strong>解说脚本任务</strong><small>只构建任务，不直接运行</small><span class="port in"></span><span class="port out"></span></article>
+        <article class="node prompt-b" style="left:650px;top:415px;width:230px;height:170px"><span class="kind">PROMPT</span><strong>备用剪辑方向</strong><small>另一条独立分支</small><span class="port in"></span><span class="port out"></span></article>
+        <article class="node agent-a" style="left:980px;top:120px;width:205px;height:140px"><span class="kind">AGENT</span><strong>本地运行</strong><small>输出绑定：脚本</small><span class="port in"></span><span class="port out"></span></article>
+        <article class="node script-a" style="left:1260px;top:105px;width:220px;height:190px"><span class="kind">SCRIPT</span><strong>解说脚本 · v1</strong><small>当前叶子链末端</small><span class="port in"></span><span class="port out"></span></article>
+        <article class="node follow-up" style="left:1050px;top:430px;width:230px;height:155px"><span class="kind">PROMPT</span><strong>脚本后的后续任务</strong><small>反向边采用外围绕行</small><span class="port in"></span></article>
+        <nav class="chains" aria-label="叶子链状态"><span>叶子链：</span><button type="button" data-branch="a" aria-pressed="true">脚本分支 · 待确认</button><button type="button" data-branch="b" aria-pressed="false">备用分支 · 空闲</button></nav>
+      </div>
+    </div>
+    <section class="layout-demo">
+      <div class="toolbar"><div><h2>自动生成节点避让</h2><p class="note">固定默认尺寸与 36px 间距；试算会考虑已有卡片保存尺寸，不移动既有节点。</p></div><button id="toggle-blocker" type="button" aria-pressed="false">加入大尺寸阻挡卡</button></div>
+      <div class="placement" id="placement" aria-label="自动候选排布示意"></div>
+      <p class="note" id="placement-status" role="status"></p>
+    </section>
+    <p class="note">此页面仅用于呈现 U7 的交互方向。连线合法性、图关系、链路状态和持久化仍以 AudioUI 后端快照与命令校验为准。</p>
+  </main>
+  <script>
+    const branchButtons = [...document.querySelectorAll('[data-branch]')]
+    function selectBranch(branch) {
+      document.querySelectorAll('.path-a').forEach((edge) => edge.querySelector('.wire').classList.toggle('active', branch === 'a'))
+      document.querySelectorAll('.path-b').forEach((edge) => edge.querySelector('.wire').classList.toggle('active', branch === 'b'))
+      document.querySelectorAll('.path-reverse .wire').forEach((edge) => edge.classList.toggle('active', branch === 'a'))
+      branchButtons.forEach((button) => button.setAttribute('aria-pressed', String(button.dataset.branch === branch)))
+      document.querySelector('.candidate-a').style.opacity = branch === 'a' ? '1' : '.62'
+      document.querySelector('.candidate-b').style.opacity = branch === 'b' ? '1' : '.62'
+      document.querySelector('.prompt-a').style.opacity = branch === 'a' ? '1' : '.62'
+      document.querySelector('.prompt-b').style.opacity = branch === 'b' ? '1' : '.62'
+      document.querySelector('.agent-a').style.opacity = branch === 'a' ? '1' : '.62'
+      document.querySelector('.script-a').style.opacity = branch === 'a' ? '1' : '.62'
+    }
+    branchButtons.forEach((button) => button.addEventListener('click', () => selectBranch(button.dataset.branch)))
+
+    const placement = document.getElementById('placement')
+    const status = document.getElementById('placement-status')
+    const toggle = document.getElementById('toggle-blocker')
+    const gap = 36
+    const candidateSize = { width: 120, height: 58 }
+    function overlaps(candidate, other) {
+      return candidate.x < other.x + other.width + gap && candidate.x + candidateSize.width + gap > other.x
+        && candidate.y < other.y + other.height + gap && candidate.y + candidateSize.height + gap > other.y
+    }
+    function allocate(origin, existing) {
+      for (let column = 0; column <= existing.length; column += 1) {
+        for (let row = 0; row <= existing.length; row += 1) {
+          const candidate = { x: origin.x + column * (candidateSize.width + gap), y: origin.y + row * (candidateSize.height + gap), ...candidateSize }
+          if (existing.every((other) => !overlaps(candidate, other))) return candidate
+        }
+      }
+      const rightmost = Math.max(origin.x, ...existing.map((other) => other.x + other.width))
+      return { x: rightmost + gap, y: origin.y, ...candidateSize }
+    }
+    function renderPlacement() {
+      const crowded = toggle.getAttribute('aria-pressed') === 'true'
+      const nodes = [{ x: 22, y: 52, width: 150, height: 112, label: 'Topic · 已有尺寸', kind: 'topic' }]
+      if (crowded) nodes.push({ x: 208, y: 38, width: 300, height: 160, label: '大尺寸阻挡节点', kind: 'blocker' })
+      const generated = []
+      const origin = { x: 208, y: 52 }
+      for (let index = 0; index < 3; index += 1) {
+        const position = allocate({ x: origin.x, y: origin.y + index * (candidateSize.height + gap) }, [...nodes, ...generated])
+        generated.push({ ...position, label: `自动候选 ${index + 1}`, kind: 'candidate' })
+      }
+      placement.replaceChildren()
+      for (const card of [...nodes, ...generated]) {
+        const element = document.createElement('div')
+        element.className = `placement-card ${card.kind}`
+        element.textContent = card.label
+        element.style.left = `${card.x}px`
+        element.style.top = `${card.y}px`
+        element.style.width = `${card.width}px`
+        element.style.height = `${card.height}px`
+        placement.append(element)
+      }
+      status.textContent = crowded ? '候选避开大尺寸阻挡节点；原有节点位置保持不变。' : '候选按默认尺寸纵向排列；再次点击可加入阻挡节点。'
+    }
+    toggle.addEventListener('click', () => {
+      const next = toggle.getAttribute('aria-pressed') !== 'true'
+      toggle.setAttribute('aria-pressed', String(next))
+      toggle.textContent = next ? '移除大尺寸阻挡卡' : '加入大尺寸阻挡卡'
+      renderPlacement()
+    })
+    selectBranch('a')
+    renderPlacement()
+  </script>
+</body>
+</html>

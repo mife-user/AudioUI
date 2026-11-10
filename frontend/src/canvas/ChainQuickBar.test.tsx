@@ -23,9 +23,9 @@ describe('ChainQuickBar', () => {
     render(<ChainQuickBar chains={chains} nodes={nodes} activeNodeId="n_shared" onSelectNode={vi.fn()} onCreateNode={vi.fn()} createNodeDisabled={false} />)
 
     expect(screen.getAllByRole('button', { name: /选择叶子链/ })).toHaveLength(3)
-    expect(screen.getByRole('button', { name: '选择叶子链 分支甲，工作中' })).toHaveAttribute('aria-pressed', 'true')
-    expect(screen.getByRole('button', { name: '选择叶子链 分支乙，待处理' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '选择叶子链 分支丙，空闲' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '选择叶子链 分支甲，工作中' })).toHaveAttribute('aria-pressed', 'false')
+    expect(screen.getByRole('button', { name: '选择叶子链 分支乙，待处理' })).toHaveAttribute('aria-pressed', 'false')
+    expect(screen.getByRole('button', { name: '选择叶子链 分支丙，空闲' })).toHaveAttribute('aria-pressed', 'false')
   })
 
   it('selects a chain tail through the supplied selection callback', () => {

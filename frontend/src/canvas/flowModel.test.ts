@@ -72,6 +72,15 @@ describe('flowModel', () => {
       ['agent-output', 'script-input'],
       ['script-output', 'prompt-input'],
     ])
+    expect(model.edges[0]).toMatchObject({
+      type: 'workspace',
+      className: 'workspace-edge workspace-edge-highlighted',
+      interactionWidth: 20,
+      markerEnd: { type: 'arrowclosed', color: 'var(--accent)' },
+    })
+    expect(model.edges[0]?.data?.obstacles).toContainEqual({
+      nodeId: candidate.id, x: 0, y: 0, width: candidate.size.width, height: candidate.size.height,
+    })
     expect(model.nodes.find((node) => node.id === candidate.id)?.data.candidate).toEqual({
       index: 2, title: '候选三', angle: '角度', hook: '开场',
     })
@@ -97,6 +106,22 @@ describe('flowModel', () => {
     expect(buildFlowEdges(model.nodes, { [topic.id]: ready[topic.id] })).toEqual([])
     expect(buildFlowEdges(model.nodes, ready)).toHaveLength(1)
     expect(buildFlowEdges(model.nodes, ready)[0]?.sourceHandle).toBe('topic-candidate-0')
+  })
+
+  it('updates edge obstacles from live node positions and resize dimensions', () => {
+    const topic = makeNode('n_topic', 'topic')
+    const candidate = makeNode('n_candidate', 'candidate', topic.id, {
+      candidateSource: { topicNodeId: topic.id, artifactId: 'sha256:topics', index: 0 },
+    })
+    const model = buildFlowModel(snapshot([topic, candidate]), vi.fn())
+    const resizedNodes = model.nodes.map((node) => node.id === candidate.id
+      ? { ...node, position: { x: 500, y: 220 }, style: { ...node.style, width: 420, height: 260 } }
+      : node)
+    const edge = buildFlowEdges(resizedNodes)[0]
+
+    expect(edge?.data?.obstacles).toContainEqual({
+      nodeId: candidate.id, x: 500, y: 220, width: 420, height: 260,
+    })
   })
 
   it('exposes Agent run state and its direct Script binding without deriving extra graph rules', () => {
@@ -202,7 +227,8 @@ describe('flowModel', () => {
     }
     expect(model.nodes.find((node) => node.id === nextPrompt.id)?.data.runningLocked).toBe(false)
     expect(model.nodes.find((node) => node.id === agent.id)?.data.globalRunBusy).toBe(true)
-    expect(model.edges.find((edge) => edge.target === prompt.id)?.className).toBe('workspace-edge-highlighted')
+    expect(model.edges.find((edge) => edge.target === prompt.id)?.className).toContain('workspace-edge-highlighted')
+    expect(model.edges.find((edge) => edge.target === prompt.id)?.className).toContain('workspace-edge-running-locked')
   })
 
   it('changes Script handle measurement keys when immutable version history changes', () => {

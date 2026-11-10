@@ -608,14 +608,59 @@
   fill: var(--grid);
 }
 
+.workspace-edge {
+  opacity: .76;
+}
+
 .workspace-edge .react-flow__edge-path {
   stroke: var(--edge);
   stroke-width: 1.5;
+  transition: stroke 140ms ease-out, stroke-width 140ms ease-out;
+}
+
+.workspace-edge .react-flow__edge-interaction {
+  stroke: transparent;
+  stroke-width: 18;
+}
+
+.workspace-edge:hover,
+.workspace-edge-highlighted {
+  opacity: 1;
+}
+
+.workspace-edge:hover .react-flow__edge-path {
+  stroke: var(--accent);
+  stroke-width: 2.2;
 }
 
 .workspace-edge-highlighted .react-flow__edge-path {
   stroke: var(--accent);
   stroke-width: 2.2;
+}
+
+.workspace-edge-running-locked .react-flow__edge-path {
+  stroke: var(--warn);
+  stroke-width: 2.2;
+  stroke-dasharray: 5 4;
+}
+
+.canvas-flow-root .react-flow__connection-path {
+  stroke: var(--accent);
+  stroke-dasharray: 5 4;
+}
+
+.node-input-handle.connectingto.valid {
+  background: var(--ok);
+}
+
+.node-input-handle.connectingto:not(.valid) {
+  background: var(--danger);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workspace-edge .react-flow__edge-path {
+    transition: none;
+  }
 }
 
 .canvas-node {

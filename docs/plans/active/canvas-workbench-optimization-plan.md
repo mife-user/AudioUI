@@ -1,10 +1,10 @@
 # 画布、节点与 Agent 交互整体优化计划
 
-> **状态：U0 范围与文档决策已于 2026-11-08 确认；U1 代码、自动化与真实 Wails/WebView2 页面自检完成，待用户验收；Windows 原生 IME 与真实 Agent 未测；U2 已于 2026-11-09 完成实现、自检及前端交互验收；U3 已于 2026-11-09 通过用户验收（助手未执行真实浏览器页面实测）；U4 已于 2026-11-09 通过用户验收（助手 Edge 页面实测边界见 U4）；U5 已于 2026-11-09 通过用户验收（助手未完成浏览器实测，未归档截图/viewport）；U6～U9 尚未实施。**
+> **状态：U0 范围与文档决策已于 2026-11-08 确认；U1 代码、自动化与真实 Wails/WebView2 页面自检完成，待用户验收；Windows 原生 IME 与真实 Agent 未测；U2 已于 2026-11-09 完成实现、自检及前端交互验收；U3 已于 2026-11-09 通过用户验收（助手未执行真实浏览器页面实测）；U4 已于 2026-11-09 通过用户验收（助手 Edge 页面实测边界见 U4）；U5 已于 2026-11-09 通过用户验收（助手未完成浏览器实测，未归档截图/viewport）；U6 原范围及标题栏拖拽补充项已于 2026-11-10 通过用户验收；U7 已于 2026-11-10 通过用户验收（真实页面未测）；U8～U9 尚未实施。**
 >
 > **范围**：在已验收的 M2 本地 `script` 闭环基础上，优化卡片尺寸、输入、悬浮运行面板、节点确认、链路与新建交互，同时核对指定会话的当前阶段需求。
 >
-> **原型**：[本地单文件交互示意](../../design/canvas-workbench-redesign-demo.html)；[1440 × 900 静态截图](../../dev/evidence/canvas-workbench-redesign-demo.png)。原型使用模拟数据，不连接 Agent、不读写工程、不联网；示意不是产品实现或验收证据。
+> **原型**：[本地单文件交互示意](../../design/canvas-workbench-redesign-demo.html)；[U7 连线与排布演示](../../design/u7-canvas-routing-demo.html)；[1440 × 900 静态截图](../../dev/evidence/canvas-workbench-redesign-demo.png)。原型使用模拟数据，不连接 Agent、不读写工程、不联网；示意不是产品实现或验收证据。
 >
 > **参照**：会话 `4901b87a-148b-4127-b0fc-81ca5e9d4a80`；其需求整理提交为 `607391a`。当前范围以 `prd.md` 1.2、ADR-029、本计划 U0 决策和 `acceptance.md` AC-U 为准，M2 历史草案不覆盖已确认范围。
 
@@ -210,20 +210,23 @@
 
 ### U6：悬浮运行栏与节点待处理
 
-- **状态**：用户于 2026-11-10 完成界面验收。定向测试、类型检查、lint、令牌检查和生产构建通过；全量前端测试因 Node.js 约 4 GiB 堆上限退出（一次在 7/8 个文件、71/74 项后，另一次在 CanvasNodes 14/18 项后），不能视为全量通过。Vite 页面缺少 Wails 后端，未验证真实工程和运行请求。
+- **状态**：U6 原范围及标题栏拖拽补充项已于 2026-11-10 通过用户验收。定向测试、类型检查、lint、令牌检查和生产构建通过；全量前端测试因 Node.js 约 4 GiB 堆上限退出（一次在 7/8 个文件、71/74 项后，另一次在 CanvasNodes 14/18 项后），不能视为全量通过。Vite 页面缺少 Wails 后端，未验证真实工程和运行请求。
 - **涉及**：`App.tsx`、`ui/AgentConsole.tsx`、`PermissionCard.tsx`、`QuestionCard.tsx`、`RunList.tsx`、`Transcript.tsx`、`stores/runStore.ts`、`WorkspacePage.tsx`、各节点、`agent.css` / `workspace.css`。
 - 把当前占列侧栏重排为悬浮入口与有界窗口；抽离状态和请求映射，保证关闭/展开不重建或丢失 run 事件、scroll 和 pending。
 - 用冻结 `projectId/runId/requestId/pendingId` 定位节点与操作；结果、权限和问题入口放对应卡片右上角。保留无法定位时的恢复路径，不新增自动授权。
 - 通过既有 `GetRunSnapshot` 和 workspace revision 恢复事件；面板中保留运行历史、滚动阅读和停止，继续禁止自由提示词输入框。
-- **出口**：AC-U-11～13、AC-U-15/16；`PermissionCard` / `QuestionCard` 的权限、超时和审计回归不退化。
+- **补充项**：展开面板仅可从标题栏（操作按钮除外）拖动，且可通过聚焦标题栏使用方向键微调；面板保持在窗口可视范围内。收起/展开保留本次应用会话中的位置，不写入工程数据；重启后恢复默认位置。
+- **出口**：AC-U-11～13、AC-U-15/16、AC-U-20；`PermissionCard` / `QuestionCard` 的权限、超时和审计回归不退化。
 
 ### U7：连线、叶子链及自动排布
 
-- **涉及**：`flowModel.ts`、`WorkspaceCanvas.tsx`、`ChainQuickBar.tsx`、`nodePosition.ts`、`useMeasuredNodeHandles.ts`、`workspace.css`；自动生成节点的位置同时涉及 `internal/service/workflow/pending.go` 及相关测试。
-- 增加自定义 Edge 绘制和更大的透明命中区域；保持 Go 计算的父子关系为唯一业务真相，不把连线合法性变为前端独有规则。
-- 依据节点当前矩形/端口确定曲线或有界绕线路径；多分支共享前缀、反向连线、交叉、尺寸变化、测量失效、节点数量较多时均有稳定回退。
-- 自动 Candidate/Script 放置改为可测试的确定性函数，考虑已有节点尺寸、默认尺寸和间距；批量候选在同一事务中得到互不重叠的位置，不移动既有卡片。
-- 叶子链只消费 Go 快照；展开/收起、选择、无链、很多链和状态变化均不触发图写入。
+- **状态**：用户于 2026-11-10 确认 U7 验收通过。Go 全量测试及 `go vet` 通过；U7 前端 4 个测试文件 / 25 项通过，TypeScript 检查、令牌检查及生产构建通过；Wails 离线构建通过。lint 仅有既存 `usePendingController.tsx` 两条警告。前端全量测试在 Node 约 4 GiB 堆限制处 OOM，不能视为通过；真实页面操作未测。首次 Wails 构建任务调用了未显式离线的 `npm install`（报告依赖已最新、锁文件无变化，注册表访问情况无法确认）；随后以 `npm_config_offline=true` 重建成功。
+- **涉及**：`CanvasEdge.tsx`、`edgeRouting.ts`、`flowModel.ts`、`WorkspaceCanvas.tsx`、`ChainQuickBar.tsx`、`nodePosition.ts`、`workspace.css`；自动生成节点的位置涉及 `internal/service/workflow/node_position.go`、`pending.go` 及相关测试。
+- **连线**：新增自定义 Edge；前向且无阻挡时绘制曲线，反向、间距不足或卡片阻挡时尝试有界绕行；按源/目标之外的当前节点矩形避让，路由失败保留稳定曲线回退。可见方向箭头，透明命中区 20px；当前路径与运行锁分别强调，运行锁不再混同路径选中态，连线拖拽与无效目标有单独样式。连接合法性仍由 Go 命令校验。
+- **叶子链**：快捷栏只消费 Go 快照和 `SelectNode`；仅当当前节点是某条链的末端时标记该叶子链，处于共享前缀时不再错误地选中第一条分支。切换不写图 revision、不占运行槽。
+- **自动排布**：前端子节点创建和后端自动 Candidate/Script 创建均使用确定性矩形避让与 36px 间距；既有节点使用保存尺寸，新节点使用类型默认尺寸。批量 Candidate 按批次逐个纳入占位，单次 Topic 事务不移动既有卡片。用户指定坐标的新建仍不自动挪动。
+- **自检覆盖**：前端定向测试覆盖曲线路由、阻挡绕行、反向边、200 节点布局、端点排除、边状态/箭头/命中区、实时尺寸避让和共享前缀选择；Go 测试覆盖重设尺寸阻挡、批量 Candidate 互不重叠及自动 Script 避让。
+- **浏览器边界**：本机未安装 `chromium-cli` 或 Playwright 自动化包；Edge 可执行文件存在但没有可用交互驱动。本轮没有启动真实页面或留存截图/viewport，不能据此宣称浏览器/Wails/WebView2 页面验收通过。单文件示意：[U7 连线与排布演示](../../design/u7-canvas-routing-demo.html)，使用模拟数据，不代表产品实现或验收证据。
 - **出口**：AC-U-13/14、AC-T-08/19；图拓扑、运行快照和事务行为不受视觉路由影响。
 
 ### U8：本地 Agent 搜索能力对照

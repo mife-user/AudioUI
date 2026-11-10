@@ -98,6 +98,7 @@
 | AC-U-17 | Given 选题一次生成多条候选且周围已有不同尺寸卡片，When 自动放置节点，Then 新节点按确定性规则互不重叠、不移动已有节点；分支、来源和事务保持正确。 |
 | AC-U-18 | Given 本地 Agent 执行环境报告有或没有网页搜索能力，When 用户发起需搜索的任务，Then 可用能力及权限需求明确；搜索由 Agent 提供，不经新增通用 MCP 代理；未授权不得在测试中访问外网。 |
 | AC-U-19 | Given `Prompt A → Agent A → Script A → Prompt B` 中 Prompt B 有未保存或无效草稿，When 用户启动 Agent A，Then 仅 flush 根到 Agent A 的相关输入，Prompt B 不被强制保存或阻止本次启动；提交阶段仅临时锁定该前缀及须保护的绑定输出 Script A，Prompt B 和其他无关分支不被误锁，最终以 Go 的权威锁为准。 |
+| AC-U-20 | Given Agent 运行面板已展开，When 用户拖动标题栏（不含操作按钮）或聚焦标题栏后用方向键移动，Then 面板保持在应用窗口可视范围内；按钮点击不触发拖动，收起再展开保留本次会话位置。 |
 
 ### M3 渲染
 

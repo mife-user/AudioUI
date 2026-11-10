@@ -288,6 +288,17 @@ func TestSubmitRunReplyCommitsScriptAndDeduplicatesByRequestIdentity(t *testing.
 	if !ok || resultNode.Type != valueobject.NodeTypeScript || resultNode.Parent != scope.NodeID || len(resultNode.ScriptVersions) != 1 || resultNode.ScriptVersions[0].ArtifactID != first.ArtifactID {
 		t.Fatalf("generated script node = %+v, ok=%t", resultNode, ok)
 	}
+	for _, other := range h.session.project.Nodes {
+		if other.ID == resultNode.ID {
+			continue
+		}
+		if resultNode.Position.X < other.Position.X+other.Size.Width+generatedNodeGap &&
+			resultNode.Position.X+resultNode.Size.Width+generatedNodeGap > other.Position.X &&
+			resultNode.Position.Y < other.Position.Y+other.Size.Height+generatedNodeGap &&
+			resultNode.Position.Y+resultNode.Size.Height+generatedNodeGap > other.Position.Y {
+			t.Fatalf("generated Script overlaps %s", other.ID)
+		}
+	}
 
 	beforeNodes := len(h.session.project.Nodes)
 	beforeChanges := len(*h.changes)

@@ -16,10 +16,11 @@ import {
 import type { GraphMutationReceipt, Node, NodeParams, RunStartResult, WorkspaceSnapshot } from '../../bindings/audio-ui/internal/domain/entity'
 import { startRun as startRunAPI } from '../api/runs'
 import { graphAPI, type GraphAPI, type TopicCandidateFixture } from './graphApi'
-import { allocateNodePosition } from './nodePosition'
+import { allocateNodePosition, NODE_LAYOUT_GAP } from './nodePosition'
 import { buildFlowEdges, buildFlowModel, inputHandleId, nodeMap, outputHandleId, subtreeSize, topicRootId, type CanvasFlowNode, type ChildNodeType } from './flowModel'
 import { preserveCanvasNodeViewState } from './nodeState'
 import { type NodeLocator } from '../hooks/runRequests'
+import { CanvasEdge } from './CanvasEdge'
 import { CandidateNode } from './CandidateNode'
 import { CanvasContextMenu, type CanvasCreateType } from './CanvasContextMenu'
 import { ChainQuickBar } from './ChainQuickBar'
@@ -35,6 +36,7 @@ const nodeTypes = {
   agent: AgentNode,
   script: ScriptNode,
 }
+const edgeTypes = { workspace: CanvasEdge }
 const MOVE_DEBOUNCE_MS = 240
 const EMPTY_HANDLE_LAYOUTS: Record<string, string> = {}
 
@@ -550,7 +552,7 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFl
     const parent = graphNodes.find((node) => node.id === parentId)
     if (!parent) return
     const position = allocateNodePosition(graphNodes, {
-      x: parent.position.x + 380,
+      x: parent.position.x + parent.size.width + NODE_LAYOUT_GAP,
       y: parent.position.y,
     }, type)
     void createNode(type, parentId, position)
@@ -1037,6 +1039,7 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFl
           nodes={nodes}
           edges={edges}
           nodeTypes={nodeTypes}
+          edgeTypes={edgeTypes}
           onNodesChange={onNodesChange}
           onConnect={onConnect}
           onPaneClick={focusCanvas}
@@ -1055,7 +1058,7 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFl
           deleteKeyCode={null}
           panOnDrag
           zoomOnDoubleClick={false}
-          defaultEdgeOptions={{ type: 'smoothstep', focusable: false, selectable: false }}
+          defaultEdgeOptions={{ type: 'workspace', focusable: false, selectable: false }}
           proOptions={{ hideAttribution: false }}
           aria-label="工作台节点画布；使用鼠标平移与缩放，双击节点聚焦。"
         >

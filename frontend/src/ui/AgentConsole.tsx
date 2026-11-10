@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react'
 import { PendingStatus, RunStatus } from '../../bindings/audio-ui/internal/domain/valueobject'
 import type { Node, PendingSummary, WorkspaceRunSummary } from '../../bindings/audio-ui/internal/domain/entity'
 import type { PermissionDecision } from '../api/runs'
@@ -12,6 +12,13 @@ import { RunList } from './RunList'
 import { ConsoleTabs, type ConsoleTab } from './ConsoleTabs'
 import { Transcript } from './Transcript'
 import { PendingArtifactCard } from './PendingArtifactCard'
+
+type PanelPosition = { left: number; top: number }
+
+type PanelDrag = {
+  onMove: (event: PointerEvent) => void
+  onEnd: (event: PointerEvent) => void
+}
 
 type Props = {
   runs: WorkspaceRunSummary[]
@@ -88,7 +95,102 @@ export function AgentConsole({
 }: Props) {
   const [tab, setTab] = useState<ConsoleTab>('conversation')
   const [recoveryRunIds, setRecoveryRunIds] = useState<Set<string>>(() => new Set())
+  const [panelPosition, setPanelPosition] = useState<PanelPosition | null>(null)
+  const panelRef = useRef<HTMLElement>(null)
+  const panelPositionRef = useRef<PanelPosition | null>(null)
+  const panelTopLimitRef = useRef<number | null>(null)
+  const panelDragRef = useRef<PanelDrag | null>(null)
   const requestContext = useRunRequestContext()
+
+  const placePanel = useCallback((left: number, top: number) => {
+    const panel = panelRef.current
+    if (!panel) return null
+    const rect = panel.getBoundingClientRect()
+    const minTop = panelTopLimitRef.current ?? rect.top
+    const position = {
+      left: Math.max(12, Math.min(left, window.innerWidth - rect.width - 12)),
+      top: Math.max(minTop, Math.min(top, window.innerHeight - rect.height - 12)),
+    }
+    panelPositionRef.current = position
+    setPanelPosition(position)
+    return position
+  }, [])
+
+  const stopPanelDrag = useCallback(() => {
+    const drag = panelDragRef.current
+    if (!drag) return
+    window.removeEventListener('pointermove', drag.onMove)
+    window.removeEventListener('pointerup', drag.onEnd)
+    window.removeEventListener('pointercancel', drag.onEnd)
+    panelDragRef.current = null
+  }, [])
+
+  useEffect(() => {
+    if (collapsed) {
+      stopPanelDrag()
+      return
+    }
+    const keepPanelVisible = () => {
+      const position = panelPositionRef.current
+      if (position) placePanel(position.left, position.top)
+    }
+    keepPanelVisible()
+    window.addEventListener('resize', keepPanelVisible)
+    return () => window.removeEventListener('resize', keepPanelVisible)
+  }, [collapsed, placePanel, stopPanelDrag])
+
+  useEffect(() => stopPanelDrag, [stopPanelDrag])
+
+  function panelOrigin() {
+    const panel = panelRef.current
+    if (!panel) return null
+    const rect = panel.getBoundingClientRect()
+    if (panelTopLimitRef.current === null) panelTopLimitRef.current = rect.top
+    return panelPositionRef.current ?? { left: rect.left, top: rect.top }
+  }
+
+  function startPanelDrag(event: ReactPointerEvent<HTMLDivElement>) {
+    if (event.button !== 0 || (event.target as HTMLElement).closest('button')) return
+    const panel = panelRef.current
+    if (!panel) return
+    event.preventDefault()
+    const rect = panel.getBoundingClientRect()
+    if (panelTopLimitRef.current === null) panelTopLimitRef.current = rect.top
+    const origin = placePanel(rect.left, rect.top)
+    if (!origin) return
+    const pointerId = event.pointerId
+    const startX = event.clientX
+    const startY = event.clientY
+    const onMove = (moveEvent: PointerEvent) => {
+      if (moveEvent.pointerId !== pointerId) return
+      placePanel(origin.left + moveEvent.clientX - startX, origin.top + moveEvent.clientY - startY)
+    }
+    const onEnd = (endEvent: PointerEvent) => {
+      if (endEvent.pointerId === pointerId) stopPanelDrag()
+    }
+    panelDragRef.current = { onMove, onEnd }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onEnd)
+    window.addEventListener('pointercancel', onEnd)
+  }
+
+  function movePanelWithKeyboard(event: ReactKeyboardEvent<HTMLDivElement>) {
+    if (event.target !== event.currentTarget) return
+    const step = event.shiftKey ? 32 : 8
+    let deltaX = 0
+    let deltaY = 0
+    switch (event.key) {
+      case 'ArrowLeft': deltaX = -step; break
+      case 'ArrowRight': deltaX = step; break
+      case 'ArrowUp': deltaY = -step; break
+      case 'ArrowDown': deltaY = step; break
+      default: return
+    }
+    event.preventDefault()
+    const origin = panelOrigin()
+    if (origin) placePanel(origin.left + deltaX, origin.top + deltaY)
+  }
+
   const requestGroups = requestContext?.groups ?? getRunRequestGroups(runViews, projectId)
   const respondPermission = requestContext?.respondPermission ?? onPermission
   const respondQuestion = requestContext?.respondQuestion ?? onQuestion
@@ -129,8 +231,22 @@ export function AgentConsole({
           <button className="agent-icon-btn" onClick={onToggle} aria-label="展开运行面板" aria-expanded="false" aria-controls="agent-console-panel">⌄</button>
         </aside>
       ) : null}
-      <aside id="agent-console-panel" className="agent-console" aria-label="运行面板" hidden={collapsed}>
-        <div className="agent-console-head">
+      <aside
+        ref={panelRef}
+        id="agent-console-panel"
+        className="agent-console"
+        aria-label="运行面板"
+        hidden={collapsed}
+        style={panelPosition ? { left: panelPosition.left, top: panelPosition.top, right: 'auto' } : undefined}
+      >
+        <div
+          className="agent-console-head"
+          role="group"
+          tabIndex={0}
+          aria-label="运行面板标题栏，可拖动；使用方向键移动"
+          onPointerDown={startPanelDrag}
+          onKeyDown={movePanelWithKeyboard}
+        >
           <span className={`dot ${activeRunCount ? 'ok' : tone(selectedStatus)}`} />
           <span className="agent-console-title">AGENT</span>
           <span className="agent-console-state">{consoleStatus}</span>
