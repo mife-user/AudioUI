@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>U11 Agent 收起小窗拖动演示</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #101416;
+    --panel: #171d20;
+    --panel-2: #1c2428;
+    --border: #2a353a;
+    --border-strong: #46545b;
+    --text: #e5ecee;
+    --text-dim: #bac6ca;
+    --muted: #859398;
+    --accent: #78c6c0;
+    --accent-soft: #1d3939;
+    --ok: #88c99d;
+    --warn: #e0bd78;
+    --topbar-h: 52px;
+    font: 13px/1.5 "Segoe UI", "Microsoft YaHei UI", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-width: 360px; min-height: 100vh; color: var(--text); background: var(--bg); }
+  button { font: inherit; color: inherit; }
+  .topbar { height: var(--topbar-h); display: flex; align-items: center; gap: 14px; padding: 0 20px; border-bottom: 1px solid var(--border); background: #151a1d; }
+  .brand { color: var(--accent); font: 700 11px/1 ui-monospace, monospace; letter-spacing: .16em; }
+  .project { color: var(--text-dim); }
+  .top-state { margin-left: auto; color: var(--ok); font-size: 11px; }
+  main { min-height: calc(100vh - var(--topbar-h)); padding: clamp(24px, 5vw, 72px); background-image: radial-gradient(var(--border) 1px, transparent 1px); background-size: 22px 22px; }
+  .intro { max-width: 620px; margin: 0 auto 34px; }
+  .eyebrow { color: var(--accent); font: 10px ui-monospace, monospace; letter-spacing: .14em; }
+  h1 { margin: 8px 0; font-size: clamp(21px, 3vw, 29px); font-weight: 600; }
+  .intro p { color: var(--muted); margin: 0; }
+  .canvas { max-width: 740px; height: 330px; margin: 0 auto; position: relative; }
+  .node { position: absolute; width: 220px; padding: 14px; border: 1px solid var(--border-strong); border-radius: 10px; background: var(--panel); box-shadow: 0 14px 32px #0003; }
+  .node small { color: var(--muted); font: 10px ui-monospace, monospace; letter-spacing: .12em; }
+  .node strong { display: block; margin-top: 7px; font-size: 13px; font-weight: 550; }
+  .node p { color: var(--text-dim); font-size: 11px; margin: 6px 0 0; }
+  .node-a { left: 3%; top: 24px; }
+  .node-b { right: 3%; bottom: 36px; }
+  .edge { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+  .edge path { fill: none; stroke: #496a68; stroke-width: 2; }
+  .demo-note { max-width: 740px; margin: 0 auto; padding: 12px 14px; border: 1px solid var(--border); border-radius: 8px; background: #151b1e; color: var(--muted); font-size: 11px; }
+  .agent-console, .agent-rail { position: fixed; z-index: 10; top: calc(var(--topbar-h) + 12px); right: 16px; border: 1px solid var(--border-strong); border-radius: 10px; background: #171d20ed; box-shadow: 0 18px 48px #0008; backdrop-filter: blur(14px); }
+  .agent-console { width: min(360px, calc(100vw - 32px)); max-height: calc(100vh - var(--topbar-h) - 24px); display: flex; flex-direction: column; }
+  .agent-console[hidden] { display: none; }
+  .console-head { height: 52px; flex: none; display: flex; align-items: center; gap: 9px; padding: 0 12px; border-bottom: 1px solid var(--border); cursor: grab; touch-action: none; user-select: none; }
+  .console-head:active { cursor: grabbing; }
+  .console-head:focus-visible, .agent-rail:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .title { color: var(--text-dim); font: 10px ui-monospace, monospace; letter-spacing: .14em; }
+  .status { color: var(--ok); font-size: 10px; }
+  .dot { width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--ok); box-shadow: 0 0 12px #88c99d80; }
+  .icon-btn { width: 30px; height: 30px; margin-left: auto; display: grid; place-items: center; border: 1px solid var(--border); border-radius: 6px; background: var(--panel-2); color: var(--text-dim); cursor: pointer; }
+  .console-body { overflow: auto; padding: 14px; }
+  .section-label { color: var(--muted); font-size: 10px; letter-spacing: .1em; }
+  .request { margin-top: 9px; padding: 11px; border: 1px solid #665637; border-radius: 8px; background: #28251d; }
+  .request strong { color: var(--warn); font-size: 11px; }
+  .request p { color: var(--text-dim); font-size: 11px; margin: 6px 0 0; }
+  .tabs { display: flex; gap: 8px; margin-top: 16px; padding-bottom: 8px; border-bottom: 1px solid var(--border); color: var(--muted); font-size: 11px; }
+  .tabs .active { color: var(--accent); }
+  .run { margin-top: 12px; padding: 11px; border-radius: 7px; background: var(--panel-2); color: var(--text-dim); font-size: 11px; }
+  .run b { color: var(--text); font-weight: 550; }
+  .agent-rail { min-height: 42px; max-width: calc(100vw - 24px); display: flex; align-items: center; gap: 9px; padding: 6px 8px 6px 11px; cursor: grab; touch-action: none; user-select: none; }
+  .agent-rail:active { cursor: grabbing; }
+  .rail-state { color: var(--text-dim); font-size: 10.5px; white-space: nowrap; }
+  .rail-count, .rail-pending { color: var(--muted); font: 9px ui-monospace, monospace; white-space: nowrap; }
+  .rail-count { color: var(--warn); }
+  @media (max-width: 540px) { .agent-rail { gap: 6px; padding-inline: 8px; } .rail-state { max-width: 80px; overflow: hidden; text-overflow: ellipsis; } .node { width: 190px; } }
+</style>
+</head>
+<body>
+<header class="topbar"><span class="brand">AUDIOUI</span><span class="project">工作台 / U11 交互演示</span><span class="top-state">● 1 项运行中</span></header>
+<main>
+  <section class="intro">
+    <div class="eyebrow">U11 · AGENT RAIL</div>
+    <h1>收起后，状态入口仍可移动</h1>
+    <p>拖动小窗的非按钮区域，或聚焦后用方向键移动。展开和收起共用位置；切换状态时按各自尺寸避让窗口边缘。</p>
+  </section>
+  <div class="canvas" aria-hidden="true">
+    <svg class="edge" viewBox="0 0 740 330" preserveAspectRatio="none"><path d="M210 93 C330 93 380 244 530 244"/></svg>
+    <article class="node node-a"><small>AGENT · 运行中</small><strong>脚本生成</strong><p>运行与输入快照保持不变</p></article>
+    <article class="node node-b"><small>SCRIPT · 待确认</small><strong>结果版本 v2</strong><p>需要确认的操作仍可在节点处理</p></article>
+  </div>
+  <p class="demo-note">纯本地模拟，不连接 Agent、不读取或写入工程、不访问网络。按钮负责展开/收起；状态计数在两种形态间保持不变。</p>
+</main>
+<aside class="agent-rail" role="group" tabindex="0" aria-label="运行状态小窗，可拖动；使用方向键移动" aria-keyshortcuts="ArrowLeft ArrowRight ArrowUp ArrowDown">
+  <span class="dot" aria-hidden="true"></span><span class="rail-state">1 项运行中</span><span class="rail-count">请求 1</span><span class="rail-pending">结果 1</span>
+  <button class="icon-btn" type="button" aria-label="展开运行面板" aria-expanded="false">⌄</button>
+</aside>
+<aside class="agent-console" hidden aria-label="运行面板">
+  <div class="console-head" role="group" tabindex="0" aria-label="运行面板标题栏，可拖动；使用方向键移动" aria-keyshortcuts="ArrowLeft ArrowRight ArrowUp ArrowDown">
+    <span class="dot" aria-hidden="true"></span><span class="title">AGENT</span><span class="status">1 项运行中</span><button class="icon-btn" type="button" aria-label="收起运行面板" aria-expanded="true">×</button>
+  </div>
+  <div class="console-body"><div class="section-label">未决请求　1</div><div class="request"><strong>权限请求 · Write</strong><p>请求身份与运行状态不受小窗位置影响。</p></div><div class="tabs"><span class="active">对话</span><span>待处理</span></div><div class="run"><b>运行 r_demo</b><br>工作中 · 快照与请求保持不变</div></div>
+</aside>
+<script>
+  const rail = document.querySelector('.agent-rail');
+  const panel = document.querySelector('.agent-console');
+  const toggle = rail.querySelector('button');
+  const close = panel.querySelector('button');
+  let position = null;
+  let topLimit = null;
+  let drag = null;
+
+  function activeElement() { return panel.hidden ? rail : panel; }
+  function place(left, top) {
+    const element = activeElement();
+    const rect = element.getBoundingClientRect();
+    const next = {
+      left: Math.max(12, Math.min(left, innerWidth - rect.width - 12)),
+      top: Math.max(topLimit ?? Math.max(12, rect.top), Math.min(top, innerHeight - rect.height - 12)),
+    };
+    position = next;
+    element.style.left = `${next.left}px`;
+    element.style.top = `${next.top}px`;
+    element.style.right = 'auto';
+  }
+  function clamp() { if (position) place(position.left, position.top); }
+  function stop() {
+    if (!drag) return;
+    removeEventListener('pointermove', drag.move);
+    removeEventListener('pointerup', drag.end);
+    removeEventListener('pointercancel', drag.end);
+    drag = null;
+  }
+  function begin(event) {
+    if (event.button !== 0 || event.target.closest('button')) return;
+    const element = activeElement();
+    const rect = element.getBoundingClientRect();
+    topLimit ??= rect.top;
+    event.preventDefault();
+    place(rect.left, rect.top);
+    const origin = position;
+    const id = event.pointerId;
+    const x = event.clientX;
+    const y = event.clientY;
+    const move = (next) => { if (next.pointerId === id) place(origin.left + next.clientX - x, origin.top + next.clientY - y); };
+    const end = (next) => { if (next.pointerId === id) stop(); };
+    drag = { move, end };
+    addEventListener('pointermove', move);
+    addEventListener('pointerup', end);
+    addEventListener('pointercancel', end);
+  }
+  function keyboard(event) {
+    if (event.target !== event.currentTarget) return;
+    const step = event.shiftKey ? 32 : 8;
+    const delta = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] }[event.key];
+    if (!delta) return;
+    event.preventDefault();
+    const element = activeElement();
+    const rect = element.getBoundingClientRect();
+    topLimit ??= rect.top;
+    place((position?.left ?? rect.left) + delta[0], (position?.top ?? rect.top) + delta[1]);
+  }
+  function setCollapsed(collapsed) {
+    stop();
+    panel.hidden = collapsed;
+    rail.hidden = !collapsed;
+    toggle.setAttribute('aria-expanded', String(!collapsed));
+    close.setAttribute('aria-expanded', String(!collapsed));
+    requestAnimationFrame(clamp);
+  }
+  rail.addEventListener('pointerdown', begin);
+  panel.querySelector('.console-head').addEventListener('pointerdown', begin);
+  rail.addEventListener('keydown', keyboard);
+  panel.querySelector('.console-head').addEventListener('keydown', keyboard);
+  toggle.addEventListener('click', () => setCollapsed(false));
+  close.addEventListener('click', () => setCollapsed(true));
+  addEventListener('resize', clamp);
+</script>
+</body>
+</html>

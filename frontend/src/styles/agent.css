@@ -545,6 +545,13 @@
   border-radius: var(--radius);
   background: var(--bg-elev);
   box-shadow: var(--shadow-dialog);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.agent-rail:active {
+  cursor: grabbing;
 }
 
 .agent-rail .dot {

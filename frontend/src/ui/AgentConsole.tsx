@@ -15,7 +15,7 @@ import { PendingArtifactCard } from './PendingArtifactCard'
 
 type PanelPosition = { left: number; top: number }
 
-type PanelDrag = {
+type ConsoleDrag = {
   onMove: (event: PointerEvent) => void
   onEnd: (event: PointerEvent) => void
 }
@@ -97,16 +97,17 @@ export function AgentConsole({
   const [recoveryRunIds, setRecoveryRunIds] = useState<Set<string>>(() => new Set())
   const [panelPosition, setPanelPosition] = useState<PanelPosition | null>(null)
   const panelRef = useRef<HTMLElement>(null)
+  const railRef = useRef<HTMLElement>(null)
   const panelPositionRef = useRef<PanelPosition | null>(null)
-  const panelTopLimitRef = useRef<number | null>(null)
-  const panelDragRef = useRef<PanelDrag | null>(null)
+  const consoleTopLimitRef = useRef<number | null>(null)
+  const consoleDragRef = useRef<ConsoleDrag | null>(null)
   const requestContext = useRunRequestContext()
 
-  const placePanel = useCallback((left: number, top: number) => {
-    const panel = panelRef.current
-    if (!panel) return null
-    const rect = panel.getBoundingClientRect()
-    const minTop = panelTopLimitRef.current ?? rect.top
+  const placeConsole = useCallback((left: number, top: number) => {
+    const consoleElement = collapsed ? railRef.current : panelRef.current
+    if (!consoleElement) return null
+    const rect = consoleElement.getBoundingClientRect()
+    const minTop = consoleTopLimitRef.current ?? Math.max(12, rect.top)
     const position = {
       left: Math.max(12, Math.min(left, window.innerWidth - rect.width - 12)),
       top: Math.max(minTop, Math.min(top, window.innerHeight - rect.height - 12)),
@@ -114,67 +115,64 @@ export function AgentConsole({
     panelPositionRef.current = position
     setPanelPosition(position)
     return position
-  }, [])
+  }, [collapsed])
 
-  const stopPanelDrag = useCallback(() => {
-    const drag = panelDragRef.current
+  const stopConsoleDrag = useCallback(() => {
+    const drag = consoleDragRef.current
     if (!drag) return
     window.removeEventListener('pointermove', drag.onMove)
     window.removeEventListener('pointerup', drag.onEnd)
     window.removeEventListener('pointercancel', drag.onEnd)
-    panelDragRef.current = null
+    consoleDragRef.current = null
   }, [])
 
   useEffect(() => {
-    if (collapsed) {
-      stopPanelDrag()
-      return
-    }
-    const keepPanelVisible = () => {
+    stopConsoleDrag()
+    const keepConsoleVisible = () => {
       const position = panelPositionRef.current
-      if (position) placePanel(position.left, position.top)
+      if (position) placeConsole(position.left, position.top)
     }
-    keepPanelVisible()
-    window.addEventListener('resize', keepPanelVisible)
-    return () => window.removeEventListener('resize', keepPanelVisible)
-  }, [collapsed, placePanel, stopPanelDrag])
+    keepConsoleVisible()
+    window.addEventListener('resize', keepConsoleVisible)
+    return () => window.removeEventListener('resize', keepConsoleVisible)
+  }, [collapsed, placeConsole, stopConsoleDrag])
 
-  useEffect(() => stopPanelDrag, [stopPanelDrag])
+  useEffect(() => stopConsoleDrag, [stopConsoleDrag])
 
-  function panelOrigin() {
-    const panel = panelRef.current
-    if (!panel) return null
-    const rect = panel.getBoundingClientRect()
-    if (panelTopLimitRef.current === null) panelTopLimitRef.current = rect.top
+  function consoleOrigin() {
+    const consoleElement = collapsed ? railRef.current : panelRef.current
+    if (!consoleElement) return null
+    const rect = consoleElement.getBoundingClientRect()
+    if (consoleTopLimitRef.current === null) consoleTopLimitRef.current = rect.top
     return panelPositionRef.current ?? { left: rect.left, top: rect.top }
   }
 
-  function startPanelDrag(event: ReactPointerEvent<HTMLDivElement>) {
+  function startConsoleDrag(event: ReactPointerEvent<HTMLElement>) {
     if (event.button !== 0 || (event.target as HTMLElement).closest('button')) return
-    const panel = panelRef.current
-    if (!panel) return
+    const consoleElement = collapsed ? railRef.current : panelRef.current
+    if (!consoleElement) return
     event.preventDefault()
-    const rect = panel.getBoundingClientRect()
-    if (panelTopLimitRef.current === null) panelTopLimitRef.current = rect.top
-    const origin = placePanel(rect.left, rect.top)
+    const rect = consoleElement.getBoundingClientRect()
+    if (consoleTopLimitRef.current === null) consoleTopLimitRef.current = rect.top
+    const origin = placeConsole(rect.left, rect.top)
     if (!origin) return
     const pointerId = event.pointerId
     const startX = event.clientX
     const startY = event.clientY
     const onMove = (moveEvent: PointerEvent) => {
       if (moveEvent.pointerId !== pointerId) return
-      placePanel(origin.left + moveEvent.clientX - startX, origin.top + moveEvent.clientY - startY)
+      placeConsole(origin.left + moveEvent.clientX - startX, origin.top + moveEvent.clientY - startY)
     }
     const onEnd = (endEvent: PointerEvent) => {
-      if (endEvent.pointerId === pointerId) stopPanelDrag()
+      if (endEvent.pointerId === pointerId) stopConsoleDrag()
     }
-    panelDragRef.current = { onMove, onEnd }
+    consoleDragRef.current = { onMove, onEnd }
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onEnd)
     window.addEventListener('pointercancel', onEnd)
   }
 
-  function movePanelWithKeyboard(event: ReactKeyboardEvent<HTMLDivElement>) {
+  function moveConsoleWithKeyboard(event: ReactKeyboardEvent<HTMLElement>) {
     if (event.target !== event.currentTarget) return
     const step = event.shiftKey ? 32 : 8
     let deltaX = 0
@@ -187,8 +185,8 @@ export function AgentConsole({
       default: return
     }
     event.preventDefault()
-    const origin = panelOrigin()
-    if (origin) placePanel(origin.left + deltaX, origin.top + deltaY)
+    const origin = consoleOrigin()
+    if (origin) placeConsole(origin.left + deltaX, origin.top + deltaY)
   }
 
   const requestGroups = requestContext?.groups ?? getRunRequestGroups(runViews, projectId)
@@ -223,7 +221,17 @@ export function AgentConsole({
   return (
     <>
       {collapsed ? (
-        <aside className="agent-rail" aria-label="运行状态">
+        <aside
+          ref={railRef}
+          className="agent-rail"
+          role="group"
+          tabIndex={0}
+          aria-label="运行状态小窗，可拖动；使用方向键移动"
+          aria-keyshortcuts="ArrowLeft ArrowRight ArrowUp ArrowDown"
+          style={panelPosition ? { left: panelPosition.left, top: panelPosition.top, right: 'auto' } : undefined}
+          onPointerDown={startConsoleDrag}
+          onKeyDown={moveConsoleWithKeyboard}
+        >
           <span className={`dot ${activeRunCount ? 'ok' : tone(selectedStatus)}`} aria-hidden="true" />
           <span className="agent-rail-state">{consoleStatus}</span>
           <span className="agent-rail-count">请求 {requestsCount}</span>
@@ -244,8 +252,9 @@ export function AgentConsole({
           role="group"
           tabIndex={0}
           aria-label="运行面板标题栏，可拖动；使用方向键移动"
-          onPointerDown={startPanelDrag}
-          onKeyDown={movePanelWithKeyboard}
+          aria-keyshortcuts="ArrowLeft ArrowRight ArrowUp ArrowDown"
+          onPointerDown={startConsoleDrag}
+          onKeyDown={moveConsoleWithKeyboard}
         >
           <span className={`dot ${activeRunCount ? 'ok' : tone(selectedStatus)}`} />
           <span className="agent-console-title">AGENT</span>

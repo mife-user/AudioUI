@@ -398,6 +398,95 @@ describe('AgentConsole', () => {
     expect(panel.style.top).toBe('96px')
   })
 
+  it('moves the collapsed rail, clamps it, and shares its position with the expanded panel', () => {
+    const { container, rerender, props } = renderConsole({ collapsed: true, pending: [pendingSummary] })
+    const rail = container.querySelector<HTMLElement>('.agent-rail')
+    const panel = container.querySelector<HTMLElement>('#agent-console-panel')
+    if (!rail || !panel) throw new Error('run console is missing')
+    vi.spyOn(rail, 'getBoundingClientRect').mockReturnValue(new DOMRect(500, 64, 280, 42))
+    vi.spyOn(panel, 'getBoundingClientRect').mockReturnValue(new DOMRect(100, 64, 360, 400))
+
+    fireEvent.pointerDown(rail.querySelector('.agent-rail-state')!, { pointerId: 3, button: 0, clientX: 520, clientY: 80 })
+    fireEvent.pointerMove(window, { pointerId: 3, clientX: window.innerWidth + 100, clientY: window.innerHeight + 100 })
+    fireEvent.pointerUp(window, { pointerId: 3 })
+
+    expect(rail.style.left).toBe(`${window.innerWidth - 280 - 12}px`)
+    expect(rail.style.top).toBe(`${window.innerHeight - 42 - 12}px`)
+    expect(container.querySelector('.agent-rail-pending')).toHaveTextContent('结果 1')
+
+    rerender(<ConsoleHarness props={{ ...props, collapsed: false }} />)
+    expect(panel.style.left).toBe(`${window.innerWidth - 360 - 12}px`)
+    expect(panel.style.top).toBe(`${window.innerHeight - 400 - 12}px`)
+    rerender(<ConsoleHarness props={{ ...props, collapsed: true }} />)
+    expect(rail.style.left).toBe(`${window.innerWidth - 280 - 12}px`)
+    expect(rail.style.top).toBe(`${window.innerHeight - 42 - 12}px`)
+    expect(container.querySelector('#agent-console-panel')).toBe(panel)
+  })
+
+  it('moves the collapsed rail with arrow keys and does not drag from its button', () => {
+    const { container, props } = renderConsole({ collapsed: true })
+    const rail = container.querySelector<HTMLElement>('.agent-rail')
+    if (!rail) throw new Error('collapsed run console is missing')
+    vi.spyOn(rail, 'getBoundingClientRect').mockReturnValue(new DOMRect(100, 64, 260, 42))
+
+    fireEvent.keyDown(rail, { key: 'ArrowRight' })
+    fireEvent.keyDown(rail, { key: 'ArrowDown', shiftKey: true })
+    expect(rail.style.left).toBe('108px')
+    expect(rail.style.top).toBe('96px')
+
+    const expand = screen.getByRole('button', { name: '展开运行面板' })
+    fireEvent.pointerDown(expand, { pointerId: 4, button: 0, clientX: 120, clientY: 80 })
+    fireEvent.pointerMove(window, { pointerId: 4, clientX: 300, clientY: 200 })
+    fireEvent.pointerUp(window, { pointerId: 4 })
+    expect(rail.style.left).toBe('108px')
+    fireEvent.click(expand)
+    expect(props.onToggle).toHaveBeenCalledOnce()
+  })
+
+  it('reclamps the collapsed rail after viewport resize and fits the panel when expanded', () => {
+    const originalWidth = window.innerWidth
+    const { container, rerender, props } = renderConsole({ collapsed: true })
+    const rail = container.querySelector<HTMLElement>('.agent-rail')
+    const panel = container.querySelector<HTMLElement>('#agent-console-panel')
+    if (!rail || !panel) throw new Error('run console is missing')
+    vi.spyOn(rail, 'getBoundingClientRect').mockReturnValue(new DOMRect(500, 64, 260, 42))
+    vi.spyOn(panel, 'getBoundingClientRect').mockReturnValue(new DOMRect(100, 64, 360, 400))
+
+    try {
+      Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1000 })
+      fireEvent.pointerDown(rail, { pointerId: 6, button: 0, clientX: 520, clientY: 80 })
+      fireEvent.pointerMove(window, { pointerId: 6, clientX: 2000, clientY: 80 })
+      fireEvent.pointerUp(window, { pointerId: 6 })
+      expect(rail.style.left).toBe('728px')
+
+      Object.defineProperty(window, 'innerWidth', { configurable: true, value: 500 })
+      fireEvent.resize(window)
+      expect(rail.style.left).toBe('228px')
+
+      rerender(<ConsoleHarness props={{ ...props, collapsed: false }} />)
+      expect(panel.style.left).toBe('128px')
+    } finally {
+      Object.defineProperty(window, 'innerWidth', { configurable: true, value: originalWidth })
+      fireEvent.resize(window)
+    }
+  })
+
+  it('stops dragging the collapsed rail when the pointer is cancelled', () => {
+    const { container } = renderConsole({ collapsed: true })
+    const rail = container.querySelector<HTMLElement>('.agent-rail')
+    if (!rail) throw new Error('collapsed run console is missing')
+    vi.spyOn(rail, 'getBoundingClientRect').mockReturnValue(new DOMRect(100, 64, 260, 42))
+
+    fireEvent.pointerDown(rail, { pointerId: 5, button: 0, clientX: 120, clientY: 80 })
+    fireEvent.pointerCancel(window, { pointerId: 5 })
+    const leftAfterCancel = rail.style.left
+    const topAfterCancel = rail.style.top
+    fireEvent.pointerMove(window, { pointerId: 5, clientX: 400, clientY: 300 })
+
+    expect(rail.style.left).toBe(leftAfterCancel)
+    expect(rail.style.top).toBe(topAfterCancel)
+  })
+
   it('shows a notice when a pending Script result is already assigned to its frozen target node', () => {
     renderConsole({
       pending: [scriptPendingSummary],
