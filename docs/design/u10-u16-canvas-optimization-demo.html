@@ -1,0 +1,341 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AudioUI · U10–U16 画布优化讨论稿</title>
+  <style>
+    :root{color-scheme:dark;--bg:#0a0f12;--panel:#142126;--panel-alt:#0f191e;--raised:#1a2a30;--text:#e6eef0;--muted:#a0b3b8;--subtle:#6f858b;--accent:#66d0de;--edge:#528492;--line:#29414a;--warn:#e6bd7e;--ok:#85d9ac;--shadow:0 8px 24px #0005}
+    *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:13px/1.55 "Segoe UI","Microsoft YaHei",sans-serif}button,textarea{font:inherit}button{color:inherit;cursor:pointer}button:focus-visible,textarea:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+    .top{min-height:55px;padding:0 24px;display:flex;align-items:center;gap:13px;background:#10191d;border-bottom:1px solid var(--line)}.brand{font-weight:750;letter-spacing:.15em;color:var(--accent)}.top-title{color:var(--text)}.top-note{margin-left:auto;color:var(--warn);font-size:11px}
+    main{max-width:1510px;margin:0 auto;padding:22px 24px 32px}.intro{display:flex;align-items:end;justify-content:space-between;gap:22px;margin-bottom:16px}.eyebrow{color:var(--accent);font-size:10px;letter-spacing:.15em;font-weight:700}.intro h1{margin:4px 0;font-size:22px;letter-spacing:.02em}.intro p{margin:0;color:var(--muted)}.toolbar{display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end}.toolbar button,.link-button{padding:7px 10px;border:1px solid var(--line);border-radius:7px;background:var(--panel-alt);color:var(--text)}.toolbar button:hover,.link-button:hover{background:var(--raised)}
+    .stage{position:relative;overflow:hidden;border:1px solid var(--line);border-radius:12px;background:var(--panel-alt);box-shadow:var(--shadow)}.canvas{height:690px;overflow:auto;overscroll-behavior:contain;background-image:radial-gradient(#263b42 1px,transparent 1px);background-size:22px 22px}.world{position:relative;width:1400px;height:760px}svg.wires{position:absolute;inset:0;width:100%;height:100%;overflow:visible;pointer-events:none}.wire{fill:none;stroke:var(--edge);stroke-width:2;stroke-linecap:round}.wire.task{stroke:var(--accent);stroke-width:2.4}.wire.draft{stroke:var(--warn);stroke-dasharray:6 5}
+    .card{position:absolute;display:flex;flex-direction:column;overflow:visible;border:1px solid var(--line);border-radius:10px;background:var(--panel);box-shadow:0 8px 24px #0005;color:var(--text)}.card.is-selected{background:#1a3035}.card.is-selected:not(.collapsed)::after{content:"";position:absolute;inset:-5px;z-index:3;pointer-events:none;background:radial-gradient(circle,var(--accent) 0 3px,transparent 3.5px) 0 0/8px 8px no-repeat,radial-gradient(circle,var(--accent) 0 3px,transparent 3.5px) 50% 0/8px 8px no-repeat,radial-gradient(circle,var(--accent) 0 3px,transparent 3.5px) 100% 0/8px 8px no-repeat,radial-gradient(circle,var(--accent) 0 3px,transparent 3.5px) 0 50%/8px 8px no-repeat,radial-gradient(circle,var(--accent) 0 3px,transparent 3.5px) 100% 50%/8px 8px no-repeat,radial-gradient(circle,var(--accent) 0 3px,transparent 3.5px) 0 100%/8px 8px no-repeat,radial-gradient(circle,var(--accent) 0 3px,transparent 3.5px) 50% 100%/8px 8px no-repeat,radial-gradient(circle,var(--accent) 0 3px,transparent 3.5px) 100% 100%/8px 8px no-repeat}.card-head{min-height:56px;display:flex;align-items:center;gap:8px;padding:9px 11px;cursor:grab;touch-action:none;user-select:none}.card-head:active{cursor:grabbing}.card-title{min-width:0;flex:1}.card-title strong{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}.card-title small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted);font-size:10px}.kind{flex:none;min-width:40px;padding:4px 6px;border-radius:6px;background:#223a40;color:var(--accent);text-align:center;font-size:10px;font-weight:650}.card-body{min-height:0;flex:1;overflow:auto;overscroll-behavior:contain;padding:0 12px 12px;color:var(--muted)}.card-body p{margin:7px 0}.card.collapsed .card-body{display:none}.icon-button{width:28px;height:28px;flex:none;border:0;border-radius:6px;background:transparent;color:var(--muted);font-size:17px}.icon-button:hover{background:var(--raised);color:var(--text)}.summary{padding:8px 10px;border-radius:7px;background:var(--panel-alt);color:var(--text);font-size:11px}.candidate-list{display:grid;gap:6px;margin:8px 0}.candidate-row{display:flex;align-items:center;gap:6px;padding:7px 8px;border-radius:6px;background:var(--panel-alt);color:var(--text);font-size:11px}.candidate-row span{flex:1;min-width:0}.candidate-row button{border:0;background:none;color:var(--accent);font-size:10px}.task-input{width:100%;min-height:72px;margin-top:6px;padding:8px;border:1px solid var(--line);border-radius:6px;background:var(--panel-alt);color:var(--text);resize:none}.hint{color:var(--subtle);font-size:10px}.pill{display:inline-block;margin-top:5px;padding:3px 7px;border-radius:999px;background:#29382d;color:var(--ok);font-size:10px}.pill.warn{background:#3a3223;color:var(--warn)}
+    .port{position:absolute;z-index:3;top:23px;width:12px;height:12px;padding:0;border:2px solid var(--panel);border-radius:50%;background:var(--edge)}.port.in{left:-6px}.port.out{right:-6px;background:var(--accent)}button.port:hover,button.port.is-connecting{transform:scale(1.35);box-shadow:0 0 0 4px #66d0de33}.topic-port{pointer-events:none}.tip{position:absolute;left:24px;bottom:16px;color:var(--subtle);font-size:11px}.canvas-caption{display:flex;align-items:center;gap:9px;padding:10px 15px;background:#111c20;color:var(--muted);font-size:11px}.canvas-caption strong{color:var(--accent)}.canvas-caption .grow{flex:1}
+    .floating{position:absolute;z-index:6;left:12px;top:12px;max-width:calc(100% - 24px);border:1px solid var(--line);border-radius:9px;background:#17262b;box-shadow:var(--shadow)}.floating-head{min-height:43px;display:flex;align-items:center;gap:8px;padding:8px 10px;cursor:grab;touch-action:none;user-select:none}.floating-head:active{cursor:grabbing}.floating .dot{width:8px;height:8px;border-radius:50%;background:var(--ok)}.floating .label{font-size:11px;font-weight:700;letter-spacing:.05em}.floating .stat{color:var(--muted);font-size:10px}.floating .filler{flex:1}.floating .toggle{width:25px;height:25px;border:0;border-radius:5px;background:transparent;color:var(--text);font-size:16px}.floating .toggle:hover{background:var(--raised)}.floating[data-mode="small"]{width:225px}.floating[data-mode="panel"]{width:310px}.floating-body{padding:0 13px 14px;color:var(--muted)}.floating-body p{margin:6px 0}.floating[data-mode="small"] .floating-body{display:none}
+    .details{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:15px}.detail{padding:15px;border-radius:9px;background:var(--panel-alt)}.detail h2{margin:0 0 5px;font-size:13px}.detail p{margin:0;color:var(--muted);font-size:11px;line-height:1.75}.disclaimer{margin:15px 0 0;color:var(--muted);font-size:11px}.disclaimer strong{color:var(--warn)}
+    .version-study{margin-top:15px;padding:18px;border:1px solid var(--line);border-radius:10px;background:var(--panel-alt)}.version-study h2{margin:3px 0 4px;font-size:15px}.version-study p{margin:0;color:var(--muted);font-size:11px}.result-tabs{display:flex;gap:7px;flex-wrap:wrap;margin:13px 0}.result-tabs button,.result-box button{border:1px solid var(--line);border-radius:6px;background:var(--raised);padding:6px 9px;color:var(--text);font-size:11px}.result-tabs button[aria-pressed="true"],.result-box button[aria-pressed="true"]{border-color:var(--accent);color:var(--accent);background:#183138}.result-panel{display:flex;align-items:center;gap:12px;overflow:auto;padding:14px;border-radius:8px;background:#0b1418}.result-panel[hidden]{display:none}.result-box{flex:0 0 210px;min-height:88px;padding:11px;border-radius:8px;background:var(--panel);box-shadow:0 4px 12px #0004}.result-box strong,.result-box small{display:block}.result-box small{margin:5px 0;color:var(--muted)}.result-box button{margin:3px 3px 0 0}.result-arrow{color:var(--accent);font-size:18px}.branch-stack{display:grid;gap:8px}.version-study .result-warning{margin-top:9px;color:var(--warn)}
+    .run-study{margin-top:15px;padding:18px;border:1px solid var(--line);border-radius:10px;background:var(--panel-alt)}.run-study h2{margin:3px 0 4px;font-size:15px}.run-study p{margin:0;color:var(--muted);font-size:11px}.run-tabs{display:flex;flex-wrap:wrap;gap:7px;margin:13px 0}.run-tabs button,.run-study .action,.run-row button{padding:6px 9px;border:1px solid var(--line);border-radius:6px;background:var(--raised);color:var(--text);font-size:11px}.run-tabs button[aria-pressed="true"]{border-color:var(--accent);color:var(--accent);background:#183138}.run-layout{display:grid;grid-template-columns:minmax(0,2fr) minmax(220px,1fr);gap:12px}.run-box{min-width:0;padding:14px;border-radius:8px;background:#0b1418}.run-box h3{margin:0 0 8px;font-size:12px}.run-list{display:grid;gap:7px}.run-row{display:grid;grid-template-columns:auto minmax(0,1fr) minmax(90px,110px) auto auto;align-items:center;gap:7px;padding:8px;border-radius:7px;background:var(--panel)}.run-row input{accent-color:var(--accent)}.run-row strong,.run-row small{display:block}.run-row small{color:var(--muted);font-size:10px}.run-row select,.run-box select{width:100%;padding:6px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--text);font:inherit;font-size:11px}.run-row button{padding:4px 7px}.run-box label{display:block;margin:8px 0;color:var(--muted);font-size:11px}.run-box .action{margin-top:12px}.run-box .run-feedback{margin-top:12px;color:var(--warn);line-height:1.7;white-space:pre-line}.run-box .run-feedback.ok{color:var(--ok)}.run-study .run-note{margin-top:10px;color:var(--muted);line-height:1.7}
+    @media(max-width:800px){.top{padding:12px 16px;flex-wrap:wrap}.top-note{width:100%;margin:0}.intro{align-items:start;flex-direction:column}.toolbar{justify-content:flex-start}main{padding:16px}.details{grid-template-columns:1fr}.canvas{height:600px}.run-layout{grid-template-columns:1fr}.run-row{grid-template-columns:auto minmax(0,1fr) auto auto}.run-row select{grid-column:2 / -1;grid-row:2}}
+    @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}
+  </style>
+</head>
+<body>
+  <header class="top"><span class="brand">AUDIOUI</span><span class="top-title">画布交互优化 · U10–U16</span><span class="top-note">讨论稿 · 模拟数据 · 不连接工程或 Agent</span></header>
+  <main>
+    <div class="intro">
+      <div><div class="eyebrow">WORKBENCH / INTERACTION STUDY</div><h1>更自由地搭建，让关系始终清晰</h1><p>拖动卡片与 Agent 小窗；试试将候选和提示词分别连接到同一个 Agent。</p></div>
+      <div class="toolbar"><button id="size-toggle" type="button" aria-pressed="false">模拟选题小卡片</button><button id="reverse-toggle" type="button" aria-pressed="false">模拟反向连线</button><button id="reset" type="button">重置示例</button></div>
+    </div>
+    <div class="stage" id="stage">
+      <div class="canvas" id="canvas" aria-label="可滚动的模拟画布">
+        <div class="world" id="world">
+          <svg class="wires" id="wires" aria-hidden="true"><defs><marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M1 1L9 5L1 9Z" fill="context-stroke"/></marker></defs><g id="paths"></g></svg>
+          <article class="card" data-card="topic" data-left="55" data-top="125" data-width="270" data-height="290" aria-label="选题卡片">
+            <header class="card-head" tabindex="0" aria-label="选题卡片，可拖动或按方向键移动"><span class="kind">选题</span><span class="card-title"><strong>关于节奏的选题</strong><small>已生成 3 个候选 · 内容已锁定</small></span><button class="icon-button collapse" type="button" aria-label="折叠选题内容" aria-expanded="true">⌃</button></header>
+            <div class="card-body"><div class="summary">候选已生成 · 点击“定位”查看对应节点</div><div class="candidate-list"><div class="candidate-row"><span>01 · 节奏与情绪</span><button type="button" data-locate="candidate1">定位</button></div><div class="candidate-row"><span>02 · 编曲的层次</span><button type="button" data-locate="candidate2">定位</button></div><div class="candidate-row"><span>03 · 声音里的故事</span><button type="button" data-locate="candidate3">定位</button></div></div><p class="hint">小卡片内可以滚动；出线点固定在标题附近，不随列表滚出卡片。</p></div><span class="port out topic-port" data-port="topic-out" aria-hidden="true"></span>
+          </article>
+          <article class="card" data-card="candidate1" data-left="415" data-top="55" data-width="225" data-height="125" aria-label="候选一">
+            <span class="port in" data-port="candidate1-in" aria-hidden="true"></span><header class="card-head" tabindex="0" aria-label="候选一卡片，可拖动或按方向键移动"><span class="kind">候选 1</span><span class="card-title"><strong>节奏与情绪</strong><small>选题生成</small></span><button class="icon-button collapse" type="button" aria-label="折叠候选一内容" aria-expanded="true">⌃</button></header><div class="card-body"><p>方向：从鼓点变化讲情绪。</p><span class="pill">来源已绑定</span></div><button class="port out" data-port="candidate1-out" data-connect-source="candidate1" type="button" aria-label="从候选一开始连接" title="可与提示词一起连接到 Agent"></button>
+          </article>
+          <article class="card" data-card="candidate2" data-left="415" data-top="250" data-width="225" data-height="125" aria-label="候选二">
+            <span class="port in" data-port="candidate2-in" aria-hidden="true"></span><header class="card-head" tabindex="0" aria-label="候选二卡片，可拖动或按方向键移动"><span class="kind">候选 2</span><span class="card-title"><strong>编曲的层次</strong><small>选题生成</small></span><button class="icon-button collapse" type="button" aria-label="折叠候选二内容" aria-expanded="true">⌃</button></header><div class="card-body"><p>方向：从音色递进展开。</p><span class="pill">来源已绑定</span></div>
+          </article>
+          <article class="card" data-card="candidate3" data-left="415" data-top="445" data-width="225" data-height="125" aria-label="候选三">
+            <span class="port in" data-port="candidate3-in" aria-hidden="true"></span><header class="card-head" tabindex="0" aria-label="候选三卡片，可拖动或按方向键移动"><span class="kind">候选 3</span><span class="card-title"><strong>声音里的故事</strong><small>选题生成</small></span><button class="icon-button collapse" type="button" aria-label="折叠候选三内容" aria-expanded="true">⌃</button></header><div class="card-body"><p>方向：让声音成为叙事线索。</p><span class="pill">来源已绑定</span></div>
+          </article>
+          <article class="card" data-card="prompt" data-left="745" data-top="200" data-width="255" data-height="215" aria-label="独立提示词卡片">
+            <button class="port in" data-port="prompt-in" data-connect-target="prompt" type="button" aria-label="连接到提示词" title="用于演示成环拦截"></button><header class="card-head" tabindex="0" aria-label="提示词卡片，可拖动或按方向键移动"><span class="kind">提示词</span><span class="card-title"><strong>解说脚本任务</strong><small>独立节点 · 不要求先创建选题</small></span><button class="icon-button collapse" type="button" aria-label="折叠提示词内容" aria-expanded="true">⌃</button></header><div class="card-body"><label for="task">任务内容</label><textarea class="task-input" id="task">写一段关于声音与情绪的短视频解说。</textarea><p class="hint">可编辑的演示文本；折叠不会清空它。</p></div><button class="port out" data-port="prompt-out" data-connect-source="prompt" type="button" aria-label="从提示词开始连接" title="拖向 Agent 左侧端口，或依次点击两个端口"></button>
+          </article>
+          <article class="card" data-card="agent" data-left="1100" data-top="210" data-width="220" data-height="165" aria-label="独立 Agent 卡片">
+            <button class="port in" data-port="agent-in" data-connect-target="agent" type="button" aria-label="连接到 Agent" title="将候选或提示词连接到这里"></button><header class="card-head" tabindex="0" aria-label="Agent 卡片，可拖动或按方向键移动"><span class="kind">AGENT</span><span class="card-title"><strong>本地运行</strong><small id="agent-state">尚未连接上游</small></span><button class="icon-button collapse" type="button" aria-label="折叠 Agent 内容" aria-expanded="true">⌃</button></header><div class="card-body"><p>可连接多个上游；具体运行方式待评审。</p><span class="pill warn">运行细节待评审</span><p class="hint">本页只模拟连线，不发起运行。</p></div><button class="port out" data-port="agent-out" data-connect-source="agent" type="button" aria-label="从 Agent 开始连接" title="连接到提示词可测试成环拦截"></button>
+          </article>
+          <p class="tip">可拖动标题栏；也可聚焦标题栏后用方向键移动。画布可横向滚动。</p>
+        </div>
+      </div>
+      <aside class="floating" id="floating" data-mode="small" aria-label="模拟 Agent 小窗">
+        <div class="floating-head" tabindex="0" aria-label="Agent 小窗，可拖动或按方向键移动"><span class="dot" aria-hidden="true"></span><span class="label">AGENT</span><span class="stat">空闲 · 请求 0</span><span class="filler"></span><button class="toggle" id="float-toggle" type="button" aria-label="展开 Agent 面板" aria-expanded="false">⌄</button></div>
+        <div class="floating-body"><div class="summary">本地运行 · 空闲</div><p>这里展示运行记录、请求与结果。</p><p>关闭或拖动不会触发任何运行。</p></div>
+      </aside>
+      <div class="canvas-caption"><strong>交互提示</strong><span id="message" role="status">可分别将候选、提示词接到 Agent；有向环会被拒绝。</span><span class="grow"></span><span>仅展示部分连线示例</span></div>
+    </div>
+    <div class="details"><section class="detail"><h2>01 · 曲线与缩放控制</h2><p>保留卡片本身的边框，选中时只显示局部控制点，不额外显示完整缩放框。控制点仅为外观示意；尺寸变化请用上方按钮。</p></section><section class="detail"><h2>02 · 折叠与候选</h2><p>标题、状态和固定连线锚点始终可见；候选列表可滚动并定位。折叠不删除正文或节点。</p></section><section class="detail"><h2>03 · 多上游与无环</h2><p>分别从候选和提示词右侧圆点连到 Agent 左侧圆点。连好提示词后，再尝试 Agent → 提示词，可看到成环被拒绝。</p></section></div>
+    <section class="version-study" aria-labelledby="version-title">
+      <div class="eyebrow">OUTPUT / VERSION / BRANCH</div><h2 id="version-title">重新运行后，下游已有结果</h2><p>已确认：默认确认后追加版本，也可主动另建结果。以下为模拟，实际运行逻辑尚未实现。</p>
+      <div class="result-tabs" aria-label="结果处理方式"><button type="button" data-result-choice="version" aria-pressed="true">默认 · 同节点版本</button><button type="button" data-result-choice="branch" aria-pressed="false">可选 · 新建并行节点</button></div>
+      <div class="result-panel" data-result-panel="version"><div class="result-box"><strong>Agent 再次运行</strong><small>已有脚本结果，收到新结果。</small><span class="pill">先预览并确认</span></div><span class="result-arrow">→</span><div class="result-box"><strong>同一个脚本节点</strong><small id="version-preview-text">当前预览：v1</small><button type="button" data-demo-version="1" aria-pressed="true">v1</button><button type="button" data-demo-version="2" aria-pressed="false">v2</button></div><span class="result-arrow">→</span><div class="result-box"><strong>已有下游 Prompt</strong><small id="version-binding-text">示意：使用 v1</small><button id="bind-preview" type="button">改用当前预览版本</button></div></div>
+      <div class="result-panel" data-result-panel="branch" hidden><div class="result-box"><strong>Agent 再次运行</strong><small>新旧结果同时保留。</small><span class="pill">并排比较</span></div><span class="result-arrow">→</span><div class="branch-stack"><div class="result-box"><strong>脚本节点 A</strong><small>原结果 → 原下游</small></div><div class="result-box"><strong>脚本节点 B</strong><small>新结果 → 另一条分支</small></div></div></div>
+      <p class="result-warning">现状：已有脚本收到新结果时需确认后追加版本；查看旧版本不等于下游可选择旧版本。一个 Agent 当前最多直接绑定一个 Script，“并行新节点”需另改图规则。</p>
+    </section>
+    <section class="run-study" aria-labelledby="run-title">
+      <div class="eyebrow">RUN / INPUT REVIEW</div><h2 id="run-title">运行前：本次使用哪些输入？</h2><p>以下模拟已确认的无 Topic 运行方向和待评审的输入方式，与上方画布不联动；可切换场景、调整输入角色和顺序，再模拟检查。</p>
+      <div class="run-tabs" aria-label="运行场景"><button type="button" data-run-case="standalone" aria-pressed="true">独立 Prompt</button><button type="button" data-run-case="mixed" aria-pressed="false">脚本 + 要求</button><button type="button" data-run-case="tasks" aria-pressed="false">多个主任务</button><button type="button" data-run-case="missing" aria-pressed="false">输入未就绪</button></div>
+      <div class="run-layout">
+        <div class="run-box"><h3>模拟输入清单</h3><div class="run-list" id="run-input-list"></div><p class="run-note">取消勾选只是模拟本次不使用，并不删除连接。角色和顺序是提案，不是已确认规则。</p></div>
+        <div class="run-box"><h3>模拟输出与检查</h3><label for="run-output">本次输出目标</label><select id="run-output"><option value="new">不指定：生成后自动新建结果</option><option value="existing">已有脚本 A v1：预览后确认</option><option value="empty">空脚本 B：写入首版</option></select><button type="button" class="action" id="check-run">模拟运行前检查</button><p class="run-feedback" id="run-feedback" role="status">仅模拟检查，不发起运行。</p></div>
+      </div>
+      <p class="run-note">示意检查要求一条主任务和已就绪的所选输入；自然语言中的冲突不一定能自动识别，仍需人工确认。素材节点、真实输入选择和运行界面均未实现。</p>
+    </section>
+    <p class="disclaimer"><strong>注意：</strong>这是本地 HTML 原型，不读写工程、不联网、不调用真实 Agent；不代表功能已实现或验收。多上游、无环、无 Topic 的有效任务运行及版本固定是已确认的目标；多上游具体合并方式仍待评审。单主任务仅是文本任务示例，不是所有节点的限制；原型只演示部分端口，正式目标不限于这些节点类型。</p>
+  </main>
+  <script>
+    (() => {
+      const world = document.getElementById('world')
+      const stage = document.getElementById('stage')
+      const canvas = document.getElementById('canvas')
+      const paths = document.getElementById('paths')
+      const cards = [...document.querySelectorAll('[data-card]')]
+      const floating = document.getElementById('floating')
+      const floatToggle = document.getElementById('float-toggle')
+      const sizeToggle = document.getElementById('size-toggle')
+      const reverseToggle = document.getElementById('reverse-toggle')
+      const message = document.getElementById('message')
+      const sources = [...document.querySelectorAll('[data-connect-source]')]
+      const targets = [...document.querySelectorAll('[data-connect-target]')]
+      const initial = new Map(cards.map(card => [card.dataset.card, {left: Number(card.dataset.left), top: Number(card.dataset.top), width: Number(card.dataset.width), height: Number(card.dataset.height)}]))
+      const generatedLinks = [['topic-out','candidate1-in'],['topic-out','candidate2-in'],['topic-out','candidate3-in']]
+      let extraLinks = []
+      let connecting = null
+      let small = false
+      let reverse = false
+      let floatPosition = null
+
+      function cardById(id) { return cards.find(card => card.dataset.card === id) }
+      function placeCard(card, left, top) {
+        card.style.left = `${Math.max(12, Math.min(left, world.clientWidth - card.offsetWidth - 12))}px`
+        card.style.top = `${Math.max(12, Math.min(top, world.clientHeight - card.offsetHeight - 12))}px`
+      }
+      function setDimensions(card, width, height) {
+        card.dataset.expandedHeight = String(height)
+        card.style.width = `${width}px`
+        card.style.height = `${card.classList.contains('collapsed') ? 56 : height}px`
+      }
+      function point(name) {
+        const port = document.querySelector(`[data-port="${name}"]`).getBoundingClientRect()
+        const bounds = world.getBoundingClientRect()
+        return {x: port.left + port.width / 2 - bounds.left, y: port.top + port.height / 2 - bounds.top}
+      }
+      function curve(a, b) {
+        if (b.x >= a.x + 55) {
+          const d = Math.max(45, Math.min(150, (b.x - a.x) * .45))
+          return `M ${a.x} ${a.y} C ${a.x+d} ${a.y}, ${b.x-d} ${b.y}, ${b.x} ${b.y}`
+        }
+        const y = Math.min(world.clientHeight - 35, Math.max(a.y, b.y) + 210)
+        return `M ${a.x} ${a.y} C ${a.x+80} ${a.y}, ${a.x+100} ${y}, ${a.x+35} ${y} C ${a.x-45} ${y}, ${b.x+45} ${y}, ${b.x-35} ${y} C ${b.x-100} ${y}, ${b.x-80} ${b.y}, ${b.x} ${b.y}`
+      }
+      function draw() {
+        paths.replaceChildren()
+        const links = [...generatedLinks, ...extraLinks]
+        links.forEach(([from,to]) => {
+          const path = document.createElementNS('http://www.w3.org/2000/svg','path')
+          path.setAttribute('d',curve(point(from),point(to)))
+          path.setAttribute('class',generatedLinks.some(([a,b]) => a === from && b === to) ? 'wire' : 'wire task')
+          path.setAttribute('marker-end','url(#arrow)')
+          paths.append(path)
+        })
+      }
+      function setMessage(text) { message.textContent = text }
+      function select(card) { cards.forEach(item => item.classList.toggle('is-selected',item === card)) }
+      function nodeForPort(name) {
+        return document.querySelector(`[data-port="${name}"]`).closest('[data-card]').dataset.card
+      }
+      function wouldCycle(from, to) {
+        const sourceNode = nodeForPort(from), targetNode = nodeForPort(to)
+        const queue = [targetNode], visited = new Set()
+        while (queue.length) {
+          const node = queue.shift()
+          if (node === sourceNode) return true
+          if (visited.has(node)) continue
+          visited.add(node)
+          for (const [a,b] of [...generatedLinks, ...extraLinks]) if (nodeForPort(a) === node) queue.push(nodeForPort(b))
+        }
+        return false
+      }
+      function clearConnecting() {
+        connecting = null
+        sources.forEach(item => item.classList.remove('is-connecting'))
+      }
+      function connect(targetPort) {
+        if (!connecting) return
+        const from = connecting.dataset.port, to = targetPort.dataset.port
+        clearConnecting()
+        if (wouldCycle(from,to)) { setMessage('连接未创建：这会形成环或自连。'); return }
+        if (extraLinks.some(([a,b]) => a === from && b === to)) { setMessage('这两个端口已连接，未重复创建。'); return }
+        extraLinks.push([from,to])
+        const count = extraLinks.filter(([,b]) => nodeForPort(b) === 'agent').length
+        document.getElementById('agent-state').textContent = count ? `已连接 ${count} 个上游` : '尚未连接上游'
+        setMessage(`已连接：${nodeForPort(from)} → ${nodeForPort(to)}；保留已有连线。多输入细节待评审。`)
+        draw()
+      }
+      function beginConnect(sourcePort) {
+        clearConnecting()
+        connecting = sourcePort
+        sourcePort.classList.add('is-connecting')
+        setMessage('请选择左侧输入端口；按 Escape 可取消。')
+      }
+      sources.forEach(source => {
+        source.addEventListener('pointerdown', event => { if (event.button === 0) beginConnect(source) })
+        source.addEventListener('click', event => { event.stopPropagation(); if (connecting !== source) beginConnect(source) })
+      })
+      targets.forEach(target => target.addEventListener('click', event => { event.stopPropagation(); connect(target) }))
+      document.addEventListener('pointerup', event => {
+        const target = document.elementFromPoint?.(event.clientX,event.clientY)?.closest('[data-connect-target]')
+        if (connecting && target) connect(target)
+      })
+      document.addEventListener('keydown', event => {
+        if (event.key === 'Escape' && connecting) { clearConnecting(); setMessage('已取消连线。') }
+      })
+      cards.forEach(card => {
+        const start = initial.get(card.dataset.card)
+        setDimensions(card,start.width,start.height)
+        placeCard(card,start.left,start.top)
+        card.addEventListener('click', () => select(card))
+        const head = card.querySelector('.card-head')
+        head.addEventListener('pointerdown', event => {
+          if (event.button !== 0 || event.target.closest('button')) return
+          event.preventDefault(); select(card); head.setPointerCapture(event.pointerId)
+          const startX = event.clientX, startY = event.clientY, left = card.offsetLeft, top = card.offsetTop
+          const move = moveEvent => { placeCard(card,left + moveEvent.clientX - startX,top + moveEvent.clientY - startY); draw() }
+          const end = () => { head.removeEventListener('pointermove',move); head.removeEventListener('pointerup',end); head.removeEventListener('pointercancel',end) }
+          head.addEventListener('pointermove',move); head.addEventListener('pointerup',end); head.addEventListener('pointercancel',end)
+        })
+        head.addEventListener('keydown', event => {
+          if (event.target !== head) return
+          const delta = {ArrowLeft:[-8,0],ArrowRight:[8,0],ArrowUp:[0,-8],ArrowDown:[0,8]}[event.key]
+          if (!delta) return
+          event.preventDefault(); placeCard(card,card.offsetLeft + delta[0],card.offsetTop + delta[1]); draw()
+        })
+        const toggle = card.querySelector('.collapse')
+        const originalLabel = toggle.getAttribute('aria-label').replace('折叠','')
+        toggle.addEventListener('click', event => {
+          event.stopPropagation()
+          const collapsed = card.classList.toggle('collapsed')
+          card.style.height = `${collapsed ? 56 : Number(card.dataset.expandedHeight)}px`
+          toggle.setAttribute('aria-expanded',String(!collapsed))
+          toggle.setAttribute('aria-label',`${collapsed ? '展开' : '折叠'}${originalLabel}`)
+          toggle.textContent = collapsed ? '⌄' : '⌃'
+          draw()
+        })
+      })
+      document.querySelectorAll('[data-locate]').forEach(button => button.addEventListener('click', event => {
+        event.stopPropagation(); const card = cardById(button.dataset.locate); select(card)
+        canvas.scrollTo({left:Math.max(0,card.offsetLeft - canvas.clientWidth / 3),top:Math.max(0,card.offsetTop - 100),behavior:'auto'})
+        setMessage(`已定位${card.getAttribute('aria-label')}；不会改变节点关系。`)
+      }))
+      sizeToggle.addEventListener('click', () => {
+        small = !small; sizeToggle.setAttribute('aria-pressed',String(small)); sizeToggle.textContent = small ? '恢复选题尺寸' : '模拟选题小卡片'
+        setDimensions(cardById('topic'),small ? 240 : 270,small ? 145 : 290); draw()
+        setMessage(small ? '小卡片的候选列表可滚动；数量和出线锚点仍可见。' : '已恢复选题尺寸。')
+      })
+      reverseToggle.addEventListener('click', () => {
+        reverse = !reverse; reverseToggle.setAttribute('aria-pressed',String(reverse)); reverseToggle.textContent = reverse ? '恢复顺向布局' : '模拟反向连线'
+        const card = cardById('agent'); placeCard(card,reverse ? 675 : 1100,reverse ? 495 : 210); draw()
+        setMessage(reverse ? '反向连线用曲线绕行；点击两个端口可先建立示意连线。' : '已恢复顺向布局。')
+      })
+      function placeFloat(left, top) {
+        const maxLeft = Math.max(12,stage.clientWidth - floating.offsetWidth - 12)
+        const maxTop = Math.max(12,canvas.clientHeight - floating.offsetHeight - 12)
+        floatPosition = {left:Math.max(12,Math.min(left,maxLeft)),top:Math.max(12,Math.min(top,maxTop))}
+        floating.style.left = `${floatPosition.left}px`; floating.style.top = `${floatPosition.top}px`
+      }
+      const floatHead = floating.querySelector('.floating-head')
+      floatHead.addEventListener('pointerdown', event => {
+        if (event.button !== 0 || event.target.closest('button')) return
+        event.preventDefault(); floatHead.setPointerCapture(event.pointerId)
+        const startX = event.clientX, startY = event.clientY, left = floating.offsetLeft, top = floating.offsetTop
+        const move = moveEvent => placeFloat(left + moveEvent.clientX - startX,top + moveEvent.clientY - startY)
+        const end = () => {floatHead.removeEventListener('pointermove',move);floatHead.removeEventListener('pointerup',end);floatHead.removeEventListener('pointercancel',end)}
+        floatHead.addEventListener('pointermove',move);floatHead.addEventListener('pointerup',end);floatHead.addEventListener('pointercancel',end)
+      })
+      floatHead.addEventListener('keydown', event => {
+        if (event.target !== floatHead) return
+        const delta = {ArrowLeft:[-8,0],ArrowRight:[8,0],ArrowUp:[0,-8],ArrowDown:[0,8]}[event.key]
+        if (!delta) return
+        event.preventDefault(); placeFloat(floating.offsetLeft + delta[0],floating.offsetTop + delta[1])
+      })
+      floatToggle.addEventListener('click', () => {
+        const expanded = floating.dataset.mode === 'small'
+        floating.dataset.mode = expanded ? 'panel' : 'small'
+        floatToggle.setAttribute('aria-expanded',String(expanded)); floatToggle.setAttribute('aria-label',expanded ? '收起 Agent 面板' : '展开 Agent 面板'); floatToggle.textContent = expanded ? '×' : '⌄'
+        const pos = floatPosition ?? {left:floating.offsetLeft,top:floating.offsetTop}; placeFloat(pos.left,pos.top)
+      })
+      window.addEventListener('resize', () => { if (floatPosition) placeFloat(floatPosition.left,floatPosition.top); draw() })
+      document.getElementById('reset').addEventListener('click', () => {
+        extraLinks = []; clearConnecting(); document.getElementById('agent-state').textContent = '尚未连接上游'
+        small = false; reverse = false; sizeToggle.setAttribute('aria-pressed','false'); sizeToggle.textContent = '模拟选题小卡片'; reverseToggle.setAttribute('aria-pressed','false'); reverseToggle.textContent = '模拟反向连线'
+        cards.forEach(card => {const start = initial.get(card.dataset.card); card.classList.remove('collapsed','is-selected'); setDimensions(card,start.width,start.height); placeCard(card,start.left,start.top); const button = card.querySelector('.collapse'); button.setAttribute('aria-expanded','true'); button.setAttribute('aria-label',button.getAttribute('aria-label').replace('展开','折叠')); button.textContent = '⌃'})
+        document.getElementById('task').value = '写一段关于声音与情绪的短视频解说。'
+        floating.dataset.mode = 'small'; floatToggle.setAttribute('aria-expanded','false'); floatToggle.setAttribute('aria-label','展开 Agent 面板'); floatToggle.textContent = '⌄'; placeFloat(stage.clientWidth - floating.offsetWidth - 20,16)
+        canvas.scrollTo({left:0,top:0,behavior:'auto'}); setMessage('可分别将候选、提示词接到 Agent；有向环会被拒绝。'); draw()
+      })
+      const resultChoices = [...document.querySelectorAll('[data-result-choice]')]
+      const resultPanels = [...document.querySelectorAll('[data-result-panel]')]
+      let demoVersion = 1
+      function chooseResult(mode) {
+        resultChoices.forEach(button => button.setAttribute('aria-pressed',String(button.dataset.resultChoice === mode)))
+        resultPanels.forEach(panel => { panel.hidden = panel.dataset.resultPanel !== mode })
+      }
+      resultChoices.forEach(button => button.addEventListener('click', () => chooseResult(button.dataset.resultChoice)))
+      document.querySelectorAll('[data-demo-version]').forEach(button => button.addEventListener('click', () => {
+        demoVersion = Number(button.dataset.demoVersion)
+        document.querySelectorAll('[data-demo-version]').forEach(item => item.setAttribute('aria-pressed',String(Number(item.dataset.demoVersion) === demoVersion)))
+        document.getElementById('version-preview-text').textContent = `当前预览：v${demoVersion}`
+      }))
+      document.getElementById('bind-preview').addEventListener('click', () => {document.getElementById('version-binding-text').textContent = `示意：使用 v${demoVersion}`})
+
+      const runCases = {
+        standalone: {output:'new',inputs:[{name:'Prompt A',detail:'无需 Topic：写一段节奏解析',role:'task',ready:true}]},
+        mixed: {output:'existing',inputs:[{name:'Prompt A',detail:'将原稿改写为 60 秒解说',role:'task',ready:true},{name:'脚本 A · v1',detail:'固定引用旧版脚本，作为参考',role:'reference',ready:true},{name:'Prompt B',detail:'保留术语解释，语气通俗',role:'constraint',ready:true}]},
+        tasks: {output:'new',inputs:[{name:'Prompt A',detail:'主任务：写 60 秒解说',role:'task',ready:true},{name:'Prompt B',detail:'主任务：写 120 秒解说',role:'task',ready:true}]},
+        missing: {output:'new',inputs:[{name:'Prompt A',detail:'写一段节奏解析；参考脚本可选',role:'task',ready:true},{name:'脚本 B',detail:'未就绪：还没有可引用的版本',role:'reference',ready:false}]}
+      }
+      const runList = document.getElementById('run-input-list')
+      const runOutput = document.getElementById('run-output')
+      const runFeedback = document.getElementById('run-feedback')
+      const runButtons = [...document.querySelectorAll('[data-run-case]')]
+      const roleNames = {task:'主任务',constraint:'补充约束',reference:'参考 / 素材'}
+      function resetRunFeedback() { runFeedback.classList.remove('ok'); runFeedback.textContent = '输入已变化，请重新进行模拟检查。' }
+      function renderRunCase(name) {
+        runButtons.forEach(button => button.setAttribute('aria-pressed',String(button.dataset.runCase === name)))
+        runList.replaceChildren()
+        runOutput.value = runCases[name].output
+        runCases[name].inputs.forEach(input => {
+          const row = document.createElement('div'); row.className = 'run-row'; row.dataset.name = input.name; row.dataset.ready = String(input.ready)
+          const check = document.createElement('input'); check.type = 'checkbox'; check.checked = true; check.setAttribute('aria-label',`本次使用 ${input.name}`)
+          const description = document.createElement('div')
+          const title = document.createElement('strong'); title.textContent = input.name
+          const detail = document.createElement('small'); detail.textContent = input.detail
+          description.append(title,detail)
+          const role = document.createElement('select'); role.setAttribute('aria-label',`${input.name} 的输入角色`)
+          Object.entries(roleNames).forEach(([value,label]) => { const option = document.createElement('option'); option.value = value; option.textContent = label; role.append(option) })
+          role.value = input.role
+          const up = document.createElement('button'); up.type = 'button'; up.textContent = '↑'; up.setAttribute('aria-label',`将 ${input.name} 上移`)
+          const down = document.createElement('button'); down.type = 'button'; down.textContent = '↓'; down.setAttribute('aria-label',`将 ${input.name} 下移`)
+          up.addEventListener('click', () => { if (row.previousElementSibling) {runList.insertBefore(row,row.previousElementSibling); resetRunFeedback()} })
+          down.addEventListener('click', () => { if (row.nextElementSibling) {runList.insertBefore(row.nextElementSibling,row); resetRunFeedback()} })
+          row.append(check,description,role,up,down); runList.append(row)
+        })
+        runFeedback.classList.remove('ok'); runFeedback.textContent = '仅模拟检查，不发起运行。'
+      }
+      runButtons.forEach(button => button.addEventListener('click', () => renderRunCase(button.dataset.runCase)))
+      runList.addEventListener('change',resetRunFeedback)
+      runOutput.addEventListener('change',resetRunFeedback)
+      document.getElementById('check-run').addEventListener('click', () => {
+        const selected = [...runList.children].filter(row => row.querySelector('input').checked)
+        const tasks = selected.filter(row => row.querySelector('select').value === 'task')
+        runFeedback.classList.remove('ok')
+        if (!tasks.length) {runFeedback.textContent = '未通过：请先选择一条主任务。'; return}
+        if (tasks.length > 1) {runFeedback.textContent = '未通过：存在多个主任务。请明确主次；本示意不自动判断哪条优先。'; return}
+        const missing = selected.find(row => row.dataset.ready !== 'true')
+        if (missing) {runFeedback.textContent = `未通过：${missing.dataset.name} 尚未就绪。可取消本次选择，或先补齐输入。`; return}
+        const inputs = selected.map(row => `${row.dataset.name}（${roleNames[row.querySelector('select').value]}）`).join(' → ')
+        runFeedback.classList.add('ok')
+        runFeedback.textContent = `模拟检查通过，未执行。\n输入顺序：${inputs}\n输出：${runOutput.options[runOutput.selectedIndex].textContent}\n文本冲突仍需人工核对。`
+      })
+      renderRunCase('standalone')
+      placeFloat(stage.clientWidth - floating.offsetWidth - 20,16)
+      draw()
+    })()
+  </script>
+</body>
+</html>

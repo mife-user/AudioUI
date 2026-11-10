@@ -11,6 +11,7 @@
 | 你要查看 | 文档 |
 |---|---|
 | 当前阶段、优先级、暂缓项 | [开发路线图](dev/roadmap.md) |
+| AI 视频业务与混合方向调研 | [RM-020 视频生产调研](dev/ai-video-workflow-research.md)（公开索引摘要，视频实现范围待评审） |
 | M2 各任务状态与验收入口 | [M2 逐任务执行手册](plans/stages/M2/m2-workplan.md) |
 | 当前待评审或待补验收计划 | [计划导航](plans/README.md) |
 | 需求与范围 | [产品需求 PRD](prd.md)；[产品总览](product.md) |
@@ -28,6 +29,7 @@
 
 - M2 本地脚本流程：[交互演示](design/m2-11-13-local-flow-demo.html)（模拟数据，不连接 Agent）。
 - 画布整体优化：[交互原型](design/canvas-workbench-redesign-demo.html)（待评审方案，不代表产品已实现）。
+- U10～U16 画布与重跑结果讨论：[单文件交互原型](design/u10-u16-canvas-optimization-demo.html)（模拟数据；多上游、无 Topic 运行原则及版本目标已确认，运行细节待评审）。
 - 既有阶段自检与验收记录按编号存放在 [`dev/evidence/`](dev/evidence/m2.md)；M2-13 汇总见 [M2 集成证据](dev/evidence/m2.md)。
 - 其它历史原型、诊断示意按主题存放于 `design/`，历史验收截图与记录存放于 `dev/evidence/`。
 
