@@ -97,6 +97,7 @@ function makeAPI(): GraphAPI {
     connect: vi.fn().mockResolvedValue({ projectId: 'p_real_flow', projectRevision: 5, nodeId: 'n_prompt' }),
     moveNode: vi.fn().mockResolvedValue({ projectId: 'p_real_flow', projectRevision: 5, nodeId: 'n_prompt' }),
     setNodeLayout: vi.fn().mockResolvedValue({ projectId: 'p_real_flow', projectRevision: 5, nodeId: 'n_prompt' }),
+    setNodeCollapsed: vi.fn().mockResolvedValue({ projectId: 'p_real_flow', projectRevision: 5, nodeId: 'n_prompt' }),
     selectNode: vi.fn().mockResolvedValue({ projectId: 'p_real_flow', projectRevision: 5, nodeId: 'n_prompt' }),
     updateNodeParams: vi.fn().mockResolvedValue({ projectId: 'p_real_flow', projectRevision: 5, nodeId: 'n_topic' }),
     getTopicCandidates: vi.fn().mockResolvedValue([]),
@@ -147,6 +148,8 @@ describe('WorkspaceCanvas with real React Flow', () => {
       nodes.forEach((id) => expect(container.querySelector(`.react-flow__node[data-id="${id}"]`)).toBeVisible())
     })
     expect(container.querySelector('[data-id="n_topic"] [data-handleid="topic-candidate-0"]')).toBeInTheDocument()
+    expect(container.querySelector('[data-id="n_topic"] .canvas-node-head [data-handleid="topic-candidate-0"]')).toBeInTheDocument()
+    expect(container.querySelector('[data-id="n_topic"] .topic-candidate-row [data-handleid="topic-candidate-0"]')).toBeNull()
     expect(container.querySelector('[data-id="n_candidate"] [data-handleid="candidate-output"]')).toBeInTheDocument()
     await waitFor(() => expect(container.querySelectorAll('.react-flow__edge-path')).toHaveLength(4))
 
@@ -157,6 +160,39 @@ describe('WorkspaceCanvas with real React Flow', () => {
     await waitFor(() => expect(onSelectNode).toHaveBeenCalledWith('n_prompt'))
     fireEvent.keyDown(topicWrapper, { key: ' ', code: 'Space' })
     await waitFor(() => expect(onSelectNode).toHaveBeenLastCalledWith('n_topic'))
+  })
+
+  it('keeps an unsaved Topic draft and its measured edge through collapse and expand', async () => {
+    const api = makeAPI()
+    const { container } = render(
+      <WorkspaceCanvas snapshot={makeSnapshot()} onSelectNode={vi.fn().mockResolvedValue(undefined)} api={api} />,
+    )
+    const topicNode = await waitFor(() => container.querySelector<HTMLElement>('.react-flow__node[data-id="n_topic"] .topic-node')!)
+    const topicDraft = container.querySelector<HTMLTextAreaElement>('#topic-idea-n_topic')
+    if (!topicDraft) throw new Error('Topic draft missing from fixture')
+    fireEvent.change(topicDraft, { target: { value: '尚未保存的想法' } })
+
+    fireEvent.click(screen.getByRole('button', { name: '折叠 n_topic 正文' }))
+    await waitFor(() => expect(api.setNodeCollapsed).toHaveBeenCalledWith('n_topic', true, 'p_real_flow'))
+    await waitFor(() => expect(topicNode).toHaveClass('is-collapsed'))
+    expect(topicDraft.isConnected).toBe(true)
+    expect(topicDraft).toHaveValue('尚未保存的想法')
+    expect(screen.getByRole('button', { name: '展开 n_topic 正文' })).toHaveAttribute('aria-expanded', 'false')
+    await waitFor(() => expect(container.querySelectorAll('.react-flow__edge-path')).toHaveLength(4))
+
+    fireEvent.click(screen.getByRole('button', { name: '展开 n_topic 正文' }))
+    await waitFor(() => expect(api.setNodeCollapsed).toHaveBeenCalledWith('n_topic', false, 'p_real_flow'))
+    await waitFor(() => expect(topicNode).not.toHaveClass('is-collapsed'))
+    expect(topicDraft.isConnected).toBe(true)
+    expect(topicDraft).toHaveValue('尚未保存的想法')
+  })
+
+  it('locates the real Candidate node from the scrollable Topic list', async () => {
+    const onSelectNode = vi.fn().mockResolvedValue(undefined)
+    render(<WorkspaceCanvas snapshot={makeSnapshot()} onSelectNode={onSelectNode} api={makeAPI()} />)
+
+    fireEvent.click(await screen.findByRole('button', { name: '定位候选 1' }))
+    await waitFor(() => expect(onSelectNode).toHaveBeenCalledWith('n_candidate'))
   })
 
   it('opens creation on the blank pane but leaves the Prompt textarea context menu untouched', async () => {

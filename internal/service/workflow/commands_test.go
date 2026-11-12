@@ -453,6 +453,54 @@ func TestSetNodeLayout(t *testing.T) {
 	}
 }
 
+func TestSetNodeCollapsed(t *testing.T) {
+	h := newHarness(t, baseProject())
+	before := h.node(t, "n_a").Clone()
+	project, err := h.service.SetNodeCollapsed(context.Background(), "n_a", true, "p_test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated := h.node(t, "n_a")
+	if project.Revision != 2 || !updated.Collapsed || updated.Size != before.Size || updated.Position != before.Position {
+		t.Fatalf("collapsed node = %+v revision=%d", updated, project.Revision)
+	}
+	if updated.Parent != before.Parent || updated.Title != before.Title || updated.Params != before.Params ||
+		!reflect.DeepEqual(updated.Rounds, before.Rounds) || updated.Locked != before.Locked || updated.Stale != before.Stale {
+		t.Fatalf("collapse mutated node content: before=%+v after=%+v", before, updated)
+	}
+	if h.session.saveCount != 1 || len(*h.changes) != 1 {
+		t.Fatalf("collapse was not committed once: saves=%d changes=%d", h.session.saveCount, len(*h.changes))
+	}
+
+	beforeSaves := h.session.saveCount
+	project, err = h.service.SetNodeCollapsed(context.Background(), "n_a", true, "p_test")
+	if err != nil || project.Revision != 2 || h.session.saveCount != beforeSaves {
+		t.Fatalf("unchanged collapse was not idempotent: err=%v revision=%d saves=%d", err, project.Revision, h.session.saveCount)
+	}
+	if _, err := h.service.SetNodeCollapsed(context.Background(), "n_missing", true, "p_test"); !errors.Is(err, ErrNodeNotFound) {
+		t.Fatalf("missing node error = %v, want NODE_NOT_FOUND", err)
+	}
+	if _, err := h.service.SetNodeCollapsed(context.Background(), "n_a", false, "p_other"); !errors.Is(err, ErrProjectChanged) {
+		t.Fatalf("project scope error = %v, want PROJECT_CHANGED", err)
+	}
+
+	if err := h.service.AcquireRunLock(context.Background(), "r_run", "n_topic", "n_a", []string{"n_topic", "n_candidate", "n_a"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.service.SetNodeCollapsed(context.Background(), "n_a", false, "p_test"); err != nil {
+		t.Fatalf("collapse state change under run lock should be allowed: %v", err)
+	}
+
+	failed := newHarness(t, baseProject())
+	failed.session.saveErr = errors.New("disk write failed")
+	if _, err := failed.service.SetNodeCollapsed(context.Background(), "n_a", true, "p_test"); !errors.Is(err, failed.session.saveErr) {
+		t.Fatalf("write error = %v, want %v", err, failed.session.saveErr)
+	}
+	if failed.node(t, "n_a").Collapsed || failed.session.project.Revision != 1 || len(*failed.changes) != 0 {
+		t.Fatalf("failed collapse left a partial mutation: node=%+v changes=%+v", failed.node(t, "n_a"), *failed.changes)
+	}
+}
+
 func TestUpdateNodeParams(t *testing.T) {
 	h := newHarness(t, baseProject())
 	params := entity.NodeParams{Instruction: "新指令", OutputKind: valueobject.OutputKindScript}

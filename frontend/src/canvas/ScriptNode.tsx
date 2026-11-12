@@ -6,7 +6,7 @@ import { PendingStatus } from '../../bindings/audio-ui/internal/domain/valueobje
 import { usePendingControllerContext } from '../hooks/usePendingController'
 import { PendingArtifactCard } from '../ui/PendingArtifactCard'
 import { nodeHandleLayoutKey, type CanvasFlowNode } from './flowModel'
-import { NodeResizeHandles, NodeSizeControl } from './NodeLayoutControls'
+import { NodeCollapseControl, NodeResizeHandles, NodeSizeControl } from './NodeLayoutControls'
 import { useMeasuredNodeHandles } from './useMeasuredNodeHandles'
 
 type ScriptDocument = {
@@ -162,9 +162,8 @@ export const ScriptNode = memo(function ScriptNode({ id, data, selected }: NodeP
 
   return (
     <>
-      <NodeResizeHandles nodeId={id} visible={selected} disabled={mutationsDisabled} />
-      <article className={`canvas-node script-node${pathHighlighted ? ' is-path' : ''}${runningLocked ? ' is-running-locked' : ''}${node.stale ? ' is-stale' : ''}`}>
-        <Handle
+      <NodeResizeHandles nodeId={id} visible={selected && !node.collapsed} disabled={mutationsDisabled} />
+      <article className={`canvas-node script-node${pathHighlighted ? ' is-path' : ''}${runningLocked ? ' is-running-locked' : ''}${node.stale ? ' is-stale' : ''}${node.collapsed ? ' is-collapsed' : ''}`}>        <Handle
           id="script-input"
           type="target"
           position={Position.Left}
@@ -180,9 +179,30 @@ export const ScriptNode = memo(function ScriptNode({ id, data, selected }: NodeP
           <span className="canvas-node-status" role="status">
             {pendingOutputCount > 0 ? `待处理 ${pendingOutputCount}` : latestVersion ? `v${latestVersion.n}` : '空输出'}
           </span>
-          <NodeSizeControl node={node} disabled={mutationsDisabled} onApply={data.onSetNodeLayout} />
+          {pendingOutputCount > 0 ? (
+            <div className="script-pending-actions" aria-label="脚本待处理结果">
+              {pendingOutputIds.map((pendingId, index) => {
+                const summary = pendingController?.pendingItems.find((item) => item.id === pendingId)
+                if (!summary || !pendingController) return null
+                const label = summary.status === PendingStatus.PendingInvalid ? '处理无效结果' : '查看待确认结果'
+                return (
+                  <button
+                    key={pendingId}
+                    ref={(element) => { if (index === 0) pendingTrigger.current = element }}
+                    type="button"
+                    className="script-version-read nodrag"
+                    onClick={() => void pendingController.openFromNode(pendingId, node.id)}
+                  >
+                    {label}{pendingOutputCount > 1 ? ` ${index + 1}` : ''}
+                  </button>
+                )
+              })}
+            </div>
+          ) : null}
+          {!node.collapsed ? <NodeSizeControl node={node} disabled={mutationsDisabled} onApply={data.onSetNodeLayout} /> : null}
+          <NodeCollapseControl node={node} disabled={mutationsDisabled} onToggle={data.onSetNodeCollapsed} />
         </header>
-        <div className="canvas-node-content script-node-content nowheel">
+        <div id={`node-content-${node.id}`} className="canvas-node-content script-node-content nowheel" hidden={Boolean(node.collapsed)}>
           {latestVersion ? (
             <>
               <p className="script-version-summary">{versions.length} 个不可变版本 · 最新 v{latestVersion.n}</p>
@@ -229,26 +249,6 @@ export const ScriptNode = memo(function ScriptNode({ id, data, selected }: NodeP
                   ) : null}
                   {expandedRead?.status === 'ready' ? renderScriptBody(expandedDocument, expandedScriptVersion) : null}
                 </section>
-              ) : null}
-              {pendingOutputCount > 0 ? (
-                <div className="script-pending-actions" aria-label="脚本待处理结果">
-                  {pendingOutputIds.map((pendingId, index) => {
-                    const summary = pendingController?.pendingItems.find((item) => item.id === pendingId)
-                    if (!summary || !pendingController) return null
-                    const label = summary.status === PendingStatus.PendingInvalid ? '处理无效结果' : '查看待确认结果'
-                    return (
-                      <button
-                        key={pendingId}
-                        ref={(element) => { if (index === 0) pendingTrigger.current = element }}
-                        type="button"
-                        className="script-version-read"
-                        onClick={() => void pendingController.openFromNode(pendingId, node.id)}
-                      >
-                        {label}{pendingOutputCount > 1 ? ` ${index + 1}` : ''}
-                      </button>
-                    )
-                  })}
-                </div>
               ) : null}
             </>
           ) : (

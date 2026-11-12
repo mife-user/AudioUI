@@ -5,6 +5,8 @@ import type { TopicCandidateFixture } from './graphApi'
 import type { CanvasEdgeData } from './edgeRouting'
 import { canvasNodeRects } from './nodeRects'
 
+export const COLLAPSED_NODE_HEIGHT = 56
+
 export type ChildNodeType = 'prompt' | 'agent' | 'script'
 
 export type CanvasNodeData = {
@@ -12,6 +14,7 @@ export type CanvasNodeData = {
   runningLocked: boolean
   pathHighlighted: boolean
   topicCandidateIndexes: number[]
+  candidateNodeIds: Record<number, string>
   candidates: TopicCandidateFixture[]
   candidate?: TopicCandidateFixture
   candidateError?: string
@@ -35,6 +38,8 @@ export type CanvasNodeData = {
   onRegisterTopicFlush?: (nodeId: string, projectId: string, flush: () => Promise<boolean>) => () => void
   onNodeHandlesMeasured?: (nodeId: string, layoutKey: string, projectId: string) => void
   onSetNodeLayout?: (nodeId: string, width: number, height: number) => void
+  onSetNodeCollapsed?: (nodeId: string, collapsed: boolean) => void
+  onLocateNode?: (nodeId: string) => void
   onAddChild: (nodeId: string, type: ChildNodeType) => void
 }
 
@@ -61,6 +66,8 @@ type CanvasCallbacks = {
   onRegisterTopicFlush?: CanvasNodeData['onRegisterTopicFlush']
   onNodeHandlesMeasured?: CanvasNodeData['onNodeHandlesMeasured']
   onSetNodeLayout?: CanvasNodeData['onSetNodeLayout']
+  onSetNodeCollapsed?: CanvasNodeData['onSetNodeCollapsed']
+  onLocateNode?: CanvasNodeData['onLocateNode']
 }
 
 export function candidateAt(candidates: TopicCandidateFixture[] | undefined, index: number | null | undefined): TopicCandidateFixture | undefined {
@@ -113,6 +120,7 @@ export function nodeHandleLayoutKey(type: CanvasFlowNode['type'], data: CanvasNo
   if (type === 'topic') {
     return JSON.stringify({
       type,
+      collapsed: Boolean(data.node.collapsed),
       candidates: data.topicCandidateIndexes.map((index) => {
         const candidate = candidateAt(data.candidates, index)
         return { index, title: candidate?.title ?? '', angle: candidate?.angle ?? '', hook: candidate?.hook ?? '' }
@@ -122,6 +130,7 @@ export function nodeHandleLayoutKey(type: CanvasFlowNode['type'], data: CanvasNo
   if (type === 'candidate') {
     return JSON.stringify({
       type,
+      collapsed: Boolean(data.node.collapsed),
       sourceIndex: data.node.candidateSource?.index,
       title: data.candidate?.title ?? data.node.title,
       angle: data.candidate?.angle ?? '',
@@ -129,9 +138,9 @@ export function nodeHandleLayoutKey(type: CanvasFlowNode['type'], data: CanvasNo
     })
   }
   if (type === 'script') {
-    return JSON.stringify({ type, hasParent: Boolean(data.node.parent), versions: data.node.scriptVersions ?? [] })
+    return JSON.stringify({ type, collapsed: Boolean(data.node.collapsed), hasParent: Boolean(data.node.parent), versions: data.node.scriptVersions ?? [] })
   }
-  return JSON.stringify({ type, hasParent: Boolean(data.node.parent) })
+  return JSON.stringify({ type, collapsed: Boolean(data.node.collapsed), hasParent: Boolean(data.node.parent) })
 }
 
 export function buildFlowEdges(
@@ -198,12 +207,16 @@ export function buildFlowModel(
   const projectNodes = snapshot.nodes ?? []
   const projectId = snapshot.project?.id ?? ''
   const candidateIndexesByTopic = new Map<string, number[]>()
+  const candidateNodeIdsByTopic = new Map<string, Record<number, string>>()
   const scriptByAgent = new Map<string, Node>()
   for (const node of projectNodes) {
     if (node.type === 'candidate' && node.parent && node.candidateSource?.topicNodeId === node.parent) {
       const indexes = candidateIndexesByTopic.get(node.parent) ?? []
       indexes.push(node.candidateSource.index)
       candidateIndexesByTopic.set(node.parent, indexes)
+      const candidateNodeIds = candidateNodeIdsByTopic.get(node.parent) ?? {}
+      candidateNodeIds[node.candidateSource.index] = node.id
+      candidateNodeIdsByTopic.set(node.parent, candidateNodeIds)
     }
     if (node.type === 'script' && node.parent) scriptByAgent.set(node.parent, node)
   }
@@ -245,13 +258,14 @@ export function buildFlowModel(
       type: node.type as CanvasFlowNode['type'],
       dragHandle: '.canvas-node-head',
       position: { x: node.position.x, y: node.position.y },
-      style: { width: node.size.width, height: node.size.height },
+      style: { width: node.size.width, height: node.collapsed ? COLLAPSED_NODE_HEIGHT : node.size.height },
       selected: node.id === snapshot.project?.activeNodeId,
       data: {
         node,
         runningLocked: locked.has(node.id),
         pathHighlighted: highlighted.has(node.id),
         topicCandidateIndexes: candidateIndexesByTopic.get(node.id) ?? [],
+        candidateNodeIds: candidateNodeIdsByTopic.get(node.id) ?? {},
         candidates: candidateFixtures[node.id] ?? [],
         candidate: source ? candidateAt(candidateFixtures[candidateTopicId], source.index) : undefined,
         candidateError: candidateTopicId ? callbacks.candidateErrors?.[candidateTopicId] : callbacks.candidateErrors?.[node.id],
@@ -275,6 +289,8 @@ export function buildFlowModel(
         onRegisterTopicFlush: callbacks.onRegisterTopicFlush,
         onNodeHandlesMeasured: callbacks.onNodeHandlesMeasured,
         onSetNodeLayout: callbacks.onSetNodeLayout,
+        onSetNodeCollapsed: callbacks.onSetNodeCollapsed,
+        onLocateNode: callbacks.onLocateNode,
         onAddChild,
       },
     }

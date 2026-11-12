@@ -2,7 +2,7 @@ import { memo } from 'react'
 import { Handle, Position, type NodeProps } from '@xyflow/react'
 import { nodeHandleLayoutKey, type CanvasFlowNode } from './flowModel'
 import { PromptParameters } from './PromptParameters'
-import { NodeResizeHandles, NodeSizeControl } from './NodeLayoutControls'
+import { NodeCollapseControl, NodeResizeHandles, NodeSizeControl } from './NodeLayoutControls'
 import { useMeasuredNodeHandles } from './useMeasuredNodeHandles'
 
 export const PromptNode = memo(function PromptNode({ id, data, selected }: NodeProps<CanvasFlowNode>) {
@@ -16,9 +16,8 @@ export const PromptNode = memo(function PromptNode({ id, data, selected }: NodeP
 
   return (
     <>
-      <NodeResizeHandles nodeId={id} visible={selected} disabled={mutationsDisabled} />
-      <article className={`canvas-node prompt-node${pathHighlighted ? ' is-path' : ''}${runningLocked ? ' is-running-locked' : ''}${node.locked ? ' is-content-locked' : ''}${isDraft ? ' is-draft' : ''}`}>
-      <Handle
+      <NodeResizeHandles nodeId={id} visible={selected && !node.collapsed} disabled={mutationsDisabled} />
+      <article className={`canvas-node prompt-node${pathHighlighted ? ' is-path' : ''}${runningLocked ? ' is-running-locked' : ''}${node.locked ? ' is-content-locked' : ''}${isDraft ? ' is-draft' : ''}${node.collapsed ? ' is-collapsed' : ''}`}>      <Handle
         id="prompt-input"
         type="target"
         position={Position.Left}
@@ -33,9 +32,10 @@ export const PromptNode = memo(function PromptNode({ id, data, selected }: NodeP
         <strong title={node.title}>{node.title}</strong>
         {isDraft ? <span className="canvas-node-status">草稿</span> : null}
         {runningLocked ? <span className="canvas-node-status">运行中 · 只读</span> : node.stale ? <span className="canvas-node-status">上游已变化</span> : null}
-        <NodeSizeControl node={node} disabled={mutationsDisabled} onApply={data.onSetNodeLayout} />
+        {!node.collapsed ? <NodeSizeControl node={node} disabled={mutationsDisabled} onApply={data.onSetNodeLayout} /> : null}
+        <NodeCollapseControl node={node} disabled={mutationsDisabled} onToggle={data.onSetNodeCollapsed} />
       </header>
-      <div className="canvas-node-content prompt-node-content nowheel">
+      <div id={`node-content-${node.id}`} className="canvas-node-content prompt-node-content nowheel" hidden={Boolean(node.collapsed)}>
         <PromptParameters
           node={node}
           projectId={projectId ?? ''}

@@ -34,6 +34,7 @@ function flowNode(
       runningLocked: false,
       pathHighlighted: false,
       topicCandidateIndexes: [],
+      candidateNodeIds: {},
       candidates: [],
       mutationsDisabled: false,
       projectId,

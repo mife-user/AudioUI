@@ -296,6 +296,33 @@ func (s *Service) SetNodeLayout(ctx context.Context, id string, x, y, width, hei
 	return saved, nil
 }
 
+func (s *Service) SetNodeCollapsed(ctx context.Context, id string, collapsed bool, expectedProjectID ...string) (entity.Project, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return entity.Project{}, err
+	}
+	project, graph, err := s.loadCurrentForProject(ctx, firstExpectedProjectID(expectedProjectID))
+	if err != nil {
+		return entity.Project{}, err
+	}
+	node, err := requireNode(graph, id, "node")
+	if err != nil {
+		return entity.Project{}, err
+	}
+	if node.Collapsed == collapsed {
+		return project, nil
+	}
+	node.Collapsed = collapsed
+	project.Revision++
+	saved, err := s.opts.Project.Save(ctx, project)
+	if err != nil {
+		return entity.Project{}, err
+	}
+	s.changed(saved.ID, saved.Revision)
+	return saved, nil
+}
+
 func (s *Service) UpdateNodeParams(ctx context.Context, id, title string, params entity.NodeParams, expectedProjectID ...string) (entity.Project, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

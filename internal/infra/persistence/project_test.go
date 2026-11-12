@@ -51,7 +51,7 @@ func TestProjectStoreCreateLoadList(t *testing.T) {
 	}
 }
 
-func TestProjectStorePersistsNodeLayout(t *testing.T) {
+func TestProjectStorePersistsNodeLayoutAndCollapsedState(t *testing.T) {
 	ctx := context.Background()
 	store := NewProjectStore(testLayout(t.TempDir()))
 	project := sampleProject("p_layout")
@@ -60,6 +60,7 @@ func TestProjectStorePersistsNodeLayout(t *testing.T) {
 	}
 	project.Nodes[0].Position = entity.Position{X: 37, Y: 48}
 	project.Nodes[0].Size = entity.NodeSize{Width: 345, Height: 275}
+	project.Nodes[0].Collapsed = true
 	project.Revision++
 	if err := store.Save(ctx, project); err != nil {
 		t.Fatal(err)
@@ -68,8 +69,8 @@ func TestProjectStorePersistsNodeLayout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if loaded.Nodes[0].Position != project.Nodes[0].Position || loaded.Nodes[0].Size != project.Nodes[0].Size {
-		t.Fatalf("loaded node layout = position %+v size %+v", loaded.Nodes[0].Position, loaded.Nodes[0].Size)
+	if loaded.Nodes[0].Position != project.Nodes[0].Position || loaded.Nodes[0].Size != project.Nodes[0].Size || !loaded.Nodes[0].Collapsed {
+		t.Fatalf("loaded node layout = position %+v size %+v collapsed=%t", loaded.Nodes[0].Position, loaded.Nodes[0].Size, loaded.Nodes[0].Collapsed)
 	}
 }
 

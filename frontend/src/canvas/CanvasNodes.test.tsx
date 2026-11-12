@@ -60,6 +60,7 @@ function nodeData(nodeValue: Node, overrides: Partial<CanvasFlowNode['data']> = 
     runningLocked: false,
     pathHighlighted: false,
     topicCandidateIndexes: [],
+    candidateNodeIds: {},
     candidates: [],
     mutationsDisabled: false,
     onAddChild: vi.fn(),
@@ -150,6 +151,23 @@ describe('M2-12A canvas nodes', () => {
     expect(onSetNodeLayout).toHaveBeenCalledWith('n_size', defaultSize.width, defaultSize.height)
   })
 
+  it.each(canvasNodeViews)('collapses the body but preserves the header and expanded size for $label nodes', ({ type, renderNode }) => {
+    const nodeValue = node('n_fold', type)
+    const onSetNodeCollapsed = vi.fn()
+    const { container, rerender } = render(renderNode(nodeValue, nodeData(nodeValue, { onSetNodeCollapsed }), true))
+
+    expect(container.querySelector('.canvas-node-content')).not.toHaveAttribute('hidden')
+    fireEvent.click(screen.getByRole('button', { name: '折叠 n_fold 正文' }))
+    expect(onSetNodeCollapsed).toHaveBeenCalledWith('n_fold', true)
+
+    const collapsedNode = { ...nodeValue, collapsed: true }
+    rerender(renderNode(collapsedNode, nodeData(collapsedNode, { onSetNodeCollapsed }), true))
+    expect(screen.getByRole('button', { name: '展开 n_fold 正文' })).toHaveAttribute('aria-expanded', 'false')
+    expect(container.querySelector('.canvas-node-content')).toHaveAttribute('hidden')
+    expect(screen.queryByRole('button', { name: '调整 n_fold 卡片尺寸' })).not.toBeInTheDocument()
+    expect(screen.getByTestId('resize-n_fold')).toHaveAttribute('data-visible', 'false')
+  })
+
   it('applies numeric size changes and returns focus to the card control', () => {
     const prompt = node('n_prompt', 'prompt')
     const onSetNodeLayout = vi.fn()
@@ -181,11 +199,14 @@ describe('M2-12A canvas nodes', () => {
     const candidate = node('n_candidate', 'candidate', topic.id, {
       candidateSource: { topicNodeId: topic.id, artifactId: 'sha256:topics', index: 1 },
     })
+    const onLocateNode = vi.fn()
     const { container } = render(
       <>
         <TopicNode {...nodeProps(topic, nodeData(topic, {
           topicCandidateIndexes: [1],
+          candidateNodeIds: { 1: candidate.id },
           candidates: [{ index: 1, title: '谱面演示', angle: '转场', hook: '先看谱面' }],
+          onLocateNode,
         }))} />
         <CandidateNode {...nodeProps(candidate, nodeData(candidate, {
           candidate: { index: 1, title: '谱面演示', angle: '转场', hook: '先看谱面' },
@@ -199,7 +220,28 @@ describe('M2-12A canvas nodes', () => {
     expect(screen.getByLabelText('谱面演示 输出端口')).toHaveAttribute('data-connectable', 'true')
     expect(screen.getByLabelText('n_topic 的候选节点')).toBeInTheDocument()
     expect(container.querySelector('.topic-candidate-index')).toHaveTextContent('2')
+    expect(container.querySelector('.canvas-node-head [data-handle="topic-candidate-1"]')).toBeInTheDocument()
+    expect(container.querySelector('.topic-candidate-row [data-handle="topic-candidate-1"]')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '定位候选 2' }))
+    expect(onLocateNode).toHaveBeenCalledWith(candidate.id)
     expect(screen.getByLabelText('从 谱面演示 新增提示词')).toBeEnabled()
+  })
+
+  it('keeps all candidate anchors on the Topic header for a ten-candidate list', () => {
+    const topic = node('n_topic', 'topic', '', { size: { width: 200, height: 140 } })
+    const indexes = Array.from({ length: 10 }, (_value, index) => index)
+    const candidates = indexes.map((index) => ({ index, title: `候选标题 ${index + 1}` }))
+    const candidateNodeIds = Object.fromEntries(indexes.map((index) => [index, `n_candidate_${index}`]))
+    const { container } = render(<TopicNode {...nodeProps(topic, nodeData(topic, {
+      topicCandidateIndexes: indexes,
+      candidateNodeIds,
+      candidates,
+    }))} />)
+
+    expect(screen.getByText('候选 10')).toBeInTheDocument()
+    expect(container.querySelectorAll('.canvas-node-head [data-kind="source"]')).toHaveLength(10)
+    expect(container.querySelectorAll('.topic-candidate-row')).toHaveLength(10)
+    expect(container.querySelectorAll('.topic-candidate-row [data-kind="source"]')).toHaveLength(0)
   })
 
   it('keeps a draft prompt editable as a connection target and does not show a run button', () => {

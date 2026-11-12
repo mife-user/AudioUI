@@ -3,7 +3,7 @@ import { Handle, Position, type NodeProps } from '@xyflow/react'
 import type { RunStartError } from '../../bindings/audio-ui/internal/domain/entity'
 import { formatRunStartError } from './runStartError'
 import { nodeHandleLayoutKey, type CanvasFlowNode } from './flowModel'
-import { NodeResizeHandles, NodeSizeControl } from './NodeLayoutControls'
+import { NodeCollapseControl, NodeResizeHandles, NodeSizeControl } from './NodeLayoutControls'
 import { PendingNodeEntry } from '../ui/PendingNodeEntry'
 import { NodeRunRequestEntry } from '../ui/NodeRunRequestEntry'
 import { useMeasuredNodeHandles } from './useMeasuredNodeHandles'
@@ -59,9 +59,8 @@ export const AgentNode = memo(function AgentNode({ id, data, selected }: NodePro
 
   return (
     <>
-      <NodeResizeHandles nodeId={id} visible={selected} disabled={mutationsDisabled} />
-      <article className={`canvas-node agent-node${pathHighlighted ? ' is-path' : ''}${runningLocked ? ' is-running-locked' : ''}`}>
-      <Handle
+      <NodeResizeHandles nodeId={id} visible={selected && !node.collapsed} disabled={mutationsDisabled} />
+      <article className={`canvas-node agent-node${pathHighlighted ? ' is-path' : ''}${runningLocked ? ' is-running-locked' : ''}${node.collapsed ? ' is-collapsed' : ''}`}>      <Handle
         id="agent-input"
         type="target"
         position={Position.Left}
@@ -76,9 +75,11 @@ export const AgentNode = memo(function AgentNode({ id, data, selected }: NodePro
         <strong title={node.title}>{node.title}</strong>
         <span className="canvas-node-status" role="status">{statusWithPending}</span>
         <NodeRunRequestEntry nodeId={node.id} nodeTitle={node.title} />
-        <NodeSizeControl node={node} disabled={mutationsDisabled} onApply={data.onSetNodeLayout} />
+        <PendingNodeEntry node={node} pendingIds={data.pendingResultIds ?? []} />
+        {!node.collapsed ? <NodeSizeControl node={node} disabled={mutationsDisabled} onApply={data.onSetNodeLayout} /> : null}
+        <NodeCollapseControl node={node} disabled={mutationsDisabled} onToggle={data.onSetNodeCollapsed} />
       </header>
-      <div className="canvas-node-content agent-node-content nowheel">
+      <div id={`node-content-${node.id}`} className="canvas-node-content agent-node-content nowheel" hidden={Boolean(node.collapsed)}>
         <p className="canvas-node-hint">按当前路径启动一次本地运行。</p>
         <p className="agent-output-summary"><span>输出契约</span>{outputSummary}</p>
         {!outputScript ? (
@@ -102,7 +103,6 @@ export const AgentNode = memo(function AgentNode({ id, data, selected }: NodePro
         >
           {starting ? '正在启动…' : globalRunBusy ? '已有运行' : !hasParent ? '先连接提示词' : node.locked ? '节点已锁定' : '运行本地 Agent'}
         </button>
-        <PendingNodeEntry node={node} pendingIds={data.pendingResultIds ?? []} />
       </div>
       {node.parent ? (
         <Handle

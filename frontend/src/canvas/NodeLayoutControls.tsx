@@ -40,6 +40,30 @@ export function NodeResizeHandles({ nodeId, visible, disabled }: NodeResizeHandl
   )
 }
 
+type NodeCollapseControlProps = {
+  node: Node
+  disabled: boolean
+  onToggle?: (nodeId: string, collapsed: boolean) => void
+}
+
+export function NodeCollapseControl({ node, disabled, onToggle }: NodeCollapseControlProps) {
+  const collapsed = Boolean(node.collapsed)
+  return (
+    <button
+      type="button"
+      className="canvas-node-collapse-trigger nodrag nopan nowheel"
+      aria-label={`${collapsed ? '展开' : '折叠'} ${node.title} 正文`}
+      aria-controls={`node-content-${node.id}`}
+      aria-expanded={!collapsed}
+      disabled={disabled || !onToggle}
+      title={collapsed ? '展开节点正文' : '折叠节点正文'}
+      onClick={() => onToggle?.(node.id, !collapsed)}
+    >
+      {collapsed ? '⌄' : '⌃'}
+    </button>
+  )
+}
+
 type NodeSizeControlProps = {
   node: Node
   disabled: boolean

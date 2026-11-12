@@ -35,6 +35,7 @@ export interface Node {
     "scriptVersions"?: ScriptVersion[] | null;
     "position": Position;
     "size": NodeSize;
+    "collapsed"?: boolean;
     "params": NodeParams;
     "rounds": Round[] | null;
     "locked": boolean;

@@ -151,6 +151,23 @@ func TestWorkflowHandlerAddMoveUpdateSelect(t *testing.T) {
 		t.Fatalf("layout receipt = %+v", layout)
 	}
 
+	collapsed, err := h.SetNodeCollapsed(promptID, true, topicReceipt.ProjectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	view, err = h.service.WorkspaceView(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, node := range view.Project.Nodes {
+		if node.ID == promptID && !node.Collapsed {
+			t.Fatalf("collapsed prompt = %+v", node)
+		}
+	}
+	if collapsed.NodeID != promptID || collapsed.ProjectRevision <= layout.ProjectRevision {
+		t.Fatalf("collapsed receipt = %+v", collapsed)
+	}
+
 	updated, err := h.UpdateNodeParams(promptID, "新标题", entity.NodeParams{
 		Instruction: "写脚本", OutputKind: valueobject.OutputKindScript,
 	}, topicReceipt.ProjectID)

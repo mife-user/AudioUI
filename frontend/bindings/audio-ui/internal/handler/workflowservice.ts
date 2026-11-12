@@ -53,6 +53,10 @@ export function SelectNode(id: string, projectID: string): $CancellablePromise<e
     return $Call.ByID(2386440799, id, projectID);
 }
 
+export function SetNodeCollapsed(id: string, collapsed: boolean, projectID: string): $CancellablePromise<entity$0.GraphMutationReceipt> {
+    return $Call.ByID(3885265382, id, collapsed, projectID);
+}
+
 export function SetNodeLayout(id: string, x: number, y: number, width: number, height: number, projectID: string): $CancellablePromise<entity$0.GraphMutationReceipt> {
     return $Call.ByID(329130311, id, x, y, width, height, projectID);
 }

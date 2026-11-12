@@ -105,6 +105,7 @@ type Node struct {
 	ScriptVersions  []ScriptVersion      `json:"scriptVersions,omitempty"`
 	Position        Position             `json:"position"`
 	Size            NodeSize             `json:"size"`
+	Collapsed       bool                 `json:"collapsed,omitempty"`
 	Params          NodeParams           `json:"params"`
 	Rounds          []Round              `json:"rounds"`
 	Locked          bool                 `json:"locked"`

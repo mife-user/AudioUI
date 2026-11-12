@@ -48,6 +48,19 @@ describe('flowModel', () => {
     ])
   })
 
+  it('uses a compact display height without overwriting persisted node dimensions', () => {
+    const expanded = makeNode('n_topic', 'topic', '', { size: { width: 360, height: 280 } })
+    const collapsed = { ...expanded, collapsed: true }
+    const expandedFlowNode = buildFlowModel(snapshot([expanded]), vi.fn()).nodes[0]
+    const collapsedFlowNode = buildFlowModel(snapshot([collapsed]), vi.fn()).nodes[0]
+
+    expect(expandedFlowNode?.style).toEqual({ width: 360, height: 280 })
+    expect(collapsedFlowNode?.style).toEqual({ width: 360, height: 56 })
+    expect(collapsedFlowNode?.data.node.size).toEqual({ width: 360, height: 280 })
+    expect(nodeHandleLayoutKey(expandedFlowNode!.type, expandedFlowNode!.data))
+      .not.toBe(nodeHandleLayoutKey(collapsedFlowNode!.type, collapsedFlowNode!.data))
+  })
+
   it('derives all v2 edges and handles from authoritative node relationships', () => {
     const topic = makeNode('n_topic', 'topic')
     const candidate = makeNode('n_candidate', 'candidate', topic.id, {

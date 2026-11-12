@@ -17,7 +17,7 @@ import type { GraphMutationReceipt, Node, NodeParams, RunStartResult, WorkspaceS
 import { startRun as startRunAPI } from '../api/runs'
 import { graphAPI, type GraphAPI, type TopicCandidateFixture } from './graphApi'
 import { allocateNodePosition, NODE_LAYOUT_GAP } from './nodePosition'
-import { buildFlowEdges, buildFlowModel, inputHandleId, nodeMap, outputHandleId, subtreeSize, topicRootId, type CanvasFlowNode, type ChildNodeType } from './flowModel'
+import { COLLAPSED_NODE_HEIGHT, buildFlowEdges, buildFlowModel, inputHandleId, nodeMap, outputHandleId, subtreeSize, topicRootId, type CanvasFlowNode, type ChildNodeType } from './flowModel'
 import { preserveCanvasNodeViewState } from './nodeState'
 import { type NodeLocator } from '../hooks/runRequests'
 import { CanvasEdge } from './CanvasEdge'
@@ -211,6 +211,8 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFl
   const lastPersistedSizes = useRef(new Map<string, { width: number; height: number }>())
   const pendingPositions = useRef(new Map<string, PendingPosition>())
   const pendingLayouts = useRef(new Map<string, PendingLayout>())
+  const pendingCollapsed = useRef(new Map<string, boolean>())
+  const collapsingNodes = useRef(new Set<string>())
   const initialFit = useRef({ projectId: '', shouldFit: false, done: false })
   const createRequestId = useRef(0)
   const [nodes, setNodes] = useState<CanvasFlowNode[]>([])
@@ -474,6 +476,47 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFl
     void saveNodeLayout(nodeId, layout.x, layout.y, layout.width, layout.height)
   }, [projectId, saveNodeLayout])
 
+  const applyNodeCollapsed = useCallback(async (nodeId: string, collapsed: boolean) => {
+    if (!projectId || currentProjectId.current !== projectId || mutationBlockedRef.current) return
+    const ownerProjectId = projectId
+    const key = `${ownerProjectId}:${nodeId}`
+    if (collapsingNodes.current.has(key)) return
+    const node = flowRef.current.getNode(nodeId)
+    if (!node || Boolean(node.data.node.collapsed) === collapsed) return
+    collapsingNodes.current.add(key)
+    pendingCollapsed.current.set(key, collapsed)
+    setNodes((current) => current.map((flowNode) => flowNode.id === nodeId
+      ? {
+          ...flowNode,
+          data: { ...flowNode.data, node: { ...flowNode.data.node, collapsed } },
+          style: { ...flowNode.style, height: collapsed ? COLLAPSED_NODE_HEIGHT : flowNode.data.node.size.height },
+        }
+      : flowNode))
+    try {
+      const receipt = await api.setNodeCollapsed(nodeId, collapsed, ownerProjectId)
+      if (currentProjectId.current !== ownerProjectId) return
+      if (receipt.projectId !== ownerProjectId) throw new Error('节点折叠回执所属工程不一致。')
+      await syncMutation(receipt, '节点折叠状态')
+    } catch (failure) {
+      if (currentProjectId.current !== ownerProjectId || pendingCollapsed.current.get(key) !== collapsed) return
+      pendingCollapsed.current.delete(key)
+      const storedNode = graphNodes.find((candidate) => candidate.id === nodeId)
+      const restoredCollapsed = Boolean(storedNode?.collapsed)
+      const pendingLayout = pendingLayouts.current.get(key)
+      const expandedHeight = pendingLayout?.height ?? storedNode?.size.height ?? node.data.node.size.height
+      setNodes((current) => current.map((flowNode) => flowNode.id === nodeId
+        ? {
+            ...flowNode,
+            data: { ...flowNode.data, node: { ...flowNode.data.node, collapsed: restoredCollapsed } },
+            style: { ...flowNode.style, height: restoredCollapsed ? COLLAPSED_NODE_HEIGHT : expandedHeight },
+          }
+        : flowNode))
+      setError(`保存节点折叠状态失败：${errorMessage(failure)}`)
+    } finally {
+      collapsingNodes.current.delete(key)
+    }
+  }, [api, graphNodes, projectId, syncMutation])
+
   const selectCreatedNode = useCallback(async (nodeId: string) => {
     if (currentProjectId.current !== projectId) return
     try {
@@ -639,39 +682,61 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFl
       onRegisterTopicFlush: registerTopicFlush,
       onNodeHandlesMeasured,
       onSetNodeLayout: applyNodeLayout,
+      onSetNodeCollapsed: applyNodeCollapsed,
+      onLocateNode: locateNode,
     }),
-    [snapshot, addChild, candidateMap, candidateErrors, candidateLoading, mutationBlocked, paramsEditingDisabled, runSubmittingNodeId, saveNodeParams, startNodeRun, api.getScriptVersion, registerPromptFlush, registerTopicFlush, onNodeHandlesMeasured, applyNodeLayout],
+    [snapshot, addChild, candidateMap, candidateErrors, candidateLoading, mutationBlocked, paramsEditingDisabled, runSubmittingNodeId, saveNodeParams, startNodeRun, api.getScriptVersion, registerPromptFlush, registerTopicFlush, onNodeHandlesMeasured, applyNodeLayout, applyNodeCollapsed, locateNode],
   )
 
   useEffect(() => {
     setNodes((current) => preserveCanvasNodeViewState(model.nodes, current, projectId).map((node) => {
       const key = `${projectId}:${node.id}`
+      let nextNode = node
+      const collapsedOverride = pendingCollapsed.current.get(key)
+      if (collapsedOverride !== undefined) {
+        if (Boolean(node.data.node.collapsed) === collapsedOverride) {
+          pendingCollapsed.current.delete(key)
+        } else {
+          nextNode = {
+            ...node,
+            data: { ...node.data, node: { ...node.data.node, collapsed: collapsedOverride } },
+            style: {
+              ...node.style,
+              height: collapsedOverride ? COLLAPSED_NODE_HEIGHT : node.data.node.size.height,
+            },
+          }
+        }
+      }
       const pending = pendingPositions.current.get(key)
-      if (pending && pending.x === node.position.x && pending.y === node.position.y) {
+      if (pending && pending.x === nextNode.position.x && pending.y === nextNode.position.y) {
         pendingPositions.current.delete(key)
-        lastPersistedPositions.current.set(key, { ...node.position })
-        lastPersistedSizes.current.set(key, { ...node.data.node.size })
-        return node
+        lastPersistedPositions.current.set(key, { ...nextNode.position })
+        lastPersistedSizes.current.set(key, { ...nextNode.data.node.size })
+        return nextNode
       }
       const pendingLayout = pendingLayouts.current.get(key)
-      if (pendingLayout?.x === node.position.x && pendingLayout.y === node.position.y
-        && pendingLayout.width === node.style?.width && pendingLayout.height === node.style?.height) {
+      if (pendingLayout?.x === nextNode.position.x && pendingLayout.y === nextNode.position.y
+        && pendingLayout.width === nextNode.data.node.size.width && pendingLayout.height === nextNode.data.node.size.height) {
         pendingLayouts.current.delete(key)
-        lastPersistedPositions.current.set(key, { ...node.position })
-        lastPersistedSizes.current.set(key, { ...node.data.node.size })
-        return node
+        lastPersistedPositions.current.set(key, { ...nextNode.position })
+        lastPersistedSizes.current.set(key, { ...nextNode.data.node.size })
+        return nextNode
       }
       if (pendingLayout) {
         return {
-          ...node,
+          ...nextNode,
           position: { x: pendingLayout.x, y: pendingLayout.y },
-          style: { ...node.style, width: pendingLayout.width, height: pendingLayout.height },
+          style: {
+            ...nextNode.style,
+            width: pendingLayout.width,
+            height: nextNode.data.node.collapsed ? COLLAPSED_NODE_HEIGHT : pendingLayout.height,
+          },
         }
       }
-      if (pending) return { ...node, position: pending }
-      lastPersistedPositions.current.set(key, { ...node.position })
-      lastPersistedSizes.current.set(key, { ...node.data.node.size })
-      return node
+      if (pending) return { ...nextNode, position: pending }
+      lastPersistedPositions.current.set(key, { ...nextNode.position })
+      lastPersistedSizes.current.set(key, { ...nextNode.data.node.size })
+      return nextNode
     }))
   }, [model, projectId])
 
@@ -710,6 +775,10 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFl
     for (const key of pendingLayouts.current.keys()) {
       if (!key.startsWith(`${projectId}:`)) pendingLayouts.current.delete(key)
     }
+    for (const key of pendingCollapsed.current.keys()) {
+      if (!key.startsWith(`${projectId}:`)) pendingCollapsed.current.delete(key)
+    }
+    collapsingNodes.current.clear()
   }, [projectId])
 
   useEffect(() => () => {

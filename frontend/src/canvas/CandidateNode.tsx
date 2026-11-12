@@ -1,7 +1,7 @@
 import { memo } from 'react'
 import { Handle, Position, type NodeProps } from '@xyflow/react'
 import { nodeHandleLayoutKey, type CanvasFlowNode } from './flowModel'
-import { NodeResizeHandles, NodeSizeControl } from './NodeLayoutControls'
+import { NodeCollapseControl, NodeResizeHandles, NodeSizeControl } from './NodeLayoutControls'
 import { useMeasuredNodeHandles } from './useMeasuredNodeHandles'
 
 export const CandidateNode = memo(function CandidateNode({ id, data, selected }: NodeProps<CanvasFlowNode>) {
@@ -15,9 +15,8 @@ export const CandidateNode = memo(function CandidateNode({ id, data, selected }:
 
   return (
     <>
-      <NodeResizeHandles nodeId={id} visible={selected} disabled={mutationsDisabled} />
-      <article className={`canvas-node candidate-node${pathHighlighted ? ' is-path' : ''}${runningLocked ? ' is-running-locked' : ''}${node.stale ? ' is-stale' : ''}`}>
-      <Handle
+      <NodeResizeHandles nodeId={id} visible={selected && !node.collapsed} disabled={mutationsDisabled} />
+      <article className={`canvas-node candidate-node${pathHighlighted ? ' is-path' : ''}${runningLocked ? ' is-running-locked' : ''}${node.stale ? ' is-stale' : ''}${node.collapsed ? ' is-collapsed' : ''}`}>      <Handle
         id="candidate-input"
         type="target"
         position={Position.Left}
@@ -31,9 +30,10 @@ export const CandidateNode = memo(function CandidateNode({ id, data, selected }:
         <span className="canvas-node-kind candidate-kind">候选</span>
         <strong title={candidate?.title ?? node.title}>{candidate?.title ?? node.title}</strong>
         <span className="canvas-node-status">来源 #{sourceIndex + 1}</span>
-        <NodeSizeControl node={node} disabled={mutationsDisabled} onApply={data.onSetNodeLayout} />
+        {!node.collapsed ? <NodeSizeControl node={node} disabled={mutationsDisabled} onApply={data.onSetNodeLayout} /> : null}
+        <NodeCollapseControl node={node} disabled={mutationsDisabled} onToggle={data.onSetNodeCollapsed} />
       </header>
-      <div className="canvas-node-content candidate-node-content nowheel">
+      <div id={`node-content-${node.id}`} className="canvas-node-content candidate-node-content nowheel" hidden={Boolean(node.collapsed)}>
         {candidateError ? <p className="canvas-node-error" role="alert">候选读取失败：{candidateError}</p> : null}
         {candidateLoading ? <p className="canvas-node-hint" role="status">正在读取候选内容…</p> : null}
         {!candidateError && !candidateLoading && candidate ? (
