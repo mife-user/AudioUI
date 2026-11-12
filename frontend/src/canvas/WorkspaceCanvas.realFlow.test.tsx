@@ -177,6 +177,21 @@ describe('WorkspaceCanvas with real React Flow', () => {
     expect(await screen.findByRole('menu', { name: '新建节点' })).toBeInTheDocument()
   })
 
+  it('hides the resize outline while keeping edge and corner resize controls', async () => {
+    const { container } = render(
+      <WorkspaceCanvas snapshot={makeSnapshot()} onSelectNode={vi.fn().mockResolvedValue(undefined)} api={makeAPI()} />,
+    )
+    const topicWrapper = await waitFor(() => container.querySelector<HTMLElement>('.react-flow__node[data-id="n_topic"]')!)
+    const lines = [...topicWrapper.querySelectorAll<HTMLElement>('.react-flow__resize-control.line.canvas-node-resize-line')]
+    const handles = topicWrapper.querySelectorAll('.react-flow__resize-control.handle.canvas-node-resize-handle')
+
+    expect(lines).toHaveLength(4)
+    expect(handles).toHaveLength(4)
+    for (const line of lines) {
+      expect(line.style.borderColor).toBe('transparent')
+    }
+  })
+
   it('applies keyboard layout edits to a locked path and persists geometry atomically', async () => {
     const snapshot = makeSnapshot()
     snapshot.lockedNodeIds = ['n_topic', 'n_candidate', 'n_prompt', 'n_agent', 'n_script']

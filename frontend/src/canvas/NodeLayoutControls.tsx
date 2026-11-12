@@ -33,9 +33,9 @@ export function NodeResizeHandles({ nodeId, visible, disabled }: NodeResizeHandl
       minHeight={MIN_HEIGHT}
       maxWidth={MAX_WIDTH}
       maxHeight={MAX_HEIGHT}
-      color="var(--accent)"
       handleClassName="canvas-node-resize-handle"
       lineClassName="canvas-node-resize-line"
+      lineStyle={{ borderColor: 'transparent' }}
     />
   )
 }

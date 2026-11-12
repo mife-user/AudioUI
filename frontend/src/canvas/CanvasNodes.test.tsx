@@ -29,6 +29,7 @@ vi.mock('@xyflow/react', async () => {
       'data-min-height': props.minHeight,
       'data-max-width': props.maxWidth,
       'data-max-height': props.maxHeight,
+      'data-line-border-color': props.lineStyle?.borderColor,
     }),
     Position: { Left: 'left', Right: 'right', Top: 'top', Bottom: 'bottom' },
     useReactFlow: () => ({ getInternalNode: vi.fn() }),
@@ -138,6 +139,7 @@ describe('M2-12A canvas nodes', () => {
     render(renderNode(nodeValue, nodeData(nodeValue, { onSetNodeLayout }), true))
 
     expect(screen.getByTestId('resize-n_size')).toHaveAttribute('data-visible', 'true')
+    expect(screen.getByTestId('resize-n_size')).toHaveAttribute('data-line-border-color', 'transparent')
     expect(screen.getByTestId('resize-n_size')).toHaveAttribute('data-min-width', '200')
     expect(screen.getByTestId('resize-n_size')).toHaveAttribute('data-min-height', '140')
     expect(screen.getByTestId('resize-n_size')).toHaveAttribute('data-max-width', '1200')
