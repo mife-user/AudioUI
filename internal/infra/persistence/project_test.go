@@ -101,16 +101,18 @@ func TestProjectStorePersistedSchemaHasNoDerivedEdgesOrChains(t *testing.T) {
 	project.Nodes = append(project.Nodes,
 		entity.Node{
 			ID: "n_candidate", Type: valueobject.NodeTypeCandidate, Title: "候选", Size: entity.DefaultNodeSize(valueobject.NodeTypeCandidate),
-			Parent: "n_root", CandidateSource: &entity.CandidateSource{TopicNodeID: "n_root", ArtifactID: "sha256:x", Index: 0},
-			Rounds: []entity.Round{},
+			CandidateSource: &entity.CandidateSource{TopicNodeID: "n_root", ArtifactID: "sha256:x", Index: 0},
+			Rounds:          []entity.Round{},
 		},
 		entity.Node{
 			ID: "n_child", Type: valueobject.NodeTypePrompt, Title: "提示词",
-			Parent: "n_candidate", Params: entity.NodeParams{Instruction: "写脚本"},
+			Params: entity.NodeParams{Instruction: "写脚本"},
 			Size:   entity.DefaultNodeSize(valueobject.NodeTypePrompt),
 			Rounds: []entity.Round{},
 		},
 	)
+	linkNodes(&project, "n_root", "n_candidate")
+	linkNodes(&project, "n_candidate", "n_child")
 	if err := store.Create(context.Background(), project); err != nil {
 		t.Fatal(err)
 	}
@@ -122,7 +124,7 @@ func TestProjectStorePersistedSchemaHasNoDerivedEdgesOrChains(t *testing.T) {
 	if err := json.Unmarshal(data, &raw); err != nil {
 		t.Fatal(err)
 	}
-	for _, forbidden := range []string{"chains", "edges", "parentCandidate"} {
+	for _, forbidden := range []string{"chains", "parentCandidate"} {
 		if _, ok := raw[forbidden]; ok {
 			t.Fatalf("project.json contains derived field %q", forbidden)
 		}
@@ -130,6 +132,10 @@ func TestProjectStorePersistedSchemaHasNoDerivedEdgesOrChains(t *testing.T) {
 	persistedNodes, ok := raw["nodes"].([]any)
 	if !ok || len(persistedNodes) != 3 {
 		t.Fatalf("persisted nodes = %#v", raw["nodes"])
+	}
+	persistedEdges, ok := raw["edges"].([]any)
+	if !ok || len(persistedEdges) != 2 {
+		t.Fatalf("persisted edges = %#v", raw["edges"])
 	}
 	persistedSize, ok := persistedNodes[0].(map[string]any)["size"].(map[string]any)
 	if !ok || persistedSize["width"] != float64(entity.DefaultNodeSize(valueobject.NodeTypeTopic).Width) || persistedSize["height"] != float64(entity.DefaultNodeSize(valueobject.NodeTypeTopic).Height) {
@@ -140,8 +146,45 @@ func TestProjectStorePersistedSchemaHasNoDerivedEdgesOrChains(t *testing.T) {
 		t.Fatal(err)
 	}
 	child := loaded.Nodes[2]
-	if child.Parent != "n_candidate" || child.ParentCandidate != nil {
+	if child.Parent != "" || child.ParentCandidate != nil {
 		t.Fatalf("child = %+v", child)
+	}
+	if len(loaded.Edges) != 2 || loaded.Edges[1].SourceNodeID != "n_candidate" || loaded.Edges[1].TargetNodeID != "n_child" {
+		t.Fatalf("loaded edges = %+v", loaded.Edges)
+	}
+}
+
+func TestProjectStorePersistsMultipleUpstreamEdgesAndReopens(t *testing.T) {
+	layout := testLayout(t.TempDir())
+	store := NewProjectStore(layout)
+	project := sampleProject("p_test")
+	project.Nodes[0].Rounds = []entity.Round{{N: 1, Kind: valueobject.OutputKindTopics, ArtifactID: "sha256:topics"}}
+	project.Nodes = append(project.Nodes,
+		entity.Node{ID: "n_candidate", Type: valueobject.NodeTypeCandidate, Title: "候选", Size: entity.DefaultNodeSize(valueobject.NodeTypeCandidate), CandidateSource: &entity.CandidateSource{TopicNodeID: "n_root", ArtifactID: "sha256:topics", Index: 0}, Rounds: []entity.Round{}},
+		entity.Node{ID: "n_prompt", Type: valueobject.NodeTypePrompt, Title: "任务", Size: entity.DefaultNodeSize(valueobject.NodeTypePrompt), Rounds: []entity.Round{}},
+		entity.Node{ID: "n_agent", Type: valueobject.NodeTypeAgent, Title: "Agent", Size: entity.DefaultNodeSize(valueobject.NodeTypeAgent), Rounds: []entity.Round{}},
+		entity.Node{ID: "n_script", Type: valueobject.NodeTypeScript, Title: "脚本", Size: entity.DefaultNodeSize(valueobject.NodeTypeScript), Rounds: []entity.Round{}},
+	)
+	linkNodes(&project, "n_root", "n_candidate")
+	linkNodes(&project, "n_candidate", "n_prompt")
+	linkNodes(&project, "n_prompt", "n_agent")
+	linkNodes(&project, "n_script", "n_agent")
+	if err := store.Create(context.Background(), project); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := store.Load(context.Background(), "p_test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	graph, err := entity.NewGraph(&loaded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parents := graph.Parents("n_agent"); len(parents) != 2 || parents[0] != "n_prompt" || parents[1] != "n_script" {
+		t.Fatalf("reopened parents = %v", parents)
+	}
+	if edge, ok := graph.EdgeBetween("n_script", "n_prompt"); ok {
+		t.Fatalf("unexpected edge %+v", edge)
 	}
 }
 

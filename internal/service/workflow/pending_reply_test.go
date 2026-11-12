@@ -18,12 +18,12 @@ func TestSubmitTopicsReplyPlacesCandidatesAroundResizedNodes(t *testing.T) {
 		Version: valueobject.ProjectFileVersion, ID: "p_test", Name: "测试工程", Revision: 1, ActiveNodeID: "n_topic",
 		Nodes: []entity.Node{
 			{
-				ID: "n_topic", Type: valueobject.NodeTypeTopic, Title: "选题",
+				ID: "n_topic", Type: valueobject.NodeTypeTopic, Title: "选题", WorkspaceRootID: "n_topic",
 				Position: entity.Position{X: 0, Y: 0}, Size: topicSize,
 				Params: entity.NodeParams{Idea: "想法", CandidateCount: 3}, Rounds: []entity.Round{},
 			},
 			{
-				ID: "n_blocker", Type: valueobject.NodeTypeTopic, Title: "调整过的选题",
+				ID: "n_blocker", Type: valueobject.NodeTypeTopic, Title: "调整过的选题", WorkspaceRootID: "n_blocker",
 				Position: entity.Position{X: topicSize.Width + generatedNodeGap, Y: 0}, Size: blockerSize,
 				Params: entity.NodeParams{Idea: "其他想法", CandidateCount: 3}, Rounds: []entity.Round{},
 			},
@@ -380,11 +380,9 @@ func newBoundScriptReplyHarness(t *testing.T, versionCount int) *pendingHarness 
 	for i := range versions {
 		versions[i] = entity.ScriptVersion{N: i + 1, ArtifactID: fmt.Sprintf("sha256:existing-%d", i+1), RunID: fmt.Sprintf("r_existing_%d", i+1)}
 	}
-	project.Nodes = append(project.Nodes,
-		entity.Node{ID: "n_script", Type: valueobject.NodeTypeScript, Title: "脚本", Parent: "n_b", ScriptVersions: versions, Rounds: []entity.Round{}},
-		entity.Node{ID: "n_after_script", Type: valueobject.NodeTypePrompt, Title: "后续提示词", Parent: "n_script", Params: entity.NodeParams{Instruction: "后续任务"}, Rounds: []entity.Round{}},
-		entity.Node{ID: "n_after_agent", Type: valueobject.NodeTypeAgent, Title: "后续 Agent", Parent: "n_after_script", Rounds: []entity.Round{}},
-	)
+	appendNodeWithEdge(&project, entity.Node{ID: "n_script", Type: valueobject.NodeTypeScript, Title: "脚本", ScriptVersions: versions, Rounds: []entity.Round{}}, "n_b")
+	appendNodeWithEdge(&project, entity.Node{ID: "n_after_script", Type: valueobject.NodeTypePrompt, Title: "后续提示词", Params: entity.NodeParams{Instruction: "后续任务"}, Rounds: []entity.Round{}}, "n_script")
+	appendNodeWithEdge(&project, entity.Node{ID: "n_after_agent", Type: valueobject.NodeTypeAgent, Title: "后续 Agent", Rounds: []entity.Round{}}, "n_after_script")
 	return newPendingHarness(t, project)
 }
 

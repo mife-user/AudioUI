@@ -179,6 +179,7 @@ func (s *Service) SubmitRunReply(ctx context.Context, scope port.RunScope, kind 
 			}
 			nodeIDs := make([]string, len(candidates))
 			candidateNodes := make([]entity.Node, len(candidates))
+			candidateEdges := make([]entity.Edge, len(candidates))
 			candidateSize := entity.DefaultNodeSize(valueobject.NodeTypeCandidate)
 			topicID := target.ID
 			for index, candidate := range candidates {
@@ -187,6 +188,11 @@ func (s *Service) SubmitRunReply(ctx context.Context, scope port.RunScope, kind 
 					return err
 				}
 				nodeIDs[index] = id
+				edgeID, err := valueobject.NewID(valueobject.EdgeIDPrefix)
+				if err != nil {
+					return err
+				}
+				candidateEdges[index] = entity.Edge{ID: edgeID, SourceNodeID: topicID, TargetNodeID: id, Kind: entity.EdgeKindCandidateSource}
 				position := generatedNodePosition(append(append([]entity.Node(nil), project.Nodes...), candidateNodes[:index]...), entity.Position{
 					X: target.Position.X + target.Size.Width + generatedNodeGap,
 					Y: target.Position.Y + float64(index)*(candidateSize.Height+generatedNodeGap),
@@ -194,7 +200,7 @@ func (s *Service) SubmitRunReply(ctx context.Context, scope port.RunScope, kind 
 				candidateNodes[index] = entity.Node{
 					ID: id, Type: valueobject.NodeTypeCandidate,
 					Title:           generatedNodeTitle(candidate.Title, fmt.Sprintf("候选 %d", index+1)),
-					Parent:          topicID,
+					WorkspaceRootID: scope.TreeID,
 					CandidateSource: &entity.CandidateSource{TopicNodeID: topicID, ArtifactID: pending.ArtifactID, Index: index},
 					Position:        position,
 					Size:            candidateSize,
@@ -209,6 +215,7 @@ func (s *Service) SubmitRunReply(ctx context.Context, scope port.RunScope, kind 
 				PendingID: pending.ID, RunID: scope.RunID,
 			})
 			project.Nodes = append(project.Nodes, candidateNodes...)
+			project.Edges = append(project.Edges, candidateEdges...)
 			meta.NodeID = topicID
 		case valueobject.NodeTypeAgent:
 			if output == nil {
@@ -220,14 +227,21 @@ func (s *Service) SubmitRunReply(ctx context.Context, scope port.RunScope, kind 
 				if err != nil {
 					return fmt.Errorf("%w: %v", ErrPendingInvalid, err)
 				}
+				edgeID, err := valueobject.NewID(valueobject.EdgeIDPrefix)
+				if err != nil {
+					return err
+				}
 				project.Nodes = append(project.Nodes, entity.Node{
 					ID: id, Type: valueobject.NodeTypeScript, Title: generatedNodeTitle(title, "新脚本"),
-					Parent: target.ID, Position: generatedNodePosition(project.Nodes, entity.Position{
+					WorkspaceRootID: scope.TreeID, Position: generatedNodePosition(project.Nodes, entity.Position{
 						X: target.Position.X + target.Size.Width + generatedNodeGap,
 						Y: target.Position.Y,
 					}, valueobject.NodeTypeScript),
 					Size:           entity.DefaultNodeSize(valueobject.NodeTypeScript),
 					ScriptVersions: []entity.ScriptVersion{}, Rounds: []entity.Round{},
+				})
+				project.Edges = append(project.Edges, entity.Edge{
+					ID: edgeID, SourceNodeID: target.ID, TargetNodeID: id, Kind: entity.EdgeKindConnection,
 				})
 				output = &project.Nodes[len(project.Nodes)-1]
 				pending.CreatedNodeIDs = []string{id}
@@ -354,10 +368,18 @@ func validateRunSnapshotGraph(graph *entity.Graph, snapshot entity.RunExecutionS
 	if err != nil || !slices.Equal(path, snapshot.ChainPath) {
 		return port.ErrChainScopeDenied
 	}
+	if snapshot.ProjectVersion >= valueobject.DAGProjectVersion {
+		for _, frozen := range snapshot.PathEdges {
+			live, ok := graph.Edge(frozen.ID)
+			if !ok || live != frozen {
+				return port.ErrChainScopeDenied
+			}
+		}
+	}
 	for _, frozen := range snapshot.PathNodes {
 		live, ok := graph.Node(frozen.ID)
 		if !ok || live.Type != frozen.Type || live.Title != frozen.Title || live.Parent != frozen.Parent ||
-			live.Locked != frozen.Locked || live.Stale != frozen.Stale ||
+			live.WorkspaceRootID != frozen.WorkspaceRootID || live.Locked != frozen.Locked || live.Stale != frozen.Stale ||
 			!reflect.DeepEqual(live.ParentCandidate, frozen.ParentCandidate) ||
 			!reflect.DeepEqual(live.CandidateSource, frozen.CandidateSource) ||
 			!reflect.DeepEqual(live.Params, frozen.Params) || !slices.Equal(live.Rounds, frozen.Rounds) ||
@@ -390,6 +412,10 @@ func validateSnapshotOutputBinding(graph *entity.Graph, target *entity.Node, sna
 		return nil, ErrOutputBindingConflict
 	}
 	output := scriptChildren[0]
+	if snapshot.ProjectVersion >= valueobject.DAGProjectVersion &&
+		(len(graph.Incoming(output.ID)) != 1 || (output.WorkspaceRootID != "" && output.WorkspaceRootID != snapshot.TreeID)) {
+		return nil, ErrOutputBindingConflict
+	}
 	if len(output.ScriptVersions) != binding.BaselineVersion {
 		return nil, ErrOutputVersionConflict
 	}
@@ -784,7 +810,16 @@ func (s *Service) applyScriptOutputPending(ctx context.Context, access port.Proj
 		return entity.Project{}, ErrOutputBindingConflict
 	}
 	output, err := requireNode(graph, binding.NodeID, "Script")
-	if err != nil || output.Type != valueobject.NodeTypeScript || output.Parent != agent.ID {
+	if err != nil || output.Type != valueobject.NodeTypeScript {
+		return entity.Project{}, ErrOutputBindingConflict
+	}
+	if project.Version >= valueobject.DAGProjectVersion {
+		if _, err := validateSnapshotOutputBinding(graph, agent, entity.RunExecutionSnapshot{
+			ProjectVersion: project.Version, TreeID: agent.WorkspaceRootID, OutputBinding: *binding,
+		}); err != nil {
+			return entity.Project{}, err
+		}
+	} else if output.Parent != agent.ID {
 		return entity.Project{}, ErrOutputBindingConflict
 	}
 	if s.isNodeLocked(agent.ID) || s.isNodeLocked(output.ID) {

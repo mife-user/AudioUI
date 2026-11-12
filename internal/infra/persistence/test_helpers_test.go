@@ -1,6 +1,7 @@
 package persistence
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -27,6 +28,18 @@ func testLayout(root string) valueobject.Layout {
 		ProjectsDir:  filepath.Join(dataDir, "projects"),
 		BackupDir:    filepath.Join(dataDir, "backup", "m1"),
 	}
+}
+
+func linkNodes(project *entity.Project, sourceID, targetID string) {
+	kind := entity.EdgeKindConnection
+	for i := range project.Nodes {
+		if project.Nodes[i].ID == targetID && project.Nodes[i].Type == valueobject.NodeTypeCandidate {
+			kind = entity.EdgeKindCandidateSource
+		}
+	}
+	project.Edges = append(project.Edges, entity.Edge{
+		ID: fmt.Sprintf("e_%s_%d", targetID, len(project.Edges)), SourceNodeID: sourceID, TargetNodeID: targetID, Kind: kind,
+	})
 }
 
 func sampleProject(id string) entity.Project {

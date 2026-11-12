@@ -137,7 +137,7 @@ func TestTopicRunAndCandidateProjectionWithControlledAgentDriver(t *testing.T) {
 		}
 	}
 	for _, node := range beforeApply.Nodes {
-		if node.Type == valueobject.NodeTypeCandidate && node.Parent == topicReceipt.NodeID {
+		if node.Type == valueobject.NodeTypeCandidate && node.CandidateSource != nil && node.CandidateSource.TopicNodeID == topicReceipt.NodeID {
 			generatedCandidateIDs[node.ID] = true
 			if node.Size != entity.DefaultNodeSize(valueobject.NodeTypeCandidate) {
 				t.Fatalf("generated candidate size = %+v", node.Size)
@@ -375,6 +375,26 @@ func findTopicClosurePending(t *testing.T, pending []entity.Pending, nodeID stri
 	return entity.Pending{}
 }
 
+func topicClosureHasEdge(project entity.Project, sourceID, targetID string) bool {
+	for _, edge := range project.Edges {
+		if edge.SourceNodeID == sourceID && edge.TargetNodeID == targetID {
+			return true
+		}
+	}
+	return false
+}
+
+func topicClosureEdgeID(t *testing.T, project entity.Project, sourceID, targetID string) string {
+	t.Helper()
+	for _, edge := range project.Edges {
+		if edge.SourceNodeID == sourceID && edge.TargetNodeID == targetID {
+			return edge.ID
+		}
+	}
+	t.Fatalf("no edge %s → %s in project %s", sourceID, targetID, project.ID)
+	return ""
+}
+
 func topicClosureNode(t *testing.T, project entity.Project, nodeID string) entity.Node {
 	t.Helper()
 	for _, node := range project.Nodes {
@@ -540,7 +560,7 @@ func TestLocalScriptClosureWithControlledAgentDriver(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, node := range current.Nodes {
-		if node.Type == valueobject.NodeTypeCandidate && node.Parent == topicID && node.CandidateSource != nil {
+		if node.Type == valueobject.NodeTypeCandidate && node.CandidateSource != nil && node.CandidateSource.TopicNodeID == topicID {
 			index := node.CandidateSource.Index
 			if index < 0 || index >= len(candidateIDs) || node.CandidateSource.ArtifactID == "" {
 				t.Fatalf("candidate provenance = %+v", node.CandidateSource)
@@ -566,8 +586,16 @@ func TestLocalScriptClosureWithControlledAgentDriver(t *testing.T) {
 	emptyScript := addNode(valueobject.NodeTypeScript, "预先指定脚本", agentEmpty, entity.NodeParams{})
 	promptInvalid := addNode(valueobject.NodeTypePrompt, "非法结果任务", candidateIDs[2], promptParams)
 	agentInvalid := addNode(valueobject.NodeTypeAgent, "非法结果 Agent", promptInvalid, entity.NodeParams{})
-	if _, err := workflowSetup.handler.Connect(candidateIDs[0], agentA, nil, false, project.ID); !errors.Is(err, workflow.ErrNodeConnectionInvalid) {
-		t.Fatalf("candidate-to-Agent connection error = %v, want NODE_CONNECTION_INVALID", err)
+	if _, err := workflowSetup.handler.Connect(candidateIDs[0], agentA, project.ID); err != nil {
+		t.Fatalf("candidate-to-Agent connection should be accepted: %v", err)
+	}
+	withExtraInput, err := projects.service.Current(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	extraEdgeID := topicClosureEdgeID(t, withExtraInput, candidateIDs[0], agentA)
+	if _, err := workflowSetup.handler.Disconnect(extraEdgeID, project.ID); err != nil {
+		t.Fatalf("disconnect extra input: %v", err)
 	}
 
 	if result := runs.Start(promptA, project.ID); result.Error == nil || result.Error.Code != "RUN_ENTRY_UNAVAILABLE" || manager.IsBusy() {
@@ -593,7 +621,7 @@ func TestLocalScriptClosureWithControlledAgentDriver(t *testing.T) {
 	}
 	firstOutputID := ""
 	for _, node := range current.Nodes {
-		if node.Type == valueobject.NodeTypeScript && node.Parent == agentA {
+		if node.Type == valueobject.NodeTypeScript && topicClosureHasEdge(current, agentA, node.ID) {
 			firstOutputID = node.ID
 		}
 	}
@@ -625,8 +653,12 @@ func TestLocalScriptClosureWithControlledAgentDriver(t *testing.T) {
 		t.Fatalf("specified empty Script versions = %+v", emptyOutput.ScriptVersions)
 	}
 
-	if _, err := workflowSetup.handler.Connect(candidateIDs[1], promptA, nil, true, project.ID); err != nil {
-		t.Fatalf("reparent Prompt from candidate A to B: %v", err)
+	reparentSource, err := projects.service.Current(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := workflowSetup.handler.ReplaceConnection(topicClosureEdgeID(t, reparentSource, candidateIDs[0], promptA), candidateIDs[1], project.ID); err != nil {
+		t.Fatalf("replace Prompt A input from candidate A to B: %v", err)
 	}
 	driver.queueReply(agentA, scriptClosureReply{
 		kind: valueobject.OutputKindScript, payload: []byte(validScriptBClosureFixture), requestID: "script-a-second",
@@ -707,7 +739,7 @@ func TestLocalScriptClosureWithControlledAgentDriver(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, node := range current.Nodes {
-		if node.Type == valueobject.NodeTypeScript && node.Parent == agentInvalid {
+		if node.Type == valueobject.NodeTypeScript && topicClosureHasEdge(current, agentInvalid, node.ID) {
 			t.Fatalf("invalid Script reply changed graph: %+v", node)
 		}
 	}

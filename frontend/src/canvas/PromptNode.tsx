@@ -7,11 +7,12 @@ import { useMeasuredNodeHandles } from './useMeasuredNodeHandles'
 
 export const PromptNode = memo(function PromptNode({ id, data, selected }: NodeProps<CanvasFlowNode>) {
   const { node, runningLocked, pathHighlighted, mutationsDisabled, projectId, onAddChild } = data
-  const requiredHandles = node.parent
-    ? [{ id: 'prompt-input', type: 'target' as const }, { id: 'prompt-output', type: 'source' as const }]
-    : [{ id: 'prompt-input', type: 'target' as const }]
+  const requiredHandles = [
+    { id: 'prompt-input', type: 'target' as const },
+    { id: 'prompt-output', type: 'source' as const },
+  ]
   useMeasuredNodeHandles(id, nodeHandleLayoutKey('prompt', data), projectId ?? '', requiredHandles, data.onNodeHandlesMeasured)
-  const isDraft = !node.parent
+  const isDraft = !data.hasInputs
   const disabled = runningLocked || node.locked || (data.paramsEditingDisabled ?? mutationsDisabled)
 
   return (
@@ -43,32 +44,26 @@ export const PromptNode = memo(function PromptNode({ id, data, selected }: NodeP
           onSave={data.onUpdateNodeParams ?? (async () => undefined)}
           onRegisterFlush={data.onRegisterPromptFlush}
         />
-        {!isDraft ? (
-          <button
-            type="button"
-            className="node-add-child nodrag"
-            disabled={runningLocked || mutationsDisabled}
-            onClick={() => onAddChild(node.id, 'agent')}
-            aria-label={`从 ${node.title} 新增 Agent`}
-          >
-            ＋ 新增 Agent
-          </button>
-        ) : (
-          <p className="canvas-node-hint">连接到候选或脚本节点后可添加 Agent。</p>
-        )}
+        <button
+          type="button"
+          className="node-add-child nodrag"
+          disabled={runningLocked || mutationsDisabled}
+          onClick={() => onAddChild(node.id, 'agent')}
+          aria-label={`从 ${node.title} 新增 Agent`}
+        >
+          ＋ 新增 Agent
+        </button>
       </div>
-      {node.parent ? (
-        <Handle
-          id="prompt-output"
-          type="source"
-          position={Position.Right}
-          isConnectable={!runningLocked}
-          isConnectableStart={!runningLocked}
-          isConnectableEnd={false}
-          aria-label={`${node.title} 输出端口`}
-          className="node-output-handle prompt-output-handle"
-        />
-      ) : null}
+      <Handle
+        id="prompt-output"
+        type="source"
+        position={Position.Right}
+        isConnectable={!runningLocked}
+        isConnectableStart={!runningLocked}
+        isConnectableEnd={false}
+        aria-label={`${node.title} 输出端口`}
+        className="node-output-handle prompt-output-handle"
+      />
       </article>
     </>
   )

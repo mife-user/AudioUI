@@ -29,7 +29,7 @@ function workspaceResult(projectId: string | null, revision: number, runs: Works
     revision,
     snapshot: {
       project: projectId ? { id: projectId, name: projectId, revision: 5, activeNodeId: '' } : null,
-      nodes: [], pending: [], runs, chains: [], lockedNodeIds: [],
+      nodes: [], edges: [], nodePaths: {}, pending: [], runs, chains: [], lockedNodeIds: [],
     },
   }
 }

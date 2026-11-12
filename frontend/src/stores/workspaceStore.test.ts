@@ -6,7 +6,7 @@ function result(revision: number, projectId: string | null) {
     revision,
     snapshot: {
       project: projectId ? { id: projectId, name: projectId, revision, activeNodeId: '' } : null,
-      nodes: [], pending: [], runs: [], chains: [], lockedNodeIds: [],
+      nodes: [], edges: [], nodePaths: {}, pending: [], runs: [], chains: [], lockedNodeIds: [],
     },
   }
 }

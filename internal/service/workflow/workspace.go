@@ -12,6 +12,7 @@ import (
 // snapshot. It contains only pending index entries, never pending payloads.
 type WorkspaceView struct {
 	Project       entity.Project
+	NodePaths     map[string][]string
 	Pending       []entity.Pending
 	Chains        []entity.Chain
 	RunLocks      []entity.WorkspaceRunLock
@@ -51,6 +52,13 @@ func (s *Service) WorkspaceView(ctx context.Context) (WorkspaceView, error) {
 	chains := graph.LeafChains()
 	for i := range chains {
 		chains[i].Path = append([]string(nil), chains[i].Path...)
+		chains[i].NodeIDs = append([]string(nil), chains[i].NodeIDs...)
+	}
+	nodePaths := make(map[string][]string, len(project.Nodes))
+	for _, node := range project.Nodes {
+		if path, err := graph.PathToRoot(node.ID); err == nil {
+			nodePaths[node.ID] = path
+		}
 	}
 	runLocks := make([]entity.WorkspaceRunLock, 0)
 	for _, lock := range s.locks {
@@ -64,7 +72,7 @@ func (s *Service) WorkspaceView(ctx context.Context) (WorkspaceView, error) {
 	}
 	sort.Slice(runLocks, func(i, j int) bool { return runLocks[i].RunID < runLocks[j].RunID })
 	return WorkspaceView{
-		Project: project.Clone(), Pending: pending, Chains: chains, RunLocks: runLocks,
+		Project: project.Clone(), NodePaths: nodePaths, Pending: pending, Chains: chains, RunLocks: runLocks,
 		LockedNodeIDs: s.lockedNodeIDsLocked(project.ID),
 	}, nil
 }

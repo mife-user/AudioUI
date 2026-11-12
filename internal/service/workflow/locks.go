@@ -99,14 +99,11 @@ func (s *Service) BeginRun(ctx context.Context, runID, nodeID string, expectedPr
 	if err := validateRunEntry(node); err != nil {
 		return entity.Project{}, entity.RunExecutionSnapshot{}, err
 	}
-	root, err := chainRoot(graph, nodeID)
-	if err != nil {
-		return entity.Project{}, entity.RunExecutionSnapshot{}, err
-	}
 	snapshot, err := graph.SnapshotForRun(nodeID)
 	if err != nil {
 		return entity.Project{}, entity.RunExecutionSnapshot{}, err
 	}
+	root := snapshot.TreeID
 	chainPath := snapshot.ChainPath
 	if err := validateRunPath(graph, root, nodeID, chainPath); err != nil {
 		return entity.Project{}, entity.RunExecutionSnapshot{}, err

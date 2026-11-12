@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AudioUI · U14 连接过渡方案</title>
+  <style>
+    :root{color-scheme:dark;--bg:#0a0f12;--panel:#142126;--panel-alt:#0f191e;--raised:#1a2a30;--text:#e6eef0;--muted:#a0b3b8;--accent:#66d0de;--line:#29414a;--warn:#e6bd7e;--ok:#85d9ac}
+    *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.6 "Segoe UI","Microsoft YaHei",sans-serif}button,select{font:inherit}button{color:inherit;cursor:pointer}button:disabled{cursor:not-allowed;opacity:.55}button:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:3px}[hidden]{display:none!important}
+    header{display:flex;align-items:center;gap:16px;padding:17px 24px;border-bottom:1px solid var(--line);background:var(--panel-alt)}header strong{color:var(--accent);letter-spacing:.12em}header span:last-child{margin-left:auto;color:var(--warn);font-size:12px}
+    main{max-width:1180px;margin:0 auto;padding:30px 24px 48px}.eyebrow{color:var(--accent);font-size:11px;font-weight:700;letter-spacing:.14em}h1{margin:5px 0;font-size:24px}h2{margin:0;font-size:16px}p{margin:8px 0;color:var(--muted)}.intro{max-width:750px;margin-bottom:24px}.layout{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(300px,1fr);gap:16px}.panel{min-width:0;padding:20px;border:1px solid var(--line);border-radius:12px;background:var(--panel)}.panel-heading{display:flex;justify-content:space-between;align-items:center;gap:12px}.badge{padding:3px 8px;border:1px solid var(--line);border-radius:999px;color:var(--muted);font-size:11px;white-space:nowrap}.node{margin:16px 0 0;padding:14px;border:1px solid var(--line);border-radius:9px;background:var(--panel-alt)}.node-title{display:flex;align-items:center;gap:9px}.kind{padding:3px 7px;border-radius:5px;background:var(--raised);color:var(--accent);font-size:11px;font-weight:700}.node-title strong{font-size:14px}.node small{display:block;margin-top:6px;color:var(--muted)}
+    .source{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 0;border-bottom:1px solid var(--line)}.source:first-child{padding-top:0}.source:last-child{border-bottom:0}.source strong,.source small{display:block}.source small{color:var(--muted);font-size:12px}.source-actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:6px}.sources{margin:16px 0;padding:4px 13px;border:1px solid var(--line);border-radius:8px;background:var(--panel-alt)}.control{display:flex;flex-wrap:wrap;align-items:end;gap:8px;margin-top:14px}label{display:grid;gap:5px;color:var(--muted);font-size:12px}select,button{padding:7px 10px;border:1px solid var(--line);border-radius:7px;background:var(--raised);color:var(--text)}button:hover:not(:disabled){border-color:var(--accent)}.primary{border-color:var(--accent);color:var(--accent)}.quiet{background:transparent}.notice{min-height:46px;margin-top:16px;padding:10px 12px;border-left:3px solid var(--accent);background:var(--panel-alt);color:var(--text)}.notice.warning{border-left-color:var(--warn)}.notice.good{border-left-color:var(--ok)}.divider{height:1px;margin:20px 0;background:var(--line)}.explain{margin-top:16px;padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--panel-alt)}.explain p{font-size:12px}.protected{color:var(--ok);font-size:12px}.foot{margin-top:16px;color:var(--muted);font-size:12px}
+    dialog{width:min(480px,calc(100vw - 32px));padding:22px;border:1px solid var(--line);border-radius:12px;background:var(--panel);color:var(--text)}dialog::backdrop{background:#000a}.dialog-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:18px}.dialog-message{color:var(--text)}
+    @media(max-width:760px){header{flex-wrap:wrap}header span:last-child{width:100%;margin-left:0}main{padding:22px 16px}.layout{grid-template-columns:1fr}.source{align-items:flex-start;flex-direction:column}.source-actions{justify-content:flex-start}}
+    @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}
+  </style>
+</head>
+<body>
+  <header><strong>AUDIOUI</strong><span>U14 · 连接与运行过渡</span><span>讨论稿 · 模拟数据 · 不连接工程或 Agent</span></header>
+  <main>
+    <div class="intro"><div class="eyebrow">CONNECTION / TRANSITION</div><h1>新增上游，不替换已有连接</h1><p>试试为同一个 Agent 增加输入、尝试运行，再通过单独的关系入口改挂或断开。断开入口及工作区安全策略尚待评审，不代表已纳入实现。</p></div>
+    <div class="layout">
+      <section class="panel" aria-labelledby="graph-title">
+        <div class="panel-heading"><h2 id="graph-title">模拟画布与当前输入</h2><span class="badge">仅示例，不是完整画布</span></div>
+        <div class="node"><div class="node-title"><span class="kind">来源</span><strong>选题 T → 候选 1 → 提示词 A</strong></div><small>候选 1 的生成来源固定于选题 T；普通连线不能改变该来源。</small><span class="protected">候选生成关系受保护</span></div>
+        <div class="node"><div class="node-title"><span class="kind">AGENT</span><strong>解说生成</strong></div><small>输入关系列表</small><div class="sources" id="sources"></div>
+          <div class="control"><label for="new-source">增加一个上游<select id="new-source"><option value="script">脚本 B</option><option value="prompt2">提示词 D</option></select></label><button class="primary" id="add" type="button">新增连接</button><button class="quiet" id="cycle" type="button">尝试反向成环</button></div>
+        </div>
+        <div id="connection-message" class="notice" role="status" aria-live="polite">当前是旧模型可运行的单路径示例。</div>
+        <div class="control"><button class="primary" id="run" type="button">模拟运行前检查</button><button class="quiet" id="reset" type="button">重置示例</button></div>
+      </section>
+      <aside class="panel" aria-labelledby="review-title">
+        <div class="panel-heading"><h2 id="review-title">需要评审的过渡边界</h2><span class="badge">方案提议</span></div>
+        <div class="explain"><strong>1 · 自由连接，运行分开判断</strong><p>节点可以先连接；U14 保留现有有效单路径运行。独立 Prompt → Agent、多上游或不符合旧契约的组合，在 U15 设计完成前明确提示，不能挑一条输入假装运行成功。</p></div>
+        <div class="explain"><strong>2 · 改挂与断开由用户明确操作</strong><p>新增连接保留原输入；改挂只替换所选普通边。建议另设“断开”入口，以便误连后恢复；它不会通过点击画布线条直接删除，也不能断开候选生成来源。</p></div>
+        <div class="explain"><strong>3 · 不猜测工作区</strong><p>若改挂或断开后涉及多根或共享节点，必须确认文件的实际归属；不能静默移动、覆盖、删除文件，也不能自动扩大读取权限。具体不安全场景将拒绝操作并提示。</p></div>
+        <div class="divider"></div><p>U14 不实现 U15 的多输入执行，也不实现 U16 的按边固定版本。旧单路径运行仍按现有规则选择脚本最新版本，并在发送时冻结。</p>
+      </aside>
+    </div>
+    <p class="foot">此文件是独立交互示意，不写入文件、不联网、不启动运行；边界及按钮样式均待评审。节点、连线与工作区安全由正式应用的 Go 命令层校验。</p>
+  </main>
+  <dialog id="confirm-dialog" aria-labelledby="confirm-title"><h2 id="confirm-title">确认修改输入关系</h2><p class="dialog-message" id="confirm-message"></p><p>这是独立操作；候选生成来源不会改变。实际应用还需检查运行锁和工作区归属。</p><div class="dialog-actions"><button id="cancel" type="button">取消</button><button id="confirm" class="primary" type="button">确认</button></div></dialog>
+  <script>
+    (() => {
+      const names = {prompt:'提示词 A',script:'脚本 B',prompt2:'提示词 D'}
+      const sources = document.getElementById('sources')
+      const message = document.getElementById('connection-message')
+      const select = document.getElementById('new-source')
+      const dialog = document.getElementById('confirm-dialog')
+      const dialogMessage = document.getElementById('confirm-message')
+      const confirmButton = document.getElementById('confirm')
+      let inputs = ['prompt']
+      let action = null
+      let returnFocus = null
+      function say(text, state = '') {
+        message.textContent = text
+        message.className = `notice${state ? ` ${state}` : ''}`
+      }
+      function ask(text, callback, trigger) {
+        action = callback
+        returnFocus = trigger
+        dialogMessage.textContent = text
+        dialog.showModal()
+        document.getElementById('cancel').focus()
+      }
+      function render() {
+        sources.replaceChildren()
+        if (!inputs.length) {
+          const empty = document.createElement('p')
+          empty.textContent = '暂无输入。'
+          sources.append(empty)
+          return
+        }
+        for (const input of inputs) {
+          const row = document.createElement('div')
+          row.className = 'source'
+          const text = document.createElement('div')
+          const title = document.createElement('strong')
+          title.textContent = `${names[input]} → 解说生成`
+          const detail = document.createElement('small')
+          detail.textContent = input === 'prompt' ? '原有单路径输入' : '普通输入关系'
+          text.append(title, detail)
+          const controls = document.createElement('div')
+          controls.className = 'source-actions'
+          const replace = document.createElement('button')
+          replace.type = 'button'
+          replace.textContent = '改挂'
+          replace.setAttribute('aria-label', `改挂 ${names[input]} 这条输入`)
+          replace.addEventListener('click', () => {
+            const next = select.value
+            if (inputs.includes(next)) { say(`${names[next]} 已连接；请选择尚未连接的来源。`, 'warning'); return }
+            ask(`将“${names[input]} → 解说生成”改为“${names[next]} → 解说生成”？其他输入保持不变。`, () => {
+              inputs = inputs.map(value => value === input ? next : value)
+              render(); say('已模拟改挂所选输入，其他输入未改变。', 'good')
+            }, replace)
+          })
+          const remove = document.createElement('button')
+          remove.type = 'button'
+          remove.textContent = '断开（提议）'
+          remove.setAttribute('aria-label', `断开 ${names[input]} 这条输入`)
+          remove.addEventListener('click', () => ask(`断开“${names[input]} → 解说生成”？其他输入和候选来源保持不变。`, () => {
+            inputs = inputs.filter(value => value !== input)
+            render(); say('已模拟断开所选输入；正式应用须先检查工作区归属。', 'good')
+          }, remove))
+          controls.append(replace, remove)
+          row.append(text, controls)
+          sources.append(row)
+        }
+      }
+      document.getElementById('add').addEventListener('click', () => {
+        const next = select.value
+        if (inputs.includes(next)) { say(`${names[next]} 已连接，没有重复创建。`, 'warning'); return }
+        inputs.push(next)
+        render(); say(`已模拟新增 ${names[next]}，原有输入仍然保留。`, 'good')
+      })
+      document.getElementById('cycle').addEventListener('click', () => say('模拟拒绝：该连接会形成环，已有关系没有改变。', 'warning'))
+      document.getElementById('run').addEventListener('click', () => {
+        if (inputs.length !== 1 || inputs[0] !== 'prompt') {
+          say('暂不运行：当前输入不是可确认的旧单路径。多上游或无 Topic 运行留待 U15；没有删除任何连接。', 'warning')
+        } else say('旧单路径示例可进入现有运行检查；此处没有真正发起运行。', 'good')
+      })
+      document.getElementById('reset').addEventListener('click', () => {
+        inputs = ['prompt']; select.value = 'script'; render(); say('已重置为旧单路径示例。')
+      })
+      document.getElementById('cancel').addEventListener('click', () => dialog.close())
+      confirmButton.addEventListener('click', () => { const pending = action; dialog.close(); pending?.() })
+      dialog.addEventListener('close', () => { action = null; if (returnFocus?.isConnected) returnFocus.focus() })
+      render()
+    })()
+  </script>
+</body>
+</html>

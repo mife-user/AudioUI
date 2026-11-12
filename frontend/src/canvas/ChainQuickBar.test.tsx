@@ -11,9 +11,9 @@ const nodes: Node[] = [
 ]
 
 const chains: WorkspaceChain[] = [
-  { id: 'c_n_agent_a', tailNodeId: 'n_agent_a', path: ['n_topic', 'n_candidate', 'n_shared', 'n_agent_a'], label: '分支甲', status: 'running' },
-  { id: 'c_n_agent_b', tailNodeId: 'n_agent_b', path: ['n_topic', 'n_candidate', 'n_shared', 'n_agent_b'], label: '分支乙', status: 'pending' },
-  { id: 'c_n_script_c', tailNodeId: 'n_script_c', path: ['n_topic', 'n_candidate', 'n_shared', 'n_script_c'], label: '分支丙', status: 'idle' },
+  { id: 'c_n_agent_a', tailNodeId: 'n_agent_a', path: ['n_topic', 'n_candidate', 'n_shared', 'n_agent_a'], nodeIds: ['n_topic', 'n_candidate', 'n_shared', 'n_agent_a'], ambiguous: false, label: '分支甲', status: 'running' },
+  { id: 'c_n_agent_b', tailNodeId: 'n_agent_b', path: ['n_topic', 'n_candidate', 'n_shared', 'n_agent_b'], nodeIds: ['n_topic', 'n_candidate', 'n_shared', 'n_agent_b'], ambiguous: false, label: '分支乙', status: 'pending' },
+  { id: 'c_n_script_c', tailNodeId: 'n_script_c', path: ['n_topic', 'n_candidate', 'n_shared', 'n_script_c'], nodeIds: ['n_topic', 'n_candidate', 'n_shared', 'n_script_c'], ambiguous: false, label: '分支丙', status: 'idle' },
 ]
 
 describe('ChainQuickBar', () => {
@@ -69,6 +69,17 @@ describe('ChainQuickBar', () => {
     rerender(<ChainQuickBar chains={chains} nodes={nodes} activeNodeId="n_shared" onSelectNode={vi.fn()} onCreateNode={onCreateNode} createNodeDisabled={false} />)
     fireEvent.click(screen.getByRole('button', { name: '＋ 新建节点' }))
     expect(onCreateNode).toHaveBeenCalledOnce()
+  })
+
+  it('shows a convergence as a set of upstream nodes rather than a fabricated chain', () => {
+    const convergence: WorkspaceChain = {
+      id: 'c_merge', tailNodeId: 'n_agent_a', path: [],
+      nodeIds: ['n_shared', 'n_script_c', 'n_agent_a'], ambiguous: true, label: '汇合', status: 'idle',
+    }
+    render(<ChainQuickBar chains={[convergence]} nodes={nodes} activeNodeId="n_agent_a" onSelectNode={vi.fn()} onCreateNode={vi.fn()} createNodeDisabled={false} />)
+    expect(screen.getByRole('button', { name: '选择叶子节点 汇合，空闲' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByText('多上游：共同提示词、脚本丙、Agent 甲')).toBeInTheDocument()
+    expect(screen.queryByText(/共同提示词 → 脚本丙/)).not.toBeInTheDocument()
   })
 
   it('shows an empty state when the authoritative snapshot has no leaf chains', () => {

@@ -12,14 +12,18 @@ var (
 	ErrGraphNodeNotFound     = errors.New("GRAPH_NODE_NOT_FOUND")
 	ErrNodeConnectionInvalid = errors.New("NODE_CONNECTION_INVALID")
 	ErrOutputBindingConflict = errors.New("OUTPUT_BINDING_CONFLICT")
+	ErrRunGraphUnsupported   = errors.New("RUN_GRAPH_UNSUPPORTED")
+	ErrWorkspaceRootMismatch = errors.New("WORKSPACE_ROOT_MISMATCH")
 )
 
-// Graph is a read-only view over a project's nodes. Edges are derived from
-// Parent; the graph never persists an edge list.
 type Graph struct {
 	project  *Project
 	nodes    map[string]*Node
 	children map[string][]string
+	parents  map[string][]string
+	incoming map[string][]Edge
+	outgoing map[string][]Edge
+	edges    map[string]Edge
 }
 
 func NewGraph(project *Project) (*Graph, error) {
@@ -30,6 +34,10 @@ func NewGraph(project *Project) (*Graph, error) {
 		project:  project,
 		nodes:    make(map[string]*Node, len(project.Nodes)),
 		children: make(map[string][]string, len(project.Nodes)),
+		parents:  make(map[string][]string, len(project.Nodes)),
+		incoming: make(map[string][]Edge, len(project.Nodes)),
+		outgoing: make(map[string][]Edge, len(project.Nodes)),
+		edges:    make(map[string]Edge, len(project.Edges)),
 	}
 	for i := range project.Nodes {
 		node := &project.Nodes[i]
@@ -38,11 +46,29 @@ func NewGraph(project *Project) (*Graph, error) {
 		}
 		graph.nodes[node.ID] = node
 	}
-	for i := range project.Nodes {
-		node := &project.Nodes[i]
-		if node.Parent != "" {
-			graph.children[node.Parent] = append(graph.children[node.Parent], node.ID)
+	edges := project.Edges
+	if project.Version < valueobject.DAGProjectVersion {
+		edges = make([]Edge, 0, len(project.Nodes))
+		for _, node := range project.Nodes {
+			if node.Parent == "" {
+				continue
+			}
+			kind := EdgeKindConnection
+			if node.Type == valueobject.NodeTypeCandidate && node.CandidateSource != nil && node.CandidateSource.TopicNodeID == node.Parent {
+				kind = EdgeKindCandidateSource
+			}
+			edges = append(edges, Edge{ID: "e_" + node.ID, SourceNodeID: node.Parent, TargetNodeID: node.ID, Kind: kind})
 		}
+	}
+	for _, edge := range edges {
+		if _, exists := graph.edges[edge.ID]; exists {
+			return nil, fmt.Errorf("%w: duplicate edge id %q", ErrGraphInvalid, edge.ID)
+		}
+		graph.edges[edge.ID] = edge
+		graph.children[edge.SourceNodeID] = append(graph.children[edge.SourceNodeID], edge.TargetNodeID)
+		graph.parents[edge.TargetNodeID] = append(graph.parents[edge.TargetNodeID], edge.SourceNodeID)
+		graph.incoming[edge.TargetNodeID] = append(graph.incoming[edge.TargetNodeID], edge)
+		graph.outgoing[edge.SourceNodeID] = append(graph.outgoing[edge.SourceNodeID], edge)
 	}
 	return graph, nil
 }
@@ -53,11 +79,11 @@ func (g *Graph) Node(id string) (*Node, bool) {
 }
 
 func (g *Graph) Parent(id string) (*Node, bool) {
-	node, ok := g.nodes[id]
-	if !ok || node.Parent == "" {
+	parents := g.parents[id]
+	if len(parents) != 1 {
 		return nil, false
 	}
-	parent, ok := g.nodes[node.Parent]
+	parent, ok := g.nodes[parents[0]]
 	return parent, ok
 }
 
@@ -65,7 +91,36 @@ func (g *Graph) Children(id string) []string {
 	return append([]string(nil), g.children[id]...)
 }
 
+func (g *Graph) Parents(id string) []string {
+	return append([]string(nil), g.parents[id]...)
+}
+
+func (g *Graph) Incoming(id string) []Edge {
+	return append([]Edge(nil), g.incoming[id]...)
+}
+
+func (g *Graph) Outgoing(id string) []Edge {
+	return append([]Edge(nil), g.outgoing[id]...)
+}
+
+func (g *Graph) Edge(id string) (Edge, bool) {
+	edge, ok := g.edges[id]
+	return edge, ok
+}
+
+func (g *Graph) EdgeBetween(sourceID, targetID string) (Edge, bool) {
+	for _, edge := range g.incoming[targetID] {
+		if edge.SourceNodeID == sourceID {
+			return edge, true
+		}
+	}
+	return Edge{}, false
+}
+
 func (g *Graph) SnapshotForRun(nodeID string) (RunExecutionSnapshot, error) {
+	if g.project.Version >= valueobject.DAGProjectVersion {
+		return g.snapshotDAGForRun(nodeID)
+	}
 	target, ok := g.Node(nodeID)
 	if !ok {
 		return RunExecutionSnapshot{}, fmt.Errorf("%w: %s", ErrGraphNodeNotFound, nodeID)
@@ -143,25 +198,118 @@ func (g *Graph) SnapshotForRun(nodeID string) (RunExecutionSnapshot, error) {
 	return snapshot, nil
 }
 
+func (g *Graph) snapshotDAGForRun(nodeID string) (RunExecutionSnapshot, error) {
+	target, ok := g.Node(nodeID)
+	if !ok {
+		return RunExecutionSnapshot{}, fmt.Errorf("%w: %s", ErrGraphNodeNotFound, nodeID)
+	}
+	path, err := g.PathToRoot(nodeID)
+	if err != nil {
+		return RunExecutionSnapshot{}, err
+	}
+	root, ok := g.Node(path[0])
+	if !ok || root.Type != valueobject.NodeTypeTopic {
+		return RunExecutionSnapshot{}, fmt.Errorf("%w: 无 Topic 的运行将在 U15 支持", ErrRunGraphUnsupported)
+	}
+	kind := valueobject.OutputKindTopics
+	switch target.Type {
+	case valueobject.NodeTypeTopic:
+	case valueobject.NodeTypeAgent:
+		kind = valueobject.OutputKindScript
+	default:
+		return RunExecutionSnapshot{}, fmt.Errorf("%w: %s", ErrNodeConnectionInvalid, target.Type)
+	}
+
+	snapshot := RunExecutionSnapshot{
+		Version: 2, ProjectVersion: g.project.Version, ProjectID: g.project.ID,
+		ProjectRevision: g.project.Revision, TreeID: root.ID, NodeID: target.ID,
+		ChainPath: append([]string(nil), path...), PathNodes: make([]Node, 0, len(path)),
+		PathEdges: make([]Edge, 0, len(path)-1), Artifacts: []RunArtifactReference{},
+		OutputContract: RunOutputContract{Kind: kind, SchemaVersion: 1},
+	}
+	for i, id := range path {
+		node, _ := g.Node(id)
+		if i > 0 {
+			parent, _ := g.Node(path[i-1])
+			if err := ValidateNodeConnection(*parent, *node); err != nil {
+				return RunExecutionSnapshot{}, fmt.Errorf("%w: %s → %s 不符合现有运行契约", ErrRunGraphUnsupported, parent.Title, node.Title)
+			}
+			snapshot.PathEdges = append(snapshot.PathEdges, g.incoming[id][0])
+		}
+		if node.WorkspaceRootID != "" && node.WorkspaceRootID != root.ID {
+			return RunExecutionSnapshot{}, fmt.Errorf("%w: 节点 %s 的工作区与当前路径不一致", ErrWorkspaceRootMismatch, id)
+		}
+		snapshot.PathNodes = append(snapshot.PathNodes, node.Clone())
+		if i == len(path)-1 {
+			continue
+		}
+		switch {
+		case node.Type == valueobject.NodeTypeCandidate && node.CandidateSource != nil:
+			index := node.CandidateSource.Index
+			snapshot.Artifacts = append(snapshot.Artifacts, RunArtifactReference{
+				NodeID: node.ID, ArtifactID: node.CandidateSource.ArtifactID,
+				Kind: valueobject.OutputKindTopics, CandidateIndex: &index,
+			})
+		case node.Type == valueobject.NodeTypeScript && len(node.ScriptVersions) > 0:
+			latest := node.ScriptVersions[len(node.ScriptVersions)-1]
+			snapshot.Artifacts = append(snapshot.Artifacts, RunArtifactReference{
+				NodeID: node.ID, ArtifactID: latest.ArtifactID,
+				Kind: valueobject.OutputKindScript, Version: latest.N,
+			})
+		}
+	}
+	if target.Type == valueobject.NodeTypeAgent {
+		var output *Node
+		for _, childID := range g.Children(target.ID) {
+			child, _ := g.Node(childID)
+			if child.Type != valueobject.NodeTypeScript {
+				continue
+			}
+			if output != nil {
+				return RunExecutionSnapshot{}, fmt.Errorf("%w: 存在多个 Script 输出，暂不能选择运行目标", ErrOutputBindingConflict)
+			}
+			output = child
+		}
+		if output != nil {
+			if len(g.incoming[output.ID]) != 1 || (output.WorkspaceRootID != "" && output.WorkspaceRootID != root.ID) {
+				return RunExecutionSnapshot{}, fmt.Errorf("%w: Script 输出有其他输入或工作区不匹配", ErrRunGraphUnsupported)
+			}
+			snapshot.OutputBinding = RunOutputBinding{Bound: true, NodeID: output.ID, ParentNodeID: target.ID}
+			if len(output.ScriptVersions) > 0 {
+				latest := output.ScriptVersions[len(output.ScriptVersions)-1]
+				snapshot.OutputBinding.BaselineVersion = latest.N
+				snapshot.OutputBinding.BaselineArtifactID = latest.ArtifactID
+			}
+		}
+	}
+	return snapshot, nil
+}
+
 // Subtree returns root followed by every descendant in project node order.
 func (g *Graph) Subtree(root string) ([]string, error) {
 	if _, ok := g.nodes[root]; !ok {
 		return nil, fmt.Errorf("%w: %s", ErrGraphNodeNotFound, root)
 	}
 	visited := make(map[string]bool, len(g.nodes))
+	active := make(map[string]bool, len(g.nodes))
 	result := make([]string, 0, len(g.nodes))
 	var walk func(string) error
 	walk = func(id string) error {
-		if visited[id] {
+		if active[id] {
 			return fmt.Errorf("%w: cycle at %s", ErrGraphInvalid, id)
 		}
+		if visited[id] {
+			return nil
+		}
 		visited[id] = true
+		active[id] = true
 		result = append(result, id)
 		for _, child := range g.children[id] {
 			if err := walk(child); err != nil {
 				return err
 			}
 		}
+		delete(active, id)
 		return nil
 	}
 	if err := walk(root); err != nil {
@@ -185,11 +333,14 @@ func (g *Graph) PathToRoot(id string) ([]string, error) {
 		}
 		visited[current] = true
 		path = append(path, current)
-		parent := g.nodes[current].Parent
-		if parent == "" {
+		parents := g.parents[current]
+		if len(parents) == 0 {
 			break
 		}
-		current = parent
+		if len(parents) > 1 {
+			return nil, fmt.Errorf("%w: 节点 %s 存在多个上游，运行将在 U15 支持", ErrRunGraphUnsupported, current)
+		}
+		current = parents[0]
 	}
 	for i, j := 0, len(path)-1; i < j; i, j = i+1, j-1 {
 		path[i], path[j] = path[j], path[i]
@@ -206,20 +357,28 @@ func (g *Graph) Root(id string) (string, error) {
 }
 
 func (g *Graph) IsAncestor(ancestor, node string) bool {
-	path, err := g.PathToRoot(node)
-	if err != nil {
-		return false
-	}
-	for _, id := range path[:len(path)-1] {
+	visited := make(map[string]bool)
+	pending := append([]string(nil), g.parents[node]...)
+	for len(pending) > 0 {
+		id := pending[len(pending)-1]
+		pending = pending[:len(pending)-1]
 		if id == ancestor {
 			return true
 		}
+		if visited[id] {
+			continue
+		}
+		visited[id] = true
+		pending = append(pending, g.parents[id]...)
 	}
 	return false
 }
 
 // Validate checks typed node connection and provenance rules.
 func (g *Graph) Validate() error {
+	if g.project.Version >= valueobject.DAGProjectVersion {
+		return g.validateDAG()
+	}
 	if err := g.ValidateForest(); err != nil {
 		return err
 	}
@@ -274,6 +433,117 @@ func (g *Graph) Validate() error {
 				return fmt.Errorf("%w: agent %s has multiple script outputs", ErrOutputBindingConflict, parent.ID)
 			}
 		}
+	}
+	return nil
+}
+
+func (g *Graph) validateDAG() error {
+	for _, node := range g.project.Nodes {
+		if err := valueobject.ValidateID(node.ID); err != nil {
+			return fmt.Errorf("%w: node id: %v", ErrGraphInvalid, err)
+		}
+		if !node.Type.Valid() {
+			return fmt.Errorf("%w: node %s has invalid type %q", ErrGraphInvalid, node.ID, node.Type)
+		}
+		if node.Parent != "" || node.ParentCandidate != nil {
+			return fmt.Errorf("%w: node %s contains a legacy parent", ErrGraphInvalid, node.ID)
+		}
+		if node.WorkspaceRootID != "" {
+			root, ok := g.Node(node.WorkspaceRootID)
+			if !ok || root.Type != valueobject.NodeTypeTopic {
+				return fmt.Errorf("%w: node %s has invalid workspace root", ErrGraphInvalid, node.ID)
+			}
+		}
+		if node.Type == valueobject.NodeTypeCandidate {
+			source := node.CandidateSource
+			if source == nil || source.ArtifactID == "" || source.Index < 0 {
+				return fmt.Errorf("%w: candidate %s has invalid source", ErrGraphInvalid, node.ID)
+			}
+			topic, ok := g.Node(source.TopicNodeID)
+			if !ok || topic.Type != valueobject.NodeTypeTopic {
+				return fmt.Errorf("%w: candidate %s has invalid source topic", ErrGraphInvalid, node.ID)
+			}
+			latest := Round{}
+			for _, round := range topic.Rounds {
+				if round.N > latest.N {
+					latest = round
+				}
+			}
+			if latest.Kind != valueobject.OutputKindTopics || latest.ArtifactID != source.ArtifactID {
+				return fmt.Errorf("%w: candidate %s artifact is not the topic result", ErrGraphInvalid, node.ID)
+			}
+		} else if node.CandidateSource != nil {
+			return fmt.Errorf("%w: non-candidate node %s has a candidate source", ErrGraphInvalid, node.ID)
+		}
+		if node.Type != valueobject.NodeTypeScript && len(node.ScriptVersions) != 0 {
+			return fmt.Errorf("%w: non-script node %s has script versions", ErrGraphInvalid, node.ID)
+		}
+		for i, version := range node.ScriptVersions {
+			if version.N != i+1 || version.ArtifactID == "" || version.RunID == "" {
+				return fmt.Errorf("%w: script node %s has invalid version %d", ErrGraphInvalid, node.ID, i+1)
+			}
+		}
+	}
+
+	type endpoints struct{ source, target string }
+	seenPairs := make(map[endpoints]bool, len(g.project.Edges))
+	candidateSources := make(map[string]int)
+	indegree := make(map[string]int, len(g.nodes))
+	for _, edge := range g.project.Edges {
+		if err := valueobject.ValidateID(edge.ID); err != nil {
+			return fmt.Errorf("%w: edge id: %v", ErrGraphInvalid, err)
+		}
+		source, sourceOK := g.Node(edge.SourceNodeID)
+		target, targetOK := g.Node(edge.TargetNodeID)
+		if !sourceOK || !targetOK {
+			return fmt.Errorf("%w: edge %s has a missing endpoint", ErrGraphInvalid, edge.ID)
+		}
+		if source.ID == target.ID {
+			return fmt.Errorf("%w: edge %s is a self connection", ErrGraphInvalid, edge.ID)
+		}
+		pair := endpoints{source.ID, target.ID}
+		if seenPairs[pair] {
+			return fmt.Errorf("%w: duplicate edge %s → %s", ErrGraphInvalid, source.ID, target.ID)
+		}
+		seenPairs[pair] = true
+		switch edge.Kind {
+		case EdgeKindConnection:
+		case EdgeKindCandidateSource:
+			if source.Type != valueobject.NodeTypeTopic || target.Type != valueobject.NodeTypeCandidate ||
+				target.CandidateSource == nil || target.CandidateSource.TopicNodeID != source.ID {
+				return fmt.Errorf("%w: edge %s has invalid candidate source", ErrGraphInvalid, edge.ID)
+			}
+			candidateSources[target.ID]++
+		default:
+			return fmt.Errorf("%w: edge %s has invalid kind %q", ErrGraphInvalid, edge.ID, edge.Kind)
+		}
+		indegree[target.ID]++
+	}
+	for _, node := range g.project.Nodes {
+		if node.Type == valueobject.NodeTypeCandidate && candidateSources[node.ID] != 1 {
+			return fmt.Errorf("%w: candidate %s must have exactly one source edge", ErrGraphInvalid, node.ID)
+		}
+	}
+	queue := make([]string, 0, len(g.nodes))
+	for _, node := range g.project.Nodes {
+		if indegree[node.ID] == 0 {
+			queue = append(queue, node.ID)
+		}
+	}
+	visited := 0
+	for len(queue) > 0 {
+		id := queue[0]
+		queue = queue[1:]
+		visited++
+		for _, childID := range g.children[id] {
+			indegree[childID]--
+			if indegree[childID] == 0 {
+				queue = append(queue, childID)
+			}
+		}
+	}
+	if visited != len(g.nodes) {
+		return fmt.Errorf("%w: graph contains a cycle", ErrGraphInvalid)
 	}
 	return nil
 }
@@ -343,35 +613,59 @@ func ValidateNodeConnection(parent, child Node) error {
 
 // LeafChains returns derived leaf paths in deterministic node order. Chains
 // are never persisted.
-func (g *Graph) LeafChains() []Chain {
-	tails := make([]string, 0, len(g.nodes))
+func (g *Graph) AncestorNodeIDs(id string) []string {
+	visited := make(map[string]bool)
+	pending := []string{id}
+	for len(pending) > 0 {
+		current := pending[len(pending)-1]
+		pending = pending[:len(pending)-1]
+		if visited[current] {
+			continue
+		}
+		visited[current] = true
+		pending = append(pending, g.parents[current]...)
+	}
+	result := make([]string, 0, len(visited))
 	for _, node := range g.project.Nodes {
-		if len(g.children[node.ID]) == 0 {
-			tails = append(tails, node.ID)
+		if visited[node.ID] {
+			result = append(result, node.ID)
 		}
 	}
-	chains := make([]Chain, 0, len(tails))
-	for _, tail := range tails {
-		path, err := g.PathToRoot(tail)
+	return result
+}
+
+func (g *Graph) LeafChains() []Chain {
+	chains := make([]Chain, 0, len(g.nodes))
+	for _, node := range g.project.Nodes {
+		if len(g.children[node.ID]) != 0 {
+			continue
+		}
+		path, err := g.PathToRoot(node.ID)
 		if err != nil {
+			if errors.Is(err, ErrRunGraphUnsupported) {
+				chains = append(chains, Chain{
+					ID: "c_" + node.ID, TailNodeID: node.ID,
+					NodeIDs: g.AncestorNodeIDs(node.ID), Ambiguous: true,
+				})
+			}
 			continue
 		}
 		root, ok := g.nodes[path[0]]
-		if !ok || root.Type != "topic" {
+		if !ok || len(path) == 1 && root.Type != valueobject.NodeTypeTopic {
 			continue
 		}
 		chains = append(chains, Chain{
-			ID:         "c_" + tail,
-			TailNodeID: tail,
-			Path:       path,
+			ID: "c_" + node.ID, TailNodeID: node.ID,
+			Path: path, NodeIDs: append([]string(nil), path...),
 		})
 	}
 	return chains
 }
 
-// Chain is a derived topic-root-to-leaf path.
 type Chain struct {
 	ID         string   `json:"id"`
 	TailNodeID string   `json:"tailNodeId"`
 	Path       []string `json:"path"`
+	NodeIDs    []string `json:"nodeIds"`
+	Ambiguous  bool     `json:"ambiguous"`
 }

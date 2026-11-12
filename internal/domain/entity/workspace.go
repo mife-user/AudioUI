@@ -54,6 +54,8 @@ type WorkspaceChain struct {
 	ID         string   `json:"id"`
 	TailNodeID string   `json:"tailNodeId"`
 	Path       []string `json:"path"`
+	NodeIDs    []string `json:"nodeIds"`
+	Ambiguous  bool     `json:"ambiguous"`
 	Label      string   `json:"label"`
 	Status     string   `json:"status"`
 }
@@ -63,6 +65,8 @@ type WorkspaceChain struct {
 type WorkspaceSnapshot struct {
 	Project       *WorkspaceProject     `json:"project"`
 	Nodes         []Node                `json:"nodes"`
+	Edges         []Edge                `json:"edges"`
+	NodePaths     map[string][]string   `json:"nodePaths"`
 	Pending       []PendingSummary      `json:"pending"`
 	Runs          []WorkspaceRunSummary `json:"runs"`
 	Chains        []WorkspaceChain      `json:"chains"`

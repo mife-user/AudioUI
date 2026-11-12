@@ -27,8 +27,10 @@ export function ChainQuickBar({ chains, nodes, activeNodeId, onSelectNode, onCre
   const selectedChain = chains.find((chain) => chain.tailNodeId === activeNodeId)
   const runningCount = chains.filter((chain) => chain.status === 'running').length
   const pendingCount = chains.filter((chain) => chain.status === 'pending').length
+  const hasConvergence = chains.some((chain) => chain.ambiguous)
+  const label = hasConvergence ? '叶子节点' : '叶子链'
   const summary = chains.length ? [
-    `${chains.length} 条叶子链`,
+    `${chains.length} ${hasConvergence ? '个叶子节点' : '条叶子链'}`,
     runningCount ? `${runningCount} 工作中` : '',
     pendingCount ? `${pendingCount} 待处理` : '',
   ].filter(Boolean).join(' · ') : '暂无叶子链'
@@ -40,7 +42,7 @@ export function ChainQuickBar({ chains, nodes, activeNodeId, onSelectNode, onCre
   }
 
   return (
-    <nav className={`chain-quickbar nodrag nopan${collapsed ? ' is-collapsed' : ''}`} aria-label="叶子链快捷栏">
+    <nav className={`chain-quickbar nodrag nopan${collapsed ? ' is-collapsed' : ''}`} aria-label={`${label}快捷栏`}>
       <button
         type="button"
         className="chain-quickbar-toggle"
@@ -48,15 +50,17 @@ export function ChainQuickBar({ chains, nodes, activeNodeId, onSelectNode, onCre
         aria-controls="chain-quickbar-list"
         onClick={toggleCollapsed}
       >
-        <span>叶子链</span>
+        <span>{label}</span>
         <strong>{collapsed ? summary || '暂无叶子链' : chains.length}</strong>
         <span className="chain-quickbar-toggle-label">{collapsed ? '展开' : '收起'}</span>
       </button>
       {chains.length ? (
         <ul className="chain-quickbar-list" id="chain-quickbar-list" hidden={collapsed}>
           {chains.map((chain) => {
-            const label = chain.label || titleByNodeId.get(chain.tailNodeId) || chain.tailNodeId
-            const pathLabel = (chain.path ?? []).map((nodeId) => titleByNodeId.get(nodeId) || nodeId).join(' → ')
+            const nodeLabel = chain.label || titleByNodeId.get(chain.tailNodeId) || chain.tailNodeId
+            const pathLabel = chain.ambiguous
+              ? `多上游：${(chain.nodeIds ?? []).map((nodeId) => titleByNodeId.get(nodeId) || nodeId).join('、')}`
+              : (chain.path ?? []).map((nodeId) => titleByNodeId.get(nodeId) || nodeId).join(' → ')
             const state = statusLabel(chain.status)
             return (
               <li key={chain.id}>
@@ -64,13 +68,13 @@ export function ChainQuickBar({ chains, nodes, activeNodeId, onSelectNode, onCre
                   type="button"
                   className={`chain-quickbar-item${chain.id === selectedChain?.id ? ' is-active' : ''}`}
                   aria-pressed={chain.id === selectedChain?.id}
-                  aria-label={`选择叶子链 ${label}，${state}`}
+                  aria-label={`选择${chain.ambiguous ? '叶子节点' : '叶子链'} ${nodeLabel}，${state}`}
                   title={pathLabel}
                   onClick={() => {
                     if (chain.tailNodeId !== activeNodeId) onSelectNode(chain.tailNodeId)
                   }}
                 >
-                  <strong>{label}</strong>
+                  <strong>{nodeLabel}</strong>
                   <span className="chain-quickbar-path">{pathLabel}</span>
                   <span className={`chain-quickbar-status is-${chain.status}`}>{state}</span>
                 </button>

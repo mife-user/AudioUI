@@ -11,6 +11,13 @@ export interface CandidateSource {
     "index": number;
 }
 
+export interface Edge {
+    "id": string;
+    "sourceNodeId": string;
+    "targetNodeId": string;
+    "kind": string;
+}
+
 /**
  * GraphMutationReceipt identifies the authoritative project revision produced
  * by a graph command. NodeID is the created node for AddNode, otherwise the
@@ -22,15 +29,13 @@ export interface GraphMutationReceipt {
     "nodeId": string;
 }
 
-/**
- * Node is one persisted graph node. Edges are derived from Parent.
- */
 export interface Node {
     "id": string;
     "type": valueobject$0.NodeType;
     "title": string;
     "parent"?: string;
     "parentCandidate"?: number | null;
+    "workspaceRootId"?: string;
     "candidateSource"?: CandidateSource | null;
     "scriptVersions"?: ScriptVersion[] | null;
     "position": Position;
@@ -137,6 +142,7 @@ export interface Project {
     "revision": number;
     "activeNodeId": string;
     "nodes": Node[] | null;
+    "edges": Edge[] | null;
 }
 
 /**
@@ -179,6 +185,7 @@ export interface RunExecutionSnapshot {
     "nodeId": string;
     "chainPath": string[] | null;
     "pathNodes": Node[] | null;
+    "pathEdges"?: Edge[] | null;
     "artifacts": RunArtifactReference[] | null;
     "outputBinding": RunOutputBinding;
     "outputContract": RunOutputContract;
@@ -313,6 +320,8 @@ export interface WorkspaceChain {
     "id": string;
     "tailNodeId": string;
     "path": string[] | null;
+    "nodeIds": string[] | null;
+    "ambiguous": boolean;
     "label": string;
     "status": string;
 }
@@ -351,6 +360,8 @@ export interface WorkspaceRunSummary {
 export interface WorkspaceSnapshot {
     "project": WorkspaceProject | null;
     "nodes": Node[] | null;
+    "edges": Edge[] | null;
+    "nodePaths": { [_ in string]?: string[] | null } | null;
     "pending": PendingSummary[] | null;
     "runs": WorkspaceRunSummary[] | null;
     "chains": WorkspaceChain[] | null;

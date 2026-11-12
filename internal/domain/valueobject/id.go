@@ -12,6 +12,7 @@ import (
 const (
 	ProjectIDPrefix = "p_"
 	NodeIDPrefix    = "n_"
+	EdgeIDPrefix    = "e_"
 	RunIDPrefix     = "r_"
 	PendingIDPrefix = "pa_"
 

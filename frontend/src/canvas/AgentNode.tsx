@@ -20,27 +20,29 @@ function runStatusLabel(status: string | undefined): string {
 }
 
 export const AgentNode = memo(function AgentNode({ id, data, selected }: NodeProps<CanvasFlowNode>) {
-  const { node, projectId, runningLocked, pathHighlighted, mutationsDisabled, globalRunBusy, runSubmitting, runStatus, pendingCount = 0, outputScript, onStartRun, onAddChild } = data
-  const requiredHandles = node.parent
-    ? [{ id: 'agent-input', type: 'target' as const }, { id: 'agent-output', type: 'source' as const }]
-    : [{ id: 'agent-input', type: 'target' as const }]
+  const { node, projectId, runningLocked, pathHighlighted, mutationsDisabled, globalRunBusy, runSubmitting, runStatus, pendingCount = 0, outputScript, outputAmbiguous, onStartRun, onAddChild } = data
+  const requiredHandles = [
+    { id: 'agent-input', type: 'target' as const },
+    { id: 'agent-output', type: 'source' as const },
+  ]
   useMeasuredNodeHandles(id, nodeHandleLayoutKey('agent', data), projectId ?? '', requiredHandles, data.onNodeHandlesMeasured)
   const [runFailure, setRunFailure] = useState<RunStartError | null>(null)
   const [starting, setStarting] = useState(false)
   const startInFlight = useRef(false)
-  const hasParent = Boolean(node.parent)
   const versions = outputScript?.scriptVersions ?? []
   const latestVersion = versions[versions.length - 1]
-  const outputSummary = outputScript
-    ? latestVersion ? `绑定 ${outputScript.title} · v${latestVersion.n}` : `绑定 ${outputScript.title} · 等待首个结果`
-    : '未指定输出 · 合法结果自动创建 Script'
+  const outputSummary = outputAmbiguous
+    ? '已连接多个或共享的 Script，暂不能确定输出目标'
+    : outputScript
+      ? latestVersion ? `绑定 ${outputScript.title} · v${latestVersion.n}` : `绑定 ${outputScript.title} · 等待首个结果`
+      : '未指定输出 · 合法结果自动创建 Script'
   const status = runningLocked
     ? `${runStatus === 'starting' ? '启动中' : '执行中'} · 只读`
     : starting || runSubmitting ? '正在启动' : runStatusLabel(runStatus)
   const statusWithPending = pendingCount > 0 ? `${status} · 待处理 ${pendingCount}` : status
 
   async function startRun() {
-    if (startInFlight.current || !hasParent || runningLocked || node.locked || globalRunBusy || mutationsDisabled) return
+    if (startInFlight.current || runningLocked || node.locked || globalRunBusy || mutationsDisabled) return
     startInFlight.current = true
     setStarting(true)
     setRunFailure(null)
@@ -55,7 +57,7 @@ export const AgentNode = memo(function AgentNode({ id, data, selected }: NodePro
     }
   }
 
-  const runDisabled = !hasParent || runningLocked || node.locked || mutationsDisabled || globalRunBusy || starting
+  const runDisabled = runningLocked || node.locked || mutationsDisabled || globalRunBusy || starting
 
   return (
     <>
@@ -80,9 +82,9 @@ export const AgentNode = memo(function AgentNode({ id, data, selected }: NodePro
         <NodeCollapseControl node={node} disabled={mutationsDisabled} onToggle={data.onSetNodeCollapsed} />
       </header>
       <div id={`node-content-${node.id}`} className="canvas-node-content agent-node-content nowheel" hidden={Boolean(node.collapsed)}>
-        <p className="canvas-node-hint">按当前路径启动一次本地运行。</p>
+        <p className="canvas-node-hint">运行前将校验输入与输出。</p>
         <p className="agent-output-summary"><span>输出契约</span>{outputSummary}</p>
-        {!outputScript ? (
+        {!outputScript && !outputAmbiguous ? (
           <button
             type="button"
             className="node-add-child nodrag"
@@ -101,21 +103,19 @@ export const AgentNode = memo(function AgentNode({ id, data, selected }: NodePro
           aria-describedby={runFailure ? `agent-run-error-${node.id}` : undefined}
           onClick={() => void startRun()}
         >
-          {starting ? '正在启动…' : globalRunBusy ? '已有运行' : !hasParent ? '先连接提示词' : node.locked ? '节点已锁定' : '运行本地 Agent'}
+          {starting ? '正在启动…' : globalRunBusy ? '已有运行' : node.locked ? '节点已锁定' : '运行本地 Agent'}
         </button>
       </div>
-      {node.parent ? (
-        <Handle
-          id="agent-output"
-          type="source"
-          position={Position.Right}
-          isConnectable={!runningLocked}
-          isConnectableStart={!runningLocked}
-          isConnectableEnd={false}
-          aria-label={`${node.title} 输出端口`}
-          className="node-output-handle"
-        />
-      ) : null}
+      <Handle
+        id="agent-output"
+        type="source"
+        position={Position.Right}
+        isConnectable={!runningLocked}
+        isConnectableStart={!runningLocked}
+        isConnectableEnd={false}
+        aria-label={`${node.title} 输出端口`}
+        className="node-output-handle"
+      />
       </article>
     </>
   )

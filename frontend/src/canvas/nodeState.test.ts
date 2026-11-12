@@ -33,6 +33,7 @@ function flowNode(
       node: graphNode(id, type),
       runningLocked: false,
       pathHighlighted: false,
+      hasInputs: false,
       topicCandidateIndexes: [],
       candidateNodeIds: {},
       candidates: [],

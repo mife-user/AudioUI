@@ -54,9 +54,10 @@ export const ScriptNode = memo(function ScriptNode({ id, data, selected }: NodeP
   const pendingController = usePendingControllerContext()
   const versions = node.scriptVersions ?? []
   const latestVersion = versions[versions.length - 1]
-  const requiredHandles = node.parent
-    ? [{ id: 'script-input', type: 'target' as const }, { id: 'script-output', type: 'source' as const }]
-    : [{ id: 'script-input', type: 'target' as const }]
+  const requiredHandles = [
+    { id: 'script-input', type: 'target' as const },
+    { id: 'script-output', type: 'source' as const },
+  ]
   useMeasuredNodeHandles(id, nodeHandleLayoutKey('script', data), projectId, requiredHandles, data.onNodeHandlesMeasured)
 
   const [reads, setReads] = useState<Record<string, ScriptReadState>>({})
@@ -170,7 +171,7 @@ export const ScriptNode = memo(function ScriptNode({ id, data, selected }: NodeP
           isConnectable={!runningLocked}
           isConnectableStart={false}
           isConnectableEnd={!runningLocked}
-          aria-hidden="true"
+          aria-label={`连接到 ${node.title}`}
           className="node-input-handle"
         />
         <header className="canvas-node-head">
@@ -254,30 +255,26 @@ export const ScriptNode = memo(function ScriptNode({ id, data, selected }: NodeP
           ) : (
             <p className="canvas-node-hint">等待绑定 Agent 的合法 script 结果。</p>
           )}
-          {node.parent ? (
-            <button
-              type="button"
-              className="node-add-child nodrag"
-              disabled={runningLocked || mutationsDisabled}
-              onClick={() => onAddChild(node.id, 'prompt')}
-              aria-label={`从 ${node.title} 新增提示词`}
-            >
-              ＋ 新增提示词
-            </button>
-          ) : null}
+          <button
+            type="button"
+            className="node-add-child nodrag"
+            disabled={runningLocked || mutationsDisabled}
+            onClick={() => onAddChild(node.id, 'prompt')}
+            aria-label={`从 ${node.title} 新增提示词`}
+          >
+            ＋ 新增提示词
+          </button>
         </div>
-        {node.parent ? (
-          <Handle
-            id="script-output"
-            type="source"
-            position={Position.Right}
-            isConnectable={!runningLocked}
-            isConnectableStart={!runningLocked}
-            isConnectableEnd={false}
-            aria-label={`${node.title} 输出端口`}
-            className="node-output-handle"
-          />
-        ) : null}
+        <Handle
+          id="script-output"
+          type="source"
+          position={Position.Right}
+          isConnectable={!runningLocked}
+          isConnectableStart={!runningLocked}
+          isConnectableEnd={false}
+          aria-label={`${node.title} 输出端口`}
+          className="node-output-handle"
+        />
       </article>
       {pendingOpen && activePending && pendingController && typeof document !== 'undefined' ? createPortal(
         <div className="script-pending-backdrop" role="presentation" onMouseDown={(event) => {

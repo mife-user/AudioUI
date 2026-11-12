@@ -87,7 +87,8 @@ func validateAppliedReplyGraph(project entity.Project, pending entity.Pending, a
 		indices := make(map[int]struct{}, len(pending.CreatedNodeIDs))
 		for _, id := range pending.CreatedNodeIDs {
 			node, ok := graph.Node(id)
-			if !ok || node.Type != valueobject.NodeTypeCandidate || node.Parent != target.ID || node.CandidateSource == nil ||
+			sourceEdge, hasSourceEdge := graph.EdgeBetween(target.ID, id)
+			if !ok || node.Type != valueobject.NodeTypeCandidate || !hasSourceEdge || sourceEdge.Kind != entity.EdgeKindCandidateSource || node.CandidateSource == nil ||
 				node.CandidateSource.TopicNodeID != target.ID || node.CandidateSource.ArtifactID != pending.ArtifactID ||
 				node.CandidateSource.Index < 0 || node.CandidateSource.Index >= len(output.Topics) {
 				return fmt.Errorf("candidate %s does not match topic result", id)
@@ -98,7 +99,13 @@ func validateAppliedReplyGraph(project entity.Project, pending entity.Pending, a
 			created[id] = struct{}{}
 			indices[node.CandidateSource.Index] = struct{}{}
 		}
-		if len(graph.Children(target.ID)) != len(created) || len(indices) != len(output.Topics) {
+		sourceCount := 0
+		for _, edge := range graph.Outgoing(target.ID) {
+			if edge.Kind == entity.EdgeKindCandidateSource {
+				sourceCount++
+			}
+		}
+		if sourceCount != len(created) || len(indices) != len(output.Topics) {
 			return fmt.Errorf("topic candidate set is incomplete")
 		}
 		for index := range output.Topics {
@@ -123,6 +130,10 @@ func validateAppliedReplyGraph(project entity.Project, pending entity.Pending, a
 	}
 	if output == nil || output.Stale {
 		return fmt.Errorf("Script output is missing or stale")
+	}
+	if project.Version >= valueobject.DAGProjectVersion &&
+		(len(graph.Incoming(output.ID)) != 1 || output.WorkspaceRootID != target.WorkspaceRootID) {
+		return fmt.Errorf("Script output scope is invalid")
 	}
 	if binding.Bound {
 		if binding.ParentNodeID != target.ID || binding.NodeID != pending.ResultNodeID || output.ID != binding.NodeID || len(pending.CreatedNodeIDs) != 0 {

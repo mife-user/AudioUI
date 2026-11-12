@@ -52,16 +52,63 @@ func requireNode(graph *entity.Graph, id, what string) (*entity.Node, error) {
 	return node, nil
 }
 
-func chainRoot(graph *entity.Graph, nodeID string) (string, error) {
+func compatibleTopicRoot(graph *entity.Graph, nodeID string) string {
 	path, err := graph.PathToRoot(nodeID)
 	if err != nil {
-		return "", fmt.Errorf("%w: %v", ErrNotInChain, err)
+		return ""
 	}
 	root, ok := graph.Node(path[0])
 	if !ok || root.Type != valueobject.NodeTypeTopic {
-		return "", fmt.Errorf("%w: %s", ErrNotInChain, nodeID)
+		return ""
 	}
-	return root.ID, nil
+	for i := 1; i < len(path); i++ {
+		parent, _ := graph.Node(path[i-1])
+		child, _ := graph.Node(path[i])
+		if entity.ValidateNodeConnection(*parent, *child) != nil {
+			return ""
+		}
+	}
+	return root.ID
+}
+
+func bindUnassignedWorkspaces(project *entity.Project) error {
+	graph, err := entity.NewGraph(project)
+	if err != nil {
+		return err
+	}
+	for i := range project.Nodes {
+		node := &project.Nodes[i]
+		if node.WorkspaceRootID != "" {
+			continue
+		}
+		path, err := graph.PathToRoot(node.ID)
+		if err != nil {
+			continue
+		}
+		root, ok := graph.Node(path[0])
+		if !ok || root.Type != valueobject.NodeTypeTopic {
+			continue
+		}
+		valid := true
+		for j, id := range path {
+			current, _ := graph.Node(id)
+			if current.WorkspaceRootID != "" && current.WorkspaceRootID != root.ID {
+				valid = false
+				break
+			}
+			if j > 0 {
+				parent, _ := graph.Node(path[j-1])
+				if entity.ValidateNodeConnection(*parent, *current) != nil {
+					valid = false
+					break
+				}
+			}
+		}
+		if valid {
+			node.WorkspaceRootID = root.ID
+		}
+	}
+	return nil
 }
 
 func markSubtreeStale(project *entity.Project, ids []string) {

@@ -20,11 +20,11 @@ export const CandidateNode = memo(function CandidateNode({ id, data, selected }:
         id="candidate-input"
         type="target"
         position={Position.Left}
-        isConnectable={false}
+        isConnectable={!runningLocked}
         isConnectableStart={false}
-        isConnectableEnd={false}
-        aria-hidden="true"
-        className="node-input-handle candidate-input-handle"
+        isConnectableEnd={!runningLocked}
+        aria-label={`连接到 ${candidate?.title ?? node.title}`}
+        className="node-input-handle"
       />
       <header className="canvas-node-head">
         <span className="canvas-node-kind candidate-kind">候选</span>

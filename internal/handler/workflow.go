@@ -54,23 +54,59 @@ func (h *WorkflowService) AddNode(request AddNodeRequest) (entity.GraphMutationR
 	return mutationReceipt(projectValue, projectValue.Nodes[len(projectValue.Nodes)-1].ID), nil
 }
 
-func (h *WorkflowService) Connect(parentID, childID string, parentCandidate *int, replace bool, projectID string) (entity.GraphMutationReceipt, error) {
-	parentID = strings.TrimSpace(parentID)
-	childID = strings.TrimSpace(childID)
+func (h *WorkflowService) Connect(sourceID, targetID, projectID string) (entity.GraphMutationReceipt, error) {
+	sourceID = strings.TrimSpace(sourceID)
+	targetID = strings.TrimSpace(targetID)
 	projectID = strings.TrimSpace(projectID)
-	if parentID == "" || childID == "" {
-		return entity.GraphMutationReceipt{}, errors.New("父节点与子节点 ID 不能为空")
+	if sourceID == "" || targetID == "" {
+		return entity.GraphMutationReceipt{}, errors.New("连接起点与目标节点 ID 不能为空")
 	}
 	if projectID == "" {
 		return entity.GraphMutationReceipt{}, errors.New("工程 ID 不能为空")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	projectValue, err := h.service.Connect(ctx, parentID, childID, parentCandidate, replace, projectID)
+	projectValue, err := h.service.Connect(ctx, sourceID, targetID, projectID)
 	if err != nil {
 		return entity.GraphMutationReceipt{}, err
 	}
-	return mutationReceipt(projectValue, childID), nil
+	return mutationReceipt(projectValue, targetID), nil
+}
+
+func (h *WorkflowService) Disconnect(edgeID, projectID string) (entity.GraphMutationReceipt, error) {
+	edgeID = strings.TrimSpace(edgeID)
+	projectID = strings.TrimSpace(projectID)
+	if edgeID == "" || projectID == "" {
+		return entity.GraphMutationReceipt{}, errors.New("连接 ID 与工程 ID 不能为空")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	projectValue, targetID, err := h.service.Disconnect(ctx, edgeID, projectID)
+	if err != nil {
+		return entity.GraphMutationReceipt{}, err
+	}
+	return mutationReceipt(projectValue, targetID), nil
+}
+
+func (h *WorkflowService) ReplaceConnection(edgeID, sourceID, projectID string) (entity.GraphMutationReceipt, error) {
+	edgeID = strings.TrimSpace(edgeID)
+	sourceID = strings.TrimSpace(sourceID)
+	projectID = strings.TrimSpace(projectID)
+	if edgeID == "" || sourceID == "" || projectID == "" {
+		return entity.GraphMutationReceipt{}, errors.New("连接 ID、起点与工程 ID 不能为空")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	projectValue, err := h.service.ReplaceConnection(ctx, edgeID, sourceID, projectID)
+	if err != nil {
+		return entity.GraphMutationReceipt{}, err
+	}
+	for _, edge := range projectValue.Edges {
+		if edge.ID == edgeID {
+			return mutationReceipt(projectValue, edge.TargetNodeID), nil
+		}
+	}
+	return entity.GraphMutationReceipt{}, errors.New("EDGE_RECEIPT_MISSING_EDGE")
 }
 
 func (h *WorkflowService) MoveNode(id string, x, y float64, projectID string) (entity.GraphMutationReceipt, error) {

@@ -94,13 +94,25 @@ type ScriptVersionDetail struct {
 	Payload string        `json:"payload"`
 }
 
-// Node is one persisted graph node. Edges are derived from Parent.
+type Edge struct {
+	ID           string `json:"id"`
+	SourceNodeID string `json:"sourceNodeId"`
+	TargetNodeID string `json:"targetNodeId"`
+	Kind         string `json:"kind"`
+}
+
+const (
+	EdgeKindConnection      = "connection"
+	EdgeKindCandidateSource = "candidate_source"
+)
+
 type Node struct {
 	ID              string               `json:"id"`
 	Type            valueobject.NodeType `json:"type"`
 	Title           string               `json:"title"`
 	Parent          string               `json:"parent,omitempty"`
 	ParentCandidate *int                 `json:"parentCandidate,omitempty"`
+	WorkspaceRootID string               `json:"workspaceRootId,omitempty"`
 	CandidateSource *CandidateSource     `json:"candidateSource,omitempty"`
 	ScriptVersions  []ScriptVersion      `json:"scriptVersions,omitempty"`
 	Position        Position             `json:"position"`
@@ -121,6 +133,7 @@ type Project struct {
 	Revision     int64  `json:"revision"`
 	ActiveNodeID string `json:"activeNodeId"`
 	Nodes        []Node `json:"nodes"`
+	Edges        []Edge `json:"edges"`
 }
 
 // ProjectSummary is the lightweight project list entry.
@@ -135,6 +148,7 @@ type ProjectSummary struct {
 // Clone returns a deep copy safe to hand to callers outside the service lock.
 func (p Project) Clone() Project {
 	clone := p
+	clone.Edges = append([]Edge(nil), p.Edges...)
 	clone.Nodes = make([]Node, len(p.Nodes))
 	for i, node := range p.Nodes {
 		clone.Nodes[i] = node.Clone()

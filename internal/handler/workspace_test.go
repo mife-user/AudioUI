@@ -108,23 +108,29 @@ func TestGetWorkspaceSnapshotReturnsSummariesDerivedChainsAndLocks(t *testing.T)
 	seededProject.Nodes[0].Rounds = []entity.Round{{N: 1, Kind: valueobject.OutputKindTopics, ArtifactID: "sha256:topics-a"}}
 	seededProject.Nodes = append(seededProject.Nodes,
 		entity.Node{
-			ID: candidateA, Type: valueobject.NodeTypeCandidate, Title: "候选甲", Parent: rootID,
+			ID: candidateA, Type: valueobject.NodeTypeCandidate, Title: "候选甲",
 			Size:            entity.DefaultNodeSize(valueobject.NodeTypeCandidate),
 			CandidateSource: &entity.CandidateSource{TopicNodeID: rootID, ArtifactID: "sha256:topics-a", Index: 0}, Rounds: []entity.Round{},
 		},
 		entity.Node{
-			ID: firstID, Type: valueobject.NodeTypePrompt, Title: "分支甲", Parent: candidateA,
+			ID: firstID, Type: valueobject.NodeTypePrompt, Title: "分支甲",
 			Position: entity.Position{X: 3, Y: 4}, Size: entity.DefaultNodeSize(valueobject.NodeTypePrompt), Params: entity.NodeParams{Instruction: "draft"}, Rounds: []entity.Round{},
 		},
 		entity.Node{
-			ID: candidateB, Type: valueobject.NodeTypeCandidate, Title: "候选乙", Parent: rootID,
+			ID: candidateB, Type: valueobject.NodeTypeCandidate, Title: "候选乙",
 			Size:            entity.DefaultNodeSize(valueobject.NodeTypeCandidate),
 			CandidateSource: &entity.CandidateSource{TopicNodeID: rootID, ArtifactID: "sha256:topics-a", Index: 1}, Rounds: []entity.Round{},
 		},
 		entity.Node{
-			ID: secondID, Type: valueobject.NodeTypePrompt, Title: "分支乙", Parent: candidateB,
+			ID: secondID, Type: valueobject.NodeTypePrompt, Title: "分支乙",
 			Position: entity.Position{X: 5, Y: 6}, Size: entity.DefaultNodeSize(valueobject.NodeTypePrompt), Params: entity.NodeParams{Instruction: "draft"}, Rounds: []entity.Round{},
 		},
+	)
+	seededProject.Edges = append(seededProject.Edges,
+		entity.Edge{ID: "e_" + candidateA, SourceNodeID: rootID, TargetNodeID: candidateA, Kind: entity.EdgeKindCandidateSource},
+		entity.Edge{ID: "e_" + firstID, SourceNodeID: candidateA, TargetNodeID: firstID, Kind: entity.EdgeKindConnection},
+		entity.Edge{ID: "e_" + candidateB, SourceNodeID: rootID, TargetNodeID: candidateB, Kind: entity.EdgeKindCandidateSource},
+		entity.Edge{ID: "e_" + secondID, SourceNodeID: candidateB, TargetNodeID: secondID, Kind: entity.EdgeKindConnection},
 	)
 	seededProject.Revision++
 	if _, err := service.Save(context.Background(), seededProject); err != nil {

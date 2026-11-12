@@ -59,6 +59,7 @@ type RunExecutionSnapshot struct {
 	NodeID          string                 `json:"nodeId"`
 	ChainPath       []string               `json:"chainPath"`
 	PathNodes       []Node                 `json:"pathNodes"`
+	PathEdges       []Edge                 `json:"pathEdges,omitempty"`
 	Artifacts       []RunArtifactReference `json:"artifacts"`
 	OutputBinding   RunOutputBinding       `json:"outputBinding"`
 	OutputContract  RunOutputContract      `json:"outputContract"`
@@ -67,6 +68,7 @@ type RunExecutionSnapshot struct {
 func (s RunExecutionSnapshot) Clone() RunExecutionSnapshot {
 	clone := s
 	clone.ChainPath = append([]string(nil), s.ChainPath...)
+	clone.PathEdges = append([]Edge(nil), s.PathEdges...)
 	clone.PathNodes = make([]Node, len(s.PathNodes))
 	for i, node := range s.PathNodes {
 		clone.PathNodes[i] = node.Clone()
@@ -83,8 +85,15 @@ func (s RunExecutionSnapshot) Clone() RunExecutionSnapshot {
 }
 
 func (s RunExecutionSnapshot) Validate() error {
-	if s.Version != 1 || s.ProjectID == "" || s.ProjectVersion <= 0 || s.TreeID == "" || s.NodeID == "" || len(s.ChainPath) == 0 || len(s.ChainPath) != len(s.PathNodes) {
+	if (s.Version != 1 && s.Version != 2) || s.ProjectID == "" || s.ProjectVersion <= 0 || s.TreeID == "" || s.NodeID == "" || len(s.ChainPath) == 0 || len(s.ChainPath) != len(s.PathNodes) {
 		return fmt.Errorf("%w: incomplete execution snapshot", ErrGraphInvalid)
+	}
+	if s.ProjectVersion >= valueobject.DAGProjectVersion {
+		if s.Version != 2 || len(s.PathEdges) != len(s.ChainPath)-1 {
+			return fmt.Errorf("%w: invalid snapshot edges", ErrGraphInvalid)
+		}
+	} else if s.Version != 1 || len(s.PathEdges) != 0 {
+		return fmt.Errorf("%w: invalid legacy snapshot", ErrGraphInvalid)
 	}
 	if err := valueobject.ValidateID(s.ProjectID); err != nil {
 		return err
@@ -97,7 +106,7 @@ func (s RunExecutionSnapshot) Validate() error {
 			return fmt.Errorf("%w: path node mismatch", ErrGraphInvalid)
 		}
 	}
-	project := Project{Version: s.ProjectVersion, ID: s.ProjectID, Revision: s.ProjectRevision, Nodes: s.PathNodes}
+	project := Project{Version: s.ProjectVersion, ID: s.ProjectID, Revision: s.ProjectRevision, Nodes: s.PathNodes, Edges: s.PathEdges}
 	graph, err := NewGraph(&project)
 	if err != nil {
 		return err
@@ -117,6 +126,14 @@ func (s RunExecutionSnapshot) Validate() error {
 	for i := range path {
 		if path[i] != s.ChainPath[i] {
 			return fmt.Errorf("%w: invalid snapshot path", ErrGraphInvalid)
+		}
+		if s.ProjectVersion >= valueobject.DAGProjectVersion {
+			if s.PathNodes[i].WorkspaceRootID != "" && s.PathNodes[i].WorkspaceRootID != s.TreeID {
+				return fmt.Errorf("%w: invalid snapshot workspace root", ErrGraphInvalid)
+			}
+			if i > 0 && ValidateNodeConnection(s.PathNodes[i-1], s.PathNodes[i]) != nil {
+				return fmt.Errorf("%w: invalid snapshot connection", ErrGraphInvalid)
+			}
 		}
 	}
 	target, _ := graph.Node(s.NodeID)

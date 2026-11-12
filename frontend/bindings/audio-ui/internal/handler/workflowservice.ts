@@ -21,12 +21,16 @@ export function ApplyPending(id: string, force: boolean, projectID: string): $Ca
     return $Call.ByID(599074776, id, force, projectID);
 }
 
-export function Connect(parentID: string, childID: string, parentCandidate: number | null, replace: boolean, projectID: string): $CancellablePromise<entity$0.GraphMutationReceipt> {
-    return $Call.ByID(2783250323, parentID, childID, parentCandidate, replace, projectID);
+export function Connect(sourceID: string, targetID: string, projectID: string): $CancellablePromise<entity$0.GraphMutationReceipt> {
+    return $Call.ByID(2783250323, sourceID, targetID, projectID);
 }
 
 export function DiscardPending(id: string, projectID: string): $CancellablePromise<entity$0.Project> {
     return $Call.ByID(1112831042, id, projectID);
+}
+
+export function Disconnect(edgeID: string, projectID: string): $CancellablePromise<entity$0.GraphMutationReceipt> {
+    return $Call.ByID(3688814037, edgeID, projectID);
 }
 
 export function GetPending(id: string, projectID: string): $CancellablePromise<entity$0.PendingDetail> {
@@ -47,6 +51,10 @@ export function ListPending(projectID: string): $CancellablePromise<entity$0.Pen
 
 export function MoveNode(id: string, x: number, y: number, projectID: string): $CancellablePromise<entity$0.GraphMutationReceipt> {
     return $Call.ByID(634824434, id, x, y, projectID);
+}
+
+export function ReplaceConnection(edgeID: string, sourceID: string, projectID: string): $CancellablePromise<entity$0.GraphMutationReceipt> {
+    return $Call.ByID(482570597, edgeID, sourceID, projectID);
 }
 
 export function SelectNode(id: string, projectID: string): $CancellablePromise<entity$0.GraphMutationReceipt> {

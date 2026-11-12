@@ -81,12 +81,20 @@ function makeSnapshot(): WorkspaceSnapshot {
   const prompt = makeNode('n_prompt', 'prompt', candidate.id, { params: { instruction: '写一段说明。' } })
   const agent = makeNode('n_agent', 'agent', prompt.id)
   const script = makeNode('n_script', 'script', agent.id)
+  const path = [topic.id, candidate.id, prompt.id, agent.id, script.id]
   return {
     project: { id: 'p_real_flow', name: '真实画布测试', revision: 4, activeNodeId: topic.id },
     nodes: [topic, candidate, prompt, agent, script],
+    edges: [
+      { id: 'e_candidate', sourceNodeId: topic.id, targetNodeId: candidate.id, kind: 'candidate_source' },
+      { id: 'e_prompt', sourceNodeId: candidate.id, targetNodeId: prompt.id, kind: 'connection' },
+      { id: 'e_agent', sourceNodeId: prompt.id, targetNodeId: agent.id, kind: 'connection' },
+      { id: 'e_script', sourceNodeId: agent.id, targetNodeId: script.id, kind: 'connection' },
+    ],
+    nodePaths: { [topic.id]: [topic.id], [candidate.id]: path.slice(0, 2), [prompt.id]: path.slice(0, 3), [agent.id]: path.slice(0, 4), [script.id]: path },
     pending: [],
     runs: [],
-    chains: [{ id: `c_${script.id}`, tailNodeId: script.id, path: [topic.id, candidate.id, prompt.id, agent.id, script.id], label: '测试链', status: 'idle' }],
+    chains: [{ id: `c_${script.id}`, tailNodeId: script.id, path, nodeIds: path, ambiguous: false, label: '测试链', status: 'idle' }],
     lockedNodeIds: [],
   }
 }
@@ -95,6 +103,8 @@ function makeAPI(): GraphAPI {
   return {
     addNode: vi.fn().mockResolvedValue({ projectId: 'p_real_flow', projectRevision: 5, nodeId: 'n_created' }),
     connect: vi.fn().mockResolvedValue({ projectId: 'p_real_flow', projectRevision: 5, nodeId: 'n_prompt' }),
+    disconnect: vi.fn().mockResolvedValue({ projectId: 'p_real_flow', projectRevision: 5, nodeId: 'n_prompt' }),
+    replaceConnection: vi.fn().mockResolvedValue({ projectId: 'p_real_flow', projectRevision: 5, nodeId: 'n_prompt' }),
     moveNode: vi.fn().mockResolvedValue({ projectId: 'p_real_flow', projectRevision: 5, nodeId: 'n_prompt' }),
     setNodeLayout: vi.fn().mockResolvedValue({ projectId: 'p_real_flow', projectRevision: 5, nodeId: 'n_prompt' }),
     setNodeCollapsed: vi.fn().mockResolvedValue({ projectId: 'p_real_flow', projectRevision: 5, nodeId: 'n_prompt' }),

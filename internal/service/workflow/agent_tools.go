@@ -28,7 +28,7 @@ func (s *Service) ReadRunGraph(ctx context.Context, scope port.RunScope) (port.R
 		if !ok {
 			return port.RunGraph{}, port.ErrChainScopeDenied
 		}
-		result.Nodes = append(result.Nodes, runGraphNode(node))
+		result.Nodes = append(result.Nodes, runGraphNode(graph, node))
 	}
 	return result, nil
 }
@@ -55,7 +55,7 @@ func (s *Service) ReadRunNode(ctx context.Context, scope port.RunScope, nodeID s
 		}
 	}
 	return port.RunNode{
-		RunGraphNode:        runGraphNode(node),
+		RunGraphNode:        runGraphNode(graph, node),
 		Params:              node.Params,
 		Rounds:              rounds,
 		LatestScriptVersion: latestScriptVersion(node),
@@ -95,7 +95,7 @@ func (s *Service) ReadRunArtifact(ctx context.Context, scope port.RunScope, arti
 			ref := artifactRef{kind: round.Kind, candidate: -1}
 			if round.Kind == valueobject.OutputKindTopics {
 				child, ok := graph.Node(scope.ChainPath[i+1])
-				if !ok || child.Type != valueobject.NodeTypeCandidate || child.Parent != node.ID || child.CandidateSource == nil || child.CandidateSource.TopicNodeID != node.ID || child.CandidateSource.ArtifactID != round.ArtifactID || child.CandidateSource.Index < 0 {
+				if !ok || child.Type != valueobject.NodeTypeCandidate || child.CandidateSource == nil || child.CandidateSource.TopicNodeID != node.ID || child.CandidateSource.ArtifactID != round.ArtifactID || child.CandidateSource.Index < 0 {
 					return port.RunArtifact{}, ErrCandidateInvalid
 				}
 				ref.candidate = child.CandidateSource.Index
@@ -226,6 +226,7 @@ func (s *Service) runGraph(ctx context.Context, scope port.RunScope) (entity.Pro
 		project := entity.Project{
 			Version: snapshot.ProjectVersion, ID: snapshot.ProjectID,
 			Revision: snapshot.ProjectRevision, Nodes: make([]entity.Node, len(snapshot.PathNodes)),
+			Edges: append([]entity.Edge(nil), snapshot.PathEdges...),
 		}
 		for i, node := range snapshot.PathNodes {
 			project.Nodes[i] = node.Clone()
@@ -261,7 +262,11 @@ func (s *Service) runGraph(ctx context.Context, scope port.RunScope) (entity.Pro
 	return project, graph, nil
 }
 
-func runGraphNode(node *entity.Node) port.RunGraphNode {
+func runGraphNode(graph *entity.Graph, node *entity.Node) port.RunGraphNode {
+	parentID := ""
+	if parent, ok := graph.Parent(node.ID); ok {
+		parentID = parent.ID
+	}
 	var candidate *int
 	if node.ParentCandidate != nil {
 		value := *node.ParentCandidate
@@ -273,7 +278,7 @@ func runGraphNode(node *entity.Node) port.RunGraphNode {
 		source = &value
 	}
 	return port.RunGraphNode{
-		ID: node.ID, Type: node.Type, Title: node.Title, Parent: node.Parent,
+		ID: node.ID, Type: node.Type, Title: node.Title, Parent: parentID,
 		ParentCandidate: candidate, CandidateSource: source, Locked: node.Locked, Stale: node.Stale,
 	}
 }

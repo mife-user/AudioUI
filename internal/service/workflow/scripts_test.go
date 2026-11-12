@@ -18,11 +18,11 @@ const validScriptBody = `{"title":"旁白","scenes":[{"narration":"第一行\n�
 func scriptVersionService(t *testing.T, artifactID string, provider port.ArtifactStoreProvider) *Service {
 	t.Helper()
 	project := baseProject()
-	project.Nodes = append(project.Nodes, entity.Node{
-		ID: "n_script", Type: valueobject.NodeTypeScript, Title: "脚本", Parent: "n_b",
+	appendNodeWithEdge(&project, entity.Node{
+		ID: "n_script", Type: valueobject.NodeTypeScript, Title: "脚本",
 		Size: entity.DefaultNodeSize(valueobject.NodeTypeScript), Rounds: []entity.Round{},
 		ScriptVersions: []entity.ScriptVersion{{N: 1, ArtifactID: artifactID, RunID: "r_script"}},
-	})
+	}, "n_b")
 	return New(Options{Project: &fakeSession{project: project}, Artifacts: provider})
 }
 

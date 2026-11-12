@@ -69,12 +69,16 @@ func TestProjectLoadCompletesCommittedPendingTransaction(t *testing.T) {
 	project.Nodes = append(project.Nodes,
 		entity.Node{
 			ID: "n_candidate", Type: valueobject.NodeTypeCandidate, Title: "候选", Size: entity.DefaultNodeSize(valueobject.NodeTypeCandidate),
-			Parent: "n_root", CandidateSource: &entity.CandidateSource{TopicNodeID: "n_root", ArtifactID: "sha256:topic", Index: 0}, Rounds: []entity.Round{},
+			CandidateSource: &entity.CandidateSource{TopicNodeID: "n_root", ArtifactID: "sha256:topic", Index: 0}, Rounds: []entity.Round{},
 		},
-		entity.Node{ID: "n_prompt", Type: valueobject.NodeTypePrompt, Title: "提示词", Size: entity.DefaultNodeSize(valueobject.NodeTypePrompt), Parent: "n_candidate", Rounds: []entity.Round{}},
-		entity.Node{ID: "n_agent", Type: valueobject.NodeTypeAgent, Title: "Agent", Size: entity.DefaultNodeSize(valueobject.NodeTypeAgent), Parent: "n_prompt", Rounds: []entity.Round{}},
-		entity.Node{ID: "n_script", Type: valueobject.NodeTypeScript, Title: "脚本", Size: entity.DefaultNodeSize(valueobject.NodeTypeScript), Parent: "n_agent", Rounds: []entity.Round{}},
+		entity.Node{ID: "n_prompt", Type: valueobject.NodeTypePrompt, Title: "提示词", Size: entity.DefaultNodeSize(valueobject.NodeTypePrompt), Rounds: []entity.Round{}},
+		entity.Node{ID: "n_agent", Type: valueobject.NodeTypeAgent, Title: "Agent", Size: entity.DefaultNodeSize(valueobject.NodeTypeAgent), Rounds: []entity.Round{}},
+		entity.Node{ID: "n_script", Type: valueobject.NodeTypeScript, Title: "脚本", Size: entity.DefaultNodeSize(valueobject.NodeTypeScript), Rounds: []entity.Round{}},
 	)
+	linkNodes(&project, "n_root", "n_candidate")
+	linkNodes(&project, "n_candidate", "n_prompt")
+	linkNodes(&project, "n_prompt", "n_agent")
+	linkNodes(&project, "n_agent", "n_script")
 	if err := projects.Create(ctx, project); err != nil {
 		t.Fatal(err)
 	}
@@ -185,9 +189,10 @@ func TestCommittedTopicReplyRecoveryValidatesCandidateGraphAssociation(t *testin
 				for index, id := range pending.CreatedNodeIDs {
 					project.Nodes = append(project.Nodes, entity.Node{
 						ID: id, Type: valueobject.NodeTypeCandidate, Title: "候选", Size: entity.DefaultNodeSize(valueobject.NodeTypeCandidate),
-						Parent: "n_root", CandidateSource: &entity.CandidateSource{TopicNodeID: "n_root", ArtifactID: artifactID, Index: index},
-						Rounds: []entity.Round{},
+						CandidateSource: &entity.CandidateSource{TopicNodeID: "n_root", ArtifactID: artifactID, Index: index},
+						Rounds:          []entity.Round{},
 					})
+					linkNodes(&project, "n_root", id)
 				}
 			}
 			if err := projects.Save(ctx, project); err != nil {
@@ -241,11 +246,15 @@ func TestCommittedScriptReplyRecoveryValidatesVersionAssociation(t *testing.T) {
 			project.Nodes[0].Locked = true
 			project.Nodes[0].Rounds = []entity.Round{{N: 1, Kind: valueobject.OutputKindTopics, ArtifactID: "sha256:topics"}}
 			project.Nodes = append(project.Nodes,
-				entity.Node{ID: "n_candidate", Type: valueobject.NodeTypeCandidate, Title: "候选", Size: entity.DefaultNodeSize(valueobject.NodeTypeCandidate), Parent: "n_root", CandidateSource: &entity.CandidateSource{TopicNodeID: "n_root", ArtifactID: "sha256:topics", Index: 0}, Rounds: []entity.Round{}},
-				entity.Node{ID: "n_prompt", Type: valueobject.NodeTypePrompt, Title: "提示词", Size: entity.DefaultNodeSize(valueobject.NodeTypePrompt), Parent: "n_candidate", Rounds: []entity.Round{}},
-				entity.Node{ID: "n_agent", Type: valueobject.NodeTypeAgent, Title: "Agent", Size: entity.DefaultNodeSize(valueobject.NodeTypeAgent), Parent: "n_prompt", Rounds: []entity.Round{}},
-				entity.Node{ID: "n_script", Type: valueobject.NodeTypeScript, Title: "脚本", Size: entity.DefaultNodeSize(valueobject.NodeTypeScript), Parent: "n_agent", ScriptVersions: []entity.ScriptVersion{{N: 1, ArtifactID: "sha256:old-script", RunID: "r_old"}}, Rounds: []entity.Round{}},
+				entity.Node{ID: "n_candidate", Type: valueobject.NodeTypeCandidate, Title: "候选", Size: entity.DefaultNodeSize(valueobject.NodeTypeCandidate), CandidateSource: &entity.CandidateSource{TopicNodeID: "n_root", ArtifactID: "sha256:topics", Index: 0}, Rounds: []entity.Round{}},
+				entity.Node{ID: "n_prompt", Type: valueobject.NodeTypePrompt, Title: "提示词", Size: entity.DefaultNodeSize(valueobject.NodeTypePrompt), Rounds: []entity.Round{}},
+				entity.Node{ID: "n_agent", Type: valueobject.NodeTypeAgent, Title: "Agent", Size: entity.DefaultNodeSize(valueobject.NodeTypeAgent), Rounds: []entity.Round{}},
+				entity.Node{ID: "n_script", Type: valueobject.NodeTypeScript, Title: "脚本", Size: entity.DefaultNodeSize(valueobject.NodeTypeScript), ScriptVersions: []entity.ScriptVersion{{N: 1, ArtifactID: "sha256:old-script", RunID: "r_old"}}, Rounds: []entity.Round{}},
 			)
+			linkNodes(&project, "n_root", "n_candidate")
+			linkNodes(&project, "n_candidate", "n_prompt")
+			linkNodes(&project, "n_prompt", "n_agent")
+			linkNodes(&project, "n_agent", "n_script")
 			if err := projects.Create(ctx, project); err != nil {
 				t.Fatal(err)
 			}

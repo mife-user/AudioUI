@@ -59,6 +59,7 @@ function nodeData(nodeValue: Node, overrides: Partial<CanvasFlowNode['data']> = 
     node: nodeValue,
     runningLocked: false,
     pathHighlighted: false,
+    hasInputs: Boolean(nodeValue.parent),
     topicCandidateIndexes: [],
     candidateNodeIds: {},
     candidates: [],
@@ -194,7 +195,7 @@ describe('M2-12A canvas nodes', () => {
     expect(screen.getByRole('button', { name: '调整 n_locked_prompt 卡片尺寸' })).toBeEnabled()
   })
 
-  it('renders application-generated candidate links without exposing topic output ports for manual connection', () => {
+  it('renders protected candidate anchors alongside manual Topic and Candidate ports', () => {
     const topic = node('n_topic', 'topic')
     const candidate = node('n_candidate', 'candidate', topic.id, {
       candidateSource: { topicNodeId: topic.id, artifactId: 'sha256:topics', index: 1 },
@@ -218,6 +219,9 @@ describe('M2-12A canvas nodes', () => {
     expect(screen.getByText('转场')).toBeInTheDocument()
     expect(screen.getByLabelText('谱面演示 输出端口')).toHaveAttribute('data-handle', 'candidate-output')
     expect(screen.getByLabelText('谱面演示 输出端口')).toHaveAttribute('data-connectable', 'true')
+    expect(screen.getByLabelText('n_topic 输出端口')).toHaveAttribute('data-connectable', 'true')
+    expect(screen.getByLabelText('连接到 n_topic')).toHaveAttribute('data-connectable', 'true')
+    expect(screen.getByLabelText('连接到 谱面演示')).toHaveAttribute('data-connectable', 'true')
     expect(screen.getByLabelText('n_topic 的候选节点')).toBeInTheDocument()
     expect(container.querySelector('.topic-candidate-index')).toHaveTextContent('2')
     expect(container.querySelector('.canvas-node-head [data-handle="topic-candidate-1"]')).toBeInTheDocument()
@@ -249,7 +253,8 @@ describe('M2-12A canvas nodes', () => {
     render(<PromptNode {...nodeProps(prompt)} />)
 
     expect(screen.getByLabelText('连接到 n_draft')).toHaveAttribute('data-handle', 'prompt-input')
-    expect(screen.queryByLabelText('n_draft 输出端口')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('n_draft 输出端口')).toHaveAttribute('data-handle', 'prompt-output')
+    expect(screen.getByRole('button', { name: '从 n_draft 新增 Agent' })).toBeEnabled()
     expect(screen.queryByRole('button', { name: /运行/ })).not.toBeInTheDocument()
     expect(screen.getByRole('textbox', { name: '任务' })).toBeInTheDocument()
   })
@@ -276,6 +281,23 @@ describe('M2-12A canvas nodes', () => {
     expect(onAddChild).toHaveBeenCalledWith('n_agent', 'script')
     fireEvent.click(screen.getByRole('button', { name: '运行本地 Agent' }))
     await waitFor(() => expect(onStartRun).toHaveBeenCalledWith('n_agent', 'p_test'))
+  })
+
+  it('exposes a rootless Agent output and displays its backend run rejection', async () => {
+    const agent = node('n_agent_draft', 'agent')
+    const onStartRun = vi.fn().mockResolvedValue({ error: { code: 'RUN_GRAPH_UNSUPPORTED', message: '独立子图暂不可运行' } })
+    render(<AgentNode {...nodeProps(agent, nodeData(agent, { onStartRun, projectId: 'p_test' }))} />)
+
+    expect(screen.getByLabelText('n_agent_draft 输出端口')).toHaveAttribute('data-handle', 'agent-output')
+    fireEvent.click(screen.getByRole('button', { name: '运行本地 Agent' }))
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('独立子图暂不可运行'))
+  })
+
+  it('does not present an ambiguous Script output as a selected binding', () => {
+    const agent = node('n_agent', 'agent', 'n_prompt')
+    render(<AgentNode {...nodeProps(agent, nodeData(agent, { outputAmbiguous: true }))} />)
+    expect(screen.getByText('已连接多个或共享的 Script，暂不能确定输出目标')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '为 n_agent 指定空 Script 输出' })).not.toBeInTheDocument()
   })
 
   it('surfaces a backend BUSY error on the Agent node', async () => {

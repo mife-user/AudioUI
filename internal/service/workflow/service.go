@@ -86,29 +86,16 @@ func (s *Service) AddNode(ctx context.Context, input AddNodeInput) (entity.Proje
 	if input.ParentCandidate != nil {
 		return entity.Project{}, fmt.Errorf("%w: parentCandidate is not supported", ErrNodeConnectionInvalid)
 	}
-	switch input.Type {
-	case valueobject.NodeTypeTopic:
-		if input.Parent != "" {
-			return entity.Project{}, fmt.Errorf("%w: topic must be a root", ErrTopicRootParent)
-		}
-	case valueobject.NodeTypeCandidate:
+	if input.Type == valueobject.NodeTypeCandidate {
 		return entity.Project{}, fmt.Errorf("%w: candidate nodes are application-generated", ErrNodeConnectionInvalid)
-	case valueobject.NodeTypePrompt, valueobject.NodeTypeAgent, valueobject.NodeTypeScript:
-		if input.Parent != "" {
-			parent, err := requireNode(graph, input.Parent, "parent")
-			if err != nil {
-				return entity.Project{}, err
-			}
-			if s.isNodeLocked(parent.ID) {
-				return entity.Project{}, fmt.Errorf("%w: %s", ErrRunningChainLocked, parent.ID)
-			}
-			if _, err := chainRoot(graph, parent.ID); err != nil {
-				return entity.Project{}, err
-			}
-			if err := entity.ValidateNodeConnection(*parent, node); err != nil {
-				return entity.Project{}, err
-			}
-			node.Parent = parent.ID
+	}
+	if input.Parent != "" {
+		parent, err := requireNode(graph, input.Parent, "parent")
+		if err != nil {
+			return entity.Project{}, err
+		}
+		if err := s.ensureEditable(parent.ID); err != nil {
+			return entity.Project{}, err
 		}
 	}
 	id, err := valueobject.NewID(valueobject.NodeIDPrefix)
@@ -116,7 +103,22 @@ func (s *Service) AddNode(ctx context.Context, input AddNodeInput) (entity.Proje
 		return entity.Project{}, err
 	}
 	node.ID = id
+	if node.Type == valueobject.NodeTypeTopic {
+		node.WorkspaceRootID = id
+	}
 	project.Nodes = append(project.Nodes, node)
+	if input.Parent != "" {
+		edgeID, err := valueobject.NewID(valueobject.EdgeIDPrefix)
+		if err != nil {
+			return entity.Project{}, err
+		}
+		project.Edges = append(project.Edges, entity.Edge{
+			ID: edgeID, SourceNodeID: input.Parent, TargetNodeID: id, Kind: entity.EdgeKindConnection,
+		})
+	}
+	if err := bindUnassignedWorkspaces(&project); err != nil {
+		return entity.Project{}, err
+	}
 	if err := validateFinalGraph(&project); err != nil {
 		return entity.Project{}, fmt.Errorf("图校验失败: %w", err)
 	}
@@ -129,7 +131,7 @@ func (s *Service) AddNode(ctx context.Context, input AddNodeInput) (entity.Proje
 	return saved, nil
 }
 
-func (s *Service) Connect(ctx context.Context, parentID, childID string, parentCandidate *int, replace bool, expectedProjectID ...string) (entity.Project, error) {
+func (s *Service) Connect(ctx context.Context, sourceID, targetID string, expectedProjectID ...string) (entity.Project, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := ctx.Err(); err != nil {
@@ -139,92 +141,188 @@ func (s *Service) Connect(ctx context.Context, parentID, childID string, parentC
 	if err != nil {
 		return entity.Project{}, err
 	}
-	child, err := requireNode(graph, childID, "node")
-	if err != nil {
+	if _, err := requireNode(graph, sourceID, "source"); err != nil {
 		return entity.Project{}, err
 	}
-	if child.Type == valueobject.NodeTypeTopic {
-		return entity.Project{}, fmt.Errorf("%w: topic %s cannot be a child", ErrTopicRootParent, childID)
-	}
-	if child.Type == valueobject.NodeTypeCandidate {
-		return entity.Project{}, fmt.Errorf("%w: candidate source is immutable", ErrNodeConnectionInvalid)
-	}
-	parent, err := requireNode(graph, parentID, "parent")
-	if err != nil {
+	if _, err := requireNode(graph, targetID, "target"); err != nil {
 		return entity.Project{}, err
 	}
-	if parentID == childID {
-		return entity.Project{}, fmt.Errorf("%w: %s", ErrSelfConnect, childID)
+	if sourceID == targetID {
+		return entity.Project{}, fmt.Errorf("%w: %s", ErrSelfConnect, targetID)
 	}
-	if graph.IsAncestor(childID, parentID) {
-		return entity.Project{}, fmt.Errorf("%w: %s is an ancestor of %s", ErrCycleDetected, childID, parentID)
-	}
-	if _, err := chainRoot(graph, parentID); err != nil {
-		return entity.Project{}, err
-	}
-	if parentCandidate != nil {
-		return entity.Project{}, fmt.Errorf("%w: parentCandidate is not supported", ErrNodeConnectionInvalid)
-	}
-	if err := entity.ValidateNodeConnection(*parent, *child); err != nil {
-		return entity.Project{}, err
-	}
-	if child.Parent == parentID {
+	if _, exists := graph.EdgeBetween(sourceID, targetID); exists {
 		return project, nil
 	}
-
-	subtree, err := graph.Subtree(childID)
+	if graph.IsAncestor(targetID, sourceID) {
+		return entity.Project{}, fmt.Errorf("%w: %s → %s", ErrCycleDetected, sourceID, targetID)
+	}
+	descendants, err := graph.Subtree(targetID)
 	if err != nil {
 		return entity.Project{}, err
 	}
-	if err := s.ensureEditable(subtree...); err != nil {
+	if err := s.ensureEditable(append(descendants, sourceID)...); err != nil {
 		return entity.Project{}, err
 	}
-	if err := s.ensureEditable(parentID); err != nil {
+	hadInputs := len(graph.Parents(targetID)) > 0
+	edgeID, err := valueobject.NewID(valueobject.EdgeIDPrefix)
+	if err != nil {
 		return entity.Project{}, err
 	}
-	if child.Parent != "" && !replace {
-		return entity.Project{}, fmt.Errorf("%w: %s -> %s", ErrReparentConfirmRequired, child.Parent, parentID)
+	project.Edges = append(project.Edges, entity.Edge{
+		ID: edgeID, SourceNodeID: sourceID, TargetNodeID: targetID, Kind: entity.EdgeKindConnection,
+	})
+	if hadInputs {
+		markSubtreeStale(&project, descendants)
 	}
+	if err := bindUnassignedWorkspaces(&project); err != nil {
+		return entity.Project{}, err
+	}
+	if err := validateFinalGraph(&project); err != nil {
+		return entity.Project{}, fmt.Errorf("图校验失败: %w", err)
+	}
+	project.Revision++
+	saved, err := s.opts.Project.Save(ctx, project)
+	if err != nil {
+		return entity.Project{}, err
+	}
+	s.changed(saved.ID, saved.Revision)
+	return saved, nil
+}
 
-	sourceRoot := ""
-	if child.Parent != "" {
-		sourceRoot, err = chainRoot(graph, childID)
-		if err != nil {
-			return entity.Project{}, err
+func (s *Service) Disconnect(ctx context.Context, edgeID string, expectedProjectID ...string) (entity.Project, string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return entity.Project{}, "", err
+	}
+	project, graph, err := s.loadCurrentForProject(ctx, firstExpectedProjectID(expectedProjectID))
+	if err != nil {
+		return entity.Project{}, "", err
+	}
+	edge, ok := graph.Edge(edgeID)
+	if !ok {
+		return entity.Project{}, "", fmt.Errorf("%w: %s", ErrEdgeNotFound, edgeID)
+	}
+	if edge.Kind == entity.EdgeKindCandidateSource {
+		return entity.Project{}, "", fmt.Errorf("%w: 候选生成来源不能断开", ErrProtectedEdge)
+	}
+	descendants, err := graph.Subtree(edge.TargetNodeID)
+	if err != nil {
+		return entity.Project{}, "", err
+	}
+	if err := s.ensureEditable(append(descendants, edge.SourceNodeID)...); err != nil {
+		return entity.Project{}, "", err
+	}
+	for i := range project.Edges {
+		if project.Edges[i].ID == edgeID {
+			project.Edges = append(project.Edges[:i], project.Edges[i+1:]...)
+			break
 		}
 	}
-	targetRoot, err := chainRoot(graph, parentID)
+	markSubtreeStale(&project, descendants)
+	if err := bindUnassignedWorkspaces(&project); err != nil {
+		return entity.Project{}, "", err
+	}
+	if err := validateFinalGraph(&project); err != nil {
+		return entity.Project{}, "", fmt.Errorf("图校验失败: %w", err)
+	}
+	project.Revision++
+	saved, err := s.opts.Project.Save(ctx, project)
+	if err != nil {
+		return entity.Project{}, "", err
+	}
+	s.changed(saved.ID, saved.Revision)
+	return saved, edge.TargetNodeID, nil
+}
+
+func (s *Service) ReplaceConnection(ctx context.Context, edgeID, sourceID string, expectedProjectID ...string) (entity.Project, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return entity.Project{}, err
+	}
+	project, graph, err := s.loadCurrentForProject(ctx, firstExpectedProjectID(expectedProjectID))
 	if err != nil {
 		return entity.Project{}, err
 	}
-
-	child.Parent = parentID
-	child.ParentCandidate = nil
-	markSubtreeStale(&project, subtree)
-	project.Revision++
-
+	edge, ok := graph.Edge(edgeID)
+	if !ok {
+		return entity.Project{}, fmt.Errorf("%w: %s", ErrEdgeNotFound, edgeID)
+	}
+	if edge.Kind == entity.EdgeKindCandidateSource {
+		return entity.Project{}, fmt.Errorf("%w: 候选生成来源不能改挂", ErrProtectedEdge)
+	}
+	if _, err := requireNode(graph, sourceID, "source"); err != nil {
+		return entity.Project{}, err
+	}
+	if sourceID == edge.TargetNodeID {
+		return entity.Project{}, fmt.Errorf("%w: %s", ErrSelfConnect, sourceID)
+	}
+	if sourceID == edge.SourceNodeID {
+		return project, nil
+	}
+	if _, exists := graph.EdgeBetween(sourceID, edge.TargetNodeID); exists {
+		return entity.Project{}, fmt.Errorf("%w: 目标已连接该上游", ErrEdgeConflict)
+	}
+	if graph.IsAncestor(edge.TargetNodeID, sourceID) {
+		return entity.Project{}, fmt.Errorf("%w: %s → %s", ErrCycleDetected, sourceID, edge.TargetNodeID)
+	}
+	descendants, err := graph.Subtree(edge.TargetNodeID)
+	if err != nil {
+		return entity.Project{}, err
+	}
+	if err := s.ensureEditable(append(descendants, edge.SourceNodeID, sourceID)...); err != nil {
+		return entity.Project{}, err
+	}
+	oldRoot := compatibleTopicRoot(graph, edge.TargetNodeID)
+	for i := range project.Edges {
+		if project.Edges[i].ID == edgeID {
+			project.Edges[i].SourceNodeID = sourceID
+			break
+		}
+	}
+	nextGraph, err := entity.NewGraph(&project)
+	if err != nil {
+		return entity.Project{}, err
+	}
+	if err := nextGraph.Validate(); err != nil {
+		return entity.Project{}, fmt.Errorf("图校验失败: %w", err)
+	}
+	newRoot := compatibleTopicRoot(nextGraph, edge.TargetNodeID)
 	var move port.WorkspaceMove
-	if sourceRoot != "" && sourceRoot != targetRoot {
+	if oldRoot != "" && newRoot != "" && oldRoot != newRoot {
+		for _, id := range descendants {
+			node, _ := graph.Node(id)
+			if compatibleTopicRoot(graph, id) != oldRoot || compatibleTopicRoot(nextGraph, id) != newRoot ||
+				(node.WorkspaceRootID != "" && node.WorkspaceRootID != oldRoot) {
+				return entity.Project{}, fmt.Errorf("%w: 共享后代或工作区来源不明确", ErrWorkspaceMigrationUnsafe)
+			}
+		}
 		if s.opts.Workspace == nil {
 			return entity.Project{}, fmt.Errorf("%w: workspace mover unavailable", ErrWorkspaceMoveFailed)
 		}
-		move, err = s.opts.Workspace.MoveSubtree(ctx, project.ID, sourceRoot, targetRoot, subtree)
+		move, err = s.opts.Workspace.MoveSubtree(ctx, project.ID, oldRoot, newRoot, descendants)
 		if err != nil {
 			return entity.Project{}, fmt.Errorf("%w: %v", ErrWorkspaceMoveFailed, err)
 		}
+		for _, id := range descendants {
+			node, _ := nextGraph.Node(id)
+			if node.WorkspaceRootID == oldRoot {
+				node.WorkspaceRootID = newRoot
+			}
+		}
+	}
+	markSubtreeStale(&project, descendants)
+	if err := bindUnassignedWorkspaces(&project); err != nil {
+		return entity.Project{}, errors.Join(err, rollbackMove(move))
 	}
 	if err := validateFinalGraph(&project); err != nil {
-		if rollbackErr := rollbackMove(move); rollbackErr != nil {
-			return entity.Project{}, errors.Join(fmt.Errorf("图校验失败: %w", err), rollbackErr)
-		}
-		return entity.Project{}, fmt.Errorf("图校验失败: %w", err)
+		return entity.Project{}, errors.Join(fmt.Errorf("图校验失败: %w", err), rollbackMove(move))
 	}
+	project.Revision++
 	saved, err := s.opts.Project.Save(ctx, project)
 	if err != nil {
-		if rollbackErr := rollbackMove(move); rollbackErr != nil {
-			return entity.Project{}, errors.Join(err, rollbackErr)
-		}
-		return entity.Project{}, err
+		return entity.Project{}, errors.Join(err, rollbackMove(move))
 	}
 	s.changed(saved.ID, saved.Revision)
 	return saved, nil
@@ -395,7 +493,7 @@ func (s *Service) EnsureExecutable(ctx context.Context, nodeID string) error {
 	if err := validateRunEntry(node); err != nil {
 		return err
 	}
-	if _, err := chainRoot(graph, nodeID); err != nil {
+	if _, err := graph.SnapshotForRun(nodeID); err != nil {
 		return err
 	}
 	return nil
@@ -427,10 +525,6 @@ func (s *Service) SelectNode(ctx context.Context, id string, expectedProjectID .
 
 func (s *Service) changed(projectID string, revision int64) {
 	s.changedWithReason(projectID, revision, ChangeReasonGraph)
-}
-
-func (s *Service) changedPending(projectID string, revision int64) {
-	s.changedWithReason(projectID, revision, ChangeReasonPending)
 }
 
 func (s *Service) changedWithReason(projectID string, revision int64, reason string) {

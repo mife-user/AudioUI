@@ -92,9 +92,32 @@ func intPtr(value int) *int {
 	return &value
 }
 
+func attachEdge(project *entity.Project, sourceID, targetID string) {
+	for i := range project.Nodes {
+		if project.Nodes[i].ID == targetID && project.Nodes[i].Type == valueobject.NodeTypeCandidate {
+			project.Edges = append(project.Edges, entity.Edge{
+				ID: "e_" + targetID, SourceNodeID: sourceID, TargetNodeID: targetID, Kind: entity.EdgeKindCandidateSource,
+			})
+			return
+		}
+	}
+	project.Edges = append(project.Edges, entity.Edge{
+		ID: "e_" + targetID, SourceNodeID: sourceID, TargetNodeID: targetID, Kind: entity.EdgeKindConnection,
+	})
+}
+
+func parentOf(project entity.Project, childID string) string {
+	for _, edge := range project.Edges {
+		if edge.TargetNodeID == childID {
+			return edge.SourceNodeID
+		}
+	}
+	return ""
+}
+
 func baseProject() entity.Project {
 	artifactID := "sha256:" + strings.Repeat("0", 64)
-	return entity.Project{
+	project := entity.Project{
 		Version:      valueobject.ProjectFileVersion,
 		ID:           "p_test",
 		Name:         "测试工程",
@@ -102,36 +125,36 @@ func baseProject() entity.Project {
 		ActiveNodeID: "n_a",
 		Nodes: []entity.Node{
 			{
-				ID: "n_topic", Type: valueobject.NodeTypeTopic, Title: "选题",
+				ID: "n_topic", Type: valueobject.NodeTypeTopic, Title: "选题", WorkspaceRootID: "n_topic",
 				Position: entity.Position{X: 0, Y: 0}, Size: entity.DefaultNodeSize(valueobject.NodeTypeTopic), Params: entity.NodeParams{Idea: "想法", CandidateCount: 3},
 				Rounds: []entity.Round{{N: 1, Kind: valueobject.OutputKindTopics, ArtifactID: artifactID}},
 				Locked: true,
 			},
 			{
-				ID: "n_candidate", Type: valueobject.NodeTypeCandidate, Title: "候选一",
-				Parent: "n_topic", CandidateSource: &entity.CandidateSource{TopicNodeID: "n_topic", ArtifactID: artifactID, Index: 0},
-				Size:   entity.DefaultNodeSize(valueobject.NodeTypeCandidate),
-				Rounds: []entity.Round{},
+				ID: "n_candidate", Type: valueobject.NodeTypeCandidate, Title: "候选一", WorkspaceRootID: "n_topic",
+				CandidateSource: &entity.CandidateSource{TopicNodeID: "n_topic", ArtifactID: artifactID, Index: 0},
+				Size:            entity.DefaultNodeSize(valueobject.NodeTypeCandidate),
+				Rounds:          []entity.Round{},
 			},
 			{
-				ID: "n_a", Type: valueobject.NodeTypePrompt, Title: "A",
-				Parent: "n_candidate", Position: entity.Position{X: 10, Y: 10}, Size: entity.DefaultNodeSize(valueobject.NodeTypePrompt),
+				ID: "n_a", Type: valueobject.NodeTypePrompt, Title: "A", WorkspaceRootID: "n_topic",
+				Position: entity.Position{X: 10, Y: 10}, Size: entity.DefaultNodeSize(valueobject.NodeTypePrompt),
 				Params: entity.NodeParams{Instruction: "A"}, Rounds: []entity.Round{},
 			},
 			{
-				ID: "n_b", Type: valueobject.NodeTypeAgent, Title: "B",
-				Parent: "n_a", Position: entity.Position{X: 20, Y: 20}, Size: entity.DefaultNodeSize(valueobject.NodeTypeAgent),
+				ID: "n_b", Type: valueobject.NodeTypeAgent, Title: "B", WorkspaceRootID: "n_topic",
+				Position: entity.Position{X: 20, Y: 20}, Size: entity.DefaultNodeSize(valueobject.NodeTypeAgent),
 				Rounds: []entity.Round{},
 			},
 			{
-				ID: "n_candidate2", Type: valueobject.NodeTypeCandidate, Title: "候选二",
-				Parent: "n_topic", CandidateSource: &entity.CandidateSource{TopicNodeID: "n_topic", ArtifactID: artifactID, Index: 1},
-				Size:   entity.DefaultNodeSize(valueobject.NodeTypeCandidate),
-				Rounds: []entity.Round{},
+				ID: "n_candidate2", Type: valueobject.NodeTypeCandidate, Title: "候选二", WorkspaceRootID: "n_topic",
+				CandidateSource: &entity.CandidateSource{TopicNodeID: "n_topic", ArtifactID: artifactID, Index: 1},
+				Size:            entity.DefaultNodeSize(valueobject.NodeTypeCandidate),
+				Rounds:          []entity.Round{},
 			},
 			{
-				ID: "n_c", Type: valueobject.NodeTypePrompt, Title: "C",
-				Parent: "n_candidate2", Position: entity.Position{X: 30, Y: 10}, Size: entity.DefaultNodeSize(valueobject.NodeTypePrompt),
+				ID: "n_c", Type: valueobject.NodeTypePrompt, Title: "C", WorkspaceRootID: "n_topic",
+				Position: entity.Position{X: 30, Y: 10}, Size: entity.DefaultNodeSize(valueobject.NodeTypePrompt),
 				Params: entity.NodeParams{Instruction: "C"}, Rounds: []entity.Round{},
 			},
 			{
@@ -142,6 +165,12 @@ func baseProject() entity.Project {
 			{ID: "n_agent_draft", Type: valueobject.NodeTypeAgent, Title: "Agent 草稿", Size: entity.DefaultNodeSize(valueobject.NodeTypeAgent), Rounds: []entity.Round{}},
 		},
 	}
+	attachEdge(&project, "n_topic", "n_candidate")
+	attachEdge(&project, "n_candidate", "n_a")
+	attachEdge(&project, "n_a", "n_b")
+	attachEdge(&project, "n_topic", "n_candidate2")
+	attachEdge(&project, "n_candidate2", "n_c")
+	return project
 }
 
 func projectWithSecondTree() entity.Project {
@@ -149,21 +178,23 @@ func projectWithSecondTree() entity.Project {
 	artifactID := "sha256:" + strings.Repeat("1", 64)
 	project.Nodes = append(project.Nodes,
 		entity.Node{
-			ID: "n_topic2", Type: valueobject.NodeTypeTopic, Title: "选题 2", Size: entity.DefaultNodeSize(valueobject.NodeTypeTopic),
+			ID: "n_topic2", Type: valueobject.NodeTypeTopic, Title: "选题 2", WorkspaceRootID: "n_topic2", Size: entity.DefaultNodeSize(valueobject.NodeTypeTopic),
 			Params: entity.NodeParams{Idea: "想法 2", CandidateCount: 3},
 			Rounds: []entity.Round{{N: 1, Kind: valueobject.OutputKindTopics, ArtifactID: artifactID}},
 			Locked: true,
 		},
 		entity.Node{
-			ID: "n_x", Type: valueobject.NodeTypeCandidate, Title: "候选 X",
-			Parent: "n_topic2", CandidateSource: &entity.CandidateSource{TopicNodeID: "n_topic2", ArtifactID: artifactID, Index: 0},
-			Rounds: []entity.Round{},
+			ID: "n_x", Type: valueobject.NodeTypeCandidate, Title: "候选 X", WorkspaceRootID: "n_topic2",
+			CandidateSource: &entity.CandidateSource{TopicNodeID: "n_topic2", ArtifactID: artifactID, Index: 0},
+			Rounds:          []entity.Round{},
 		},
 		entity.Node{
-			ID: "n_y", Type: valueobject.NodeTypePrompt, Title: "Y",
-			Parent: "n_x", Size: entity.DefaultNodeSize(valueobject.NodeTypePrompt), Params: entity.NodeParams{Instruction: "Y"}, Rounds: []entity.Round{},
+			ID: "n_y", Type: valueobject.NodeTypePrompt, Title: "Y", WorkspaceRootID: "n_topic2",
+			Size: entity.DefaultNodeSize(valueobject.NodeTypePrompt), Params: entity.NodeParams{Instruction: "Y"}, Rounds: []entity.Round{},
 		},
 	)
+	attachEdge(&project, "n_topic2", "n_x")
+	attachEdge(&project, "n_x", "n_y")
 	return project
 }
 
@@ -187,6 +218,15 @@ func newHarness(t *testing.T, project entity.Project) *harness {
 		},
 	})
 	return &harness{service: service, session: session, mover: mover, changes: changes}
+}
+
+func (h *harness) parents(t *testing.T, id string) []string {
+	t.Helper()
+	graph, err := entity.NewGraph(&h.session.project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return graph.Parents(id)
 }
 
 func (h *harness) node(t *testing.T, id string) *entity.Node {

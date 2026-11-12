@@ -9,7 +9,7 @@ import (
 
 func graphProject() Project {
 	return Project{
-		Version: valueobject.ProjectFileVersion, ID: "p_test", Name: "测试", Revision: 1,
+		Version: 3, ID: "p_test", Name: "测试", Revision: 1,
 		ActiveNodeID: "n_a",
 		Nodes: []Node{
 			{ID: "n_topic", Type: valueobject.NodeTypeTopic, Title: "选题", Rounds: []Round{{N: 1, Kind: valueobject.OutputKindTopics, ArtifactID: "sha256:a"}}},
@@ -159,3 +159,152 @@ func TestGraphMissingNode(t *testing.T) {
 }
 
 func intPtr(value int) *int { return &value }
+
+func dagProject() Project {
+	project := graphProject()
+	project.Version = valueobject.ProjectFileVersion
+	for i := range project.Nodes {
+		node := &project.Nodes[i]
+		if node.ID != "n_draft" {
+			node.WorkspaceRootID = "n_topic"
+		}
+		if node.Parent == "" {
+			continue
+		}
+		kind := EdgeKindConnection
+		if node.Type == valueobject.NodeTypeCandidate {
+			kind = EdgeKindCandidateSource
+		}
+		project.Edges = append(project.Edges, Edge{
+			ID: "e_" + node.ID, SourceNodeID: node.Parent, TargetNodeID: node.ID, Kind: kind,
+		})
+		node.Parent = ""
+	}
+	return project
+}
+
+func TestDAGAcceptsMultipleInputsAndArbitraryNodeTypes(t *testing.T) {
+	project := dagProject()
+	project.Edges = append(project.Edges,
+		Edge{ID: "e_merge", SourceNodeID: "n_candidate2", TargetNodeID: "n_b", Kind: EdgeKindConnection},
+		Edge{ID: "e_same_type", SourceNodeID: "n_a", TargetNodeID: "n_c", Kind: EdgeKindConnection},
+		Edge{ID: "e_topic_input", SourceNodeID: "n_draft", TargetNodeID: "n_topic", Kind: EdgeKindConnection},
+	)
+	graph, err := NewGraph(&project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := graph.Validate(); err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+	if parents := graph.Parents("n_b"); len(parents) != 2 || parents[0] != "n_script" || parents[1] != "n_candidate2" {
+		t.Fatalf("parents = %v", parents)
+	}
+	if !graph.IsAncestor("n_candidate2", "n_b") || !graph.IsAncestor("n_a", "n_c") {
+		t.Fatal("ancestor relationships missing")
+	}
+	descendants, err := graph.Subtree("n_topic")
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := make(map[string]bool)
+	for _, id := range descendants {
+		if seen[id] {
+			t.Fatalf("shared descendant %s visited twice", id)
+		}
+		seen[id] = true
+	}
+	if len(descendants) != 8 {
+		t.Fatalf("descendants = %v", descendants)
+	}
+	chains := graph.LeafChains()
+	if len(chains) != 2 || !chains[0].Ambiguous || len(chains[0].Path) != 0 || len(chains[0].NodeIDs) == 0 {
+		t.Fatalf("chains = %+v", chains)
+	}
+}
+
+func TestDAGRejectsInvalidEdgesAndCandidateSources(t *testing.T) {
+	cases := []struct {
+		name   string
+		mutate func(*Project)
+	}{
+		{"missing endpoint", func(p *Project) { p.Edges[0].SourceNodeID = "n_missing" }},
+		{"self edge", func(p *Project) { p.Edges[1].SourceNodeID = p.Edges[1].TargetNodeID }},
+		{"long cycle", func(p *Project) {
+			p.Edges = append(p.Edges, Edge{ID: "e_cycle", SourceNodeID: "n_b", TargetNodeID: "n_topic", Kind: EdgeKindConnection})
+		}},
+		{"duplicate endpoints", func(p *Project) {
+			duplicate := p.Edges[1]
+			duplicate.ID = "e_duplicate"
+			p.Edges = append(p.Edges, duplicate)
+		}},
+		{"duplicate edge id", func(p *Project) { p.Edges[1].ID = p.Edges[0].ID }},
+		{"invalid edge kind", func(p *Project) { p.Edges[1].Kind = "unknown" }},
+		{"missing source edge", func(p *Project) { p.Edges[0].Kind = EdgeKindConnection }},
+		{"forged candidate source", func(p *Project) { p.Nodes[1].CandidateSource.TopicNodeID = "n_candidate2" }},
+		{"legacy parent in v4", func(p *Project) { p.Nodes[2].Parent = "n_topic" }},
+		{"invalid workspace root", func(p *Project) { p.Nodes[2].WorkspaceRootID = "n_a" }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			project := dagProject()
+			tc.mutate(&project)
+			graph, err := NewGraph(&project)
+			if err == nil {
+				err = graph.Validate()
+			}
+			if err == nil {
+				t.Fatal("expected graph rejection")
+			}
+		})
+	}
+}
+
+func TestDAGRunSnapshotRejectsAmbiguousInputsAndOutputs(t *testing.T) {
+	project := dagProject()
+	graph, err := NewGraph(&project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := graph.SnapshotForRun("n_agent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.Version != 2 || len(snapshot.PathEdges) != len(snapshot.ChainPath)-1 {
+		t.Fatalf("snapshot = %+v", snapshot)
+	}
+	if err := snapshot.Validate(); err != nil {
+		t.Fatalf("snapshot.Validate() = %v", err)
+	}
+	project.Edges = append(project.Edges, Edge{ID: "e_extra_input", SourceNodeID: "n_draft", TargetNodeID: "n_agent", Kind: EdgeKindConnection})
+	graph, _ = NewGraph(&project)
+	if err := graph.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := graph.SnapshotForRun("n_agent"); !errors.Is(err, ErrRunGraphUnsupported) {
+		t.Fatalf("multi-input error = %v", err)
+	}
+	project = dagProject()
+	project.Nodes = append(project.Nodes, Node{ID: "n_script2", Type: valueobject.NodeTypeScript, WorkspaceRootID: "n_topic"})
+	project.Edges = append(project.Edges, Edge{ID: "e_script2", SourceNodeID: "n_agent", TargetNodeID: "n_script2", Kind: EdgeKindConnection})
+	graph, _ = NewGraph(&project)
+	if err := graph.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := graph.SnapshotForRun("n_agent"); !errors.Is(err, ErrOutputBindingConflict) {
+		t.Fatalf("multiple outputs error = %v", err)
+	}
+}
+
+func TestDAGRunRejectsWorkspaceRootMismatch(t *testing.T) {
+	project := dagProject()
+	project.Nodes = append(project.Nodes, Node{ID: "n_topic2", Type: valueobject.NodeTypeTopic, WorkspaceRootID: "n_topic2"})
+	project.Nodes[3].WorkspaceRootID = "n_topic2"
+	graph, _ := NewGraph(&project)
+	if err := graph.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := graph.SnapshotForRun("n_agent"); !errors.Is(err, ErrWorkspaceRootMismatch) {
+		t.Fatalf("workspace mismatch error = %v", err)
+	}
+}

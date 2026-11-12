@@ -43,9 +43,19 @@ func setNodeRounds(project *entity.Project, nodeID string, rounds ...entity.Roun
 
 func setCandidateArtifact(project *entity.Project, artifactID string) {
 	for i := range project.Nodes {
-		if project.Nodes[i].Type == valueobject.NodeTypeCandidate && project.Nodes[i].Parent == "n_topic" {
+		if project.Nodes[i].Type == valueobject.NodeTypeCandidate && project.Nodes[i].CandidateSource != nil && project.Nodes[i].CandidateSource.TopicNodeID == "n_topic" {
 			project.Nodes[i].CandidateSource.ArtifactID = artifactID
 		}
+	}
+}
+
+func appendNodeWithEdge(project *entity.Project, node entity.Node, sourceID string) {
+	if node.WorkspaceRootID == "" {
+		node.WorkspaceRootID = "n_topic"
+	}
+	project.Nodes = append(project.Nodes, node)
+	if sourceID != "" {
+		attachEdge(project, sourceID, node.ID)
 	}
 }
 
@@ -92,9 +102,9 @@ func TestRunGraphAndNodeExposeOnlyPath(t *testing.T) {
 
 func TestSnapshotRunToolsIgnoreLiveGraphAndUseFrozenArtifactAuthorization(t *testing.T) {
 	h := newPendingHarness(t, baseProject())
-	h.session.project.Nodes = append(h.session.project.Nodes, entity.Node{
-		ID: "n_output", Type: valueobject.NodeTypeScript, Title: "绑定输出", Parent: "n_b",
-	})
+	appendNodeWithEdge(&h.session.project, entity.Node{
+		ID: "n_output", Type: valueobject.NodeTypeScript, Title: "绑定输出",
+	}, "n_b")
 	for i := range h.session.project.Nodes {
 		if h.session.project.Nodes[i].ID == "n_a" {
 			h.session.project.Nodes[i].Rounds = []entity.Round{{N: 1, Kind: valueobject.OutputKindScript, ArtifactID: "sha256:legacy-round"}}
@@ -163,17 +173,15 @@ func TestSnapshotRunArtifactUsesExactScriptVersion(t *testing.T) {
 	setNodeRounds(&h.session.project, "n_topic", entity.Round{N: 1, Kind: valueobject.OutputKindTopics, ArtifactID: topicArtifact.ID})
 	oldArtifact := putRunArtifact(t, h, valueobject.OutputKindScript, "n_script", []byte(`{"title":"旧版本","scenes":[{"narration":"旧旁白","duration":1}]}`))
 	latestArtifact := putRunArtifact(t, h, valueobject.OutputKindScript, "n_script", []byte(`{"title":"快照版本","scenes":[{"narration":"快照旁白","duration":2}]}`))
-	h.session.project.Nodes = append(h.session.project.Nodes,
-		entity.Node{
-			ID: "n_script", Type: valueobject.NodeTypeScript, Title: "脚本",
-			Parent: "n_b", ScriptVersions: []entity.ScriptVersion{
-				{N: 1, ArtifactID: oldArtifact.ID, RunID: "r_old"},
-				{N: 2, ArtifactID: latestArtifact.ID, RunID: "r_latest"},
-			},
+	appendNodeWithEdge(&h.session.project, entity.Node{
+		ID: "n_script", Type: valueobject.NodeTypeScript, Title: "脚本",
+		ScriptVersions: []entity.ScriptVersion{
+			{N: 1, ArtifactID: oldArtifact.ID, RunID: "r_old"},
+			{N: 2, ArtifactID: latestArtifact.ID, RunID: "r_latest"},
 		},
-		entity.Node{ID: "n_prompt2", Type: valueobject.NodeTypePrompt, Title: "后续任务", Parent: "n_script", Params: entity.NodeParams{Instruction: "后续"}},
-		entity.Node{ID: "n_agent2", Type: valueobject.NodeTypeAgent, Title: "后续 Agent", Parent: "n_prompt2"},
-	)
+	}, "n_b")
+	appendNodeWithEdge(&h.session.project, entity.Node{ID: "n_prompt2", Type: valueobject.NodeTypePrompt, Title: "后续任务", Params: entity.NodeParams{Instruction: "后续"}}, "n_script")
+	appendNodeWithEdge(&h.session.project, entity.Node{ID: "n_agent2", Type: valueobject.NodeTypeAgent, Title: "后续 Agent"}, "n_prompt2")
 	graph, err := entity.NewGraph(&h.session.project)
 	if err != nil {
 		t.Fatal(err)
@@ -285,7 +293,8 @@ func TestSubmitRunReplyCommitsScriptAndDeduplicatesByRequestIdentity(t *testing.
 		t.Fatal(err)
 	}
 	resultNode, ok := graph.Node(first.ResultNodeID)
-	if !ok || resultNode.Type != valueobject.NodeTypeScript || resultNode.Parent != scope.NodeID || len(resultNode.ScriptVersions) != 1 || resultNode.ScriptVersions[0].ArtifactID != first.ArtifactID {
+	outputEdge, hasOutputEdge := graph.EdgeBetween(scope.NodeID, first.ResultNodeID)
+	if !ok || resultNode.Type != valueobject.NodeTypeScript || !hasOutputEdge || outputEdge.Kind != entity.EdgeKindConnection || len(resultNode.ScriptVersions) != 1 || resultNode.ScriptVersions[0].ArtifactID != first.ArtifactID {
 		t.Fatalf("generated script node = %+v, ok=%t", resultNode, ok)
 	}
 	for _, other := range h.session.project.Nodes {

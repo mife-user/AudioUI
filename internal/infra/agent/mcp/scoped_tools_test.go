@@ -132,9 +132,13 @@ func TestSnapshotReplyRejectsKindOutsideOutputContract(t *testing.T) {
 	options := scopedMCPOptions(t.TempDir())
 	project := entity.Project{Version: valueobject.ProjectFileVersion, ID: "p_scoped", Nodes: []entity.Node{
 		{ID: "n_topic", Type: valueobject.NodeTypeTopic, Rounds: []entity.Round{{N: 1, Kind: valueobject.OutputKindTopics, ArtifactID: "sha256:topics"}}},
-		{ID: "n_candidate", Type: valueobject.NodeTypeCandidate, Parent: "n_topic", CandidateSource: &entity.CandidateSource{TopicNodeID: "n_topic", ArtifactID: "sha256:topics", Index: 0}},
-		{ID: "n_prompt", Type: valueobject.NodeTypePrompt, Parent: "n_candidate"},
-		{ID: "n_agent", Type: valueobject.NodeTypeAgent, Parent: "n_prompt"},
+		{ID: "n_candidate", Type: valueobject.NodeTypeCandidate, CandidateSource: &entity.CandidateSource{TopicNodeID: "n_topic", ArtifactID: "sha256:topics", Index: 0}},
+		{ID: "n_prompt", Type: valueobject.NodeTypePrompt},
+		{ID: "n_agent", Type: valueobject.NodeTypeAgent},
+	}, Edges: []entity.Edge{
+		{ID: "e_n_candidate", SourceNodeID: "n_topic", TargetNodeID: "n_candidate", Kind: entity.EdgeKindCandidateSource},
+		{ID: "e_n_prompt", SourceNodeID: "n_candidate", TargetNodeID: "n_prompt", Kind: entity.EdgeKindConnection},
+		{ID: "e_n_agent", SourceNodeID: "n_prompt", TargetNodeID: "n_agent", Kind: entity.EdgeKindConnection},
 	}}
 	graph, err := entity.NewGraph(&project)
 	if err != nil {

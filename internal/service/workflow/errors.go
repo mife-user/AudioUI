@@ -9,15 +9,17 @@ import (
 
 var (
 	ErrNodeNotFound             = errors.New("NODE_NOT_FOUND")
+	ErrEdgeNotFound             = errors.New("EDGE_NOT_FOUND")
+	ErrProtectedEdge            = errors.New("PROTECTED_EDGE")
+	ErrEdgeConflict             = errors.New("EDGE_CONFLICT")
+	ErrWorkspaceMigrationUnsafe = errors.New("WORKSPACE_MIGRATION_UNSAFE")
 	ErrNodeConnectionInvalid    = entity.ErrNodeConnectionInvalid
 	ErrOutputBindingConflict    = entity.ErrOutputBindingConflict
 	ErrRunEntryUnavailable      = errors.New("RUN_ENTRY_UNAVAILABLE")
 	ErrNodeLocked               = errors.New("NODE_LOCKED")
 	ErrRunningChainLocked       = errors.New("RUNNING_CHAIN_LOCKED")
-	ErrReparentConfirmRequired  = errors.New("REPARENT_CONFIRM_REQUIRED")
 	ErrSelfConnect              = errors.New("SELF_CONNECT")
 	ErrCycleDetected            = errors.New("CYCLE_DETECTED")
-	ErrTopicRootParent          = errors.New("TOPIC_ROOT_PARENT")
 	ErrNotInChain               = errors.New("NOT_IN_CHAIN")
 	ErrCandidateInvalid         = errors.New("CANDIDATE_INVALID")
 	ErrScriptVersionNotFound    = errors.New("SCRIPT_VERSION_NOT_FOUND")

@@ -3,6 +3,7 @@
 
 export type {
     CandidateSource,
+    Edge,
     GraphMutationReceipt,
     Node,
     NodeConstraints,

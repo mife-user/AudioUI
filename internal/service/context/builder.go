@@ -424,7 +424,7 @@ func (b *Builder) resolveSnapshot(ctx context.Context, input Input, includeWorks
 		var ancestor resolvedAncestor
 		switch node.Type {
 		case valueobject.NodeTypeCandidate:
-			if node.CandidateSource == nil || node.CandidateSource.TopicNodeID != node.Parent {
+			if node.CandidateSource == nil || (snapshot.ProjectVersion < valueobject.DAGProjectVersion && node.CandidateSource.TopicNodeID != node.Parent) {
 				return resolvedInput{}, fmt.Errorf("%w: candidate %s", ErrCandidateInvalid, node.ID)
 			}
 			reference, ok := snapshotArtifact(snapshot, node.ID)

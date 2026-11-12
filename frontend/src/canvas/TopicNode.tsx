@@ -38,7 +38,11 @@ export const TopicNode = memo(function TopicNode({ id, data, selected }: NodePro
     onUpdateTopicParams,
     onStartRun,
   } = data
-  const requiredHandles = topicCandidateIndexes.map((index) => ({ id: `topic-candidate-${index}`, type: 'source' as const }))
+  const requiredHandles = [
+    { id: 'topic-input', type: 'target' as const },
+    { id: 'topic-output', type: 'source' as const },
+    ...topicCandidateIndexes.map((index) => ({ id: `topic-candidate-${index}`, type: 'source' as const })),
+  ]
   useMeasuredNodeHandles(id, nodeHandleLayoutKey('topic', data), projectId ?? '', requiredHandles, data.onNodeHandlesMeasured)
   const runState = runSubmitting ? '正在启动' : runStatusLabel(runStatus)
   const status = runningLocked
@@ -55,6 +59,26 @@ export const TopicNode = memo(function TopicNode({ id, data, selected }: NodePro
     <>
       <NodeResizeHandles nodeId={id} visible={selected && !node.collapsed} disabled={mutationsDisabled} />
       <article className={`canvas-node topic-node${pathHighlighted ? ' is-path' : ''}${runningLocked ? ' is-running-locked' : ''}${node.locked ? ' is-content-locked' : ''}${node.collapsed ? ' is-collapsed' : ''}`}>
+        <Handle
+          id="topic-input"
+          type="target"
+          position={Position.Left}
+          isConnectable={!runningLocked}
+          isConnectableStart={false}
+          isConnectableEnd={!runningLocked}
+          aria-label={`连接到 ${node.title}`}
+          className="node-input-handle"
+        />
+        <Handle
+          id="topic-output"
+          type="source"
+          position={Position.Right}
+          isConnectable={!runningLocked}
+          isConnectableStart={!runningLocked}
+          isConnectableEnd={false}
+          aria-label={`${node.title} 输出端口`}
+          className="node-output-handle topic-manual-output"
+        />
         <header className="canvas-node-head" tabIndex={-1}>
           <span className="canvas-node-kind topic-kind">选题</span>
           <strong title={node.title}>{node.title}</strong>

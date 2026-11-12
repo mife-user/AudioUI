@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { Node, WorkspaceSnapshot } from '../../bindings/audio-ui/internal/domain/entity'
+import type { Edge, Node, WorkspaceSnapshot } from '../../bindings/audio-ui/internal/domain/entity'
 import { OutputKind, PendingStatus, RunStatus } from '../../bindings/audio-ui/internal/domain/valueobject'
-import { buildFlowEdges, buildFlowModel, deriveHighlightedPath, nodeHandleLayoutKey, subtreeSize, topicRootId } from './flowModel'
+import { buildFlowEdges, buildFlowModel, deriveHighlightedPath, inputHandleId, nodeHandleLayoutKey, outputHandleId } from './flowModel'
 
 function makeNode(id: string, type: string, parent = '', overrides: Partial<Node> = {}): Node {
   return {
@@ -20,12 +20,31 @@ function makeNode(id: string, type: string, parent = '', overrides: Partial<Node
 }
 
 function snapshot(nodes: Node[], activeNodeId = 'n_prompt'): WorkspaceSnapshot {
+  const byId = new Map(nodes.map((node) => [node.id, node]))
+  const edges: Edge[] = nodes.filter((node) => node.parent && byId.has(node.parent)).map((node) => ({
+    id: `edge-${node.parent}-${node.id}`,
+    sourceNodeId: node.parent ?? '',
+    targetNodeId: node.id,
+    kind: node.candidateSource?.topicNodeId === node.parent ? 'candidate_source' : 'connection',
+  }))
+  const nodePaths: Record<string, string[]> = {}
+  for (const node of nodes) {
+    const path: string[] = []
+    let current: Node | undefined = node
+    while (current && !path.includes(current.id)) {
+      path.unshift(current.id)
+      current = current.parent ? byId.get(current.parent) : undefined
+    }
+    nodePaths[node.id] = path
+  }
   return {
     project: { id: 'p_test', name: '测试', revision: 1, activeNodeId },
     nodes,
+    edges,
+    nodePaths,
     pending: [],
     runs: [],
-    chains: [{ id: 'c_n_prompt', tailNodeId: 'n_prompt', path: ['n_topic', 'n_candidate', 'n_prompt'], label: '链路', status: 'idle' }],
+    chains: [{ id: 'c_n_prompt', tailNodeId: 'n_prompt', path: ['n_topic', 'n_candidate', 'n_prompt'], nodeIds: ['n_topic', 'n_candidate', 'n_prompt'], ambiguous: false, label: '链路', status: 'idle' }],
     lockedNodeIds: ['n_prompt'],
   }
 }
@@ -115,10 +134,10 @@ describe('flowModel', () => {
       [candidate.id]: nodeHandleLayoutKey(candidateFlowNode.type, candidateFlowNode.data),
     }
 
-    expect(buildFlowEdges(model.nodes, {})).toEqual([])
-    expect(buildFlowEdges(model.nodes, { [topic.id]: ready[topic.id] })).toEqual([])
-    expect(buildFlowEdges(model.nodes, ready)).toHaveLength(1)
-    expect(buildFlowEdges(model.nodes, ready)[0]?.sourceHandle).toBe('topic-candidate-0')
+    expect(buildFlowEdges(model.nodes, graph.edges ?? [], {})).toEqual([])
+    expect(buildFlowEdges(model.nodes, graph.edges ?? [], { [topic.id]: ready[topic.id] })).toEqual([])
+    expect(buildFlowEdges(model.nodes, graph.edges ?? [], ready)).toHaveLength(1)
+    expect(buildFlowEdges(model.nodes, graph.edges ?? [], ready)[0]?.sourceHandle).toBe('topic-candidate-0')
   })
 
   it('updates edge obstacles from live node positions and resize dimensions', () => {
@@ -126,11 +145,12 @@ describe('flowModel', () => {
     const candidate = makeNode('n_candidate', 'candidate', topic.id, {
       candidateSource: { topicNodeId: topic.id, artifactId: 'sha256:topics', index: 0 },
     })
-    const model = buildFlowModel(snapshot([topic, candidate]), vi.fn())
+    const view = snapshot([topic, candidate])
+    const model = buildFlowModel(view, vi.fn())
     const resizedNodes = model.nodes.map((node) => node.id === candidate.id
       ? { ...node, position: { x: 500, y: 220 }, style: { ...node.style, width: 420, height: 260 } }
       : node)
-    const edge = buildFlowEdges(resizedNodes)[0]
+    const edge = buildFlowEdges(resizedNodes, view.edges ?? [])[0]
 
     expect(edge?.data?.obstacles).toContainEqual({
       nodeId: candidate.id, x: 500, y: 220, width: 420, height: 260,
@@ -142,11 +162,12 @@ describe('flowModel', () => {
     const candidate = makeNode('n_candidate', 'candidate', topic.id, {
       candidateSource: { topicNodeId: topic.id, artifactId: 'sha256:topics', index: 0 },
     })
-    const model = buildFlowModel(snapshot([topic, candidate]), vi.fn())
+    const view = snapshot([topic, candidate])
+    const model = buildFlowModel(view, vi.fn())
     const resizingNodes = model.nodes.map((node) => node.id === candidate.id
       ? { ...node, measured: { width: 420, height: 260 } }
       : node)
-    const edge = buildFlowEdges(resizingNodes)[0]
+    const edge = buildFlowEdges(resizingNodes, view.edges ?? [])[0]
 
     expect(edge?.data?.obstacles).toContainEqual({
       nodeId: candidate.id, x: 0, y: 0, width: 420, height: 260,
@@ -245,6 +266,8 @@ describe('flowModel', () => {
       id: 'c_n_next_prompt',
       tailNodeId: nextPrompt.id,
       path: [topic.id, candidate.id, prompt.id, agent.id, script.id, nextPrompt.id],
+      nodeIds: [topic.id, candidate.id, prompt.id, agent.id, script.id, nextPrompt.id],
+      ambiguous: false,
       label: '链路',
       status: 'idle',
     }]
@@ -278,18 +301,45 @@ describe('flowModel', () => {
     expect(nodeHandleLayoutKey(before.type, before.data)).not.toBe(nodeHandleLayoutKey(after.type, after.data))
   })
 
-  it('reports subtree size and root identity for v2 candidate branches', () => {
-    const nodes = [
-      makeNode('n_topic', 'topic'),
-      makeNode('n_candidate', 'candidate', 'n_topic', {
-        candidateSource: { topicNodeId: 'n_topic', artifactId: 'sha256:topics', index: 0 },
-      }),
-      makeNode('n_prompt', 'prompt', 'n_candidate'),
-      makeNode('n_agent', 'agent', 'n_prompt'),
+  it('renders all authoritative edges for multiple upstreams without reading parent', () => {
+    const prompt = makeNode('n_prompt', 'prompt', 'n_unrelated')
+    const script = makeNode('n_script', 'script')
+    const agent = makeNode('n_agent', 'agent', 'n_unrelated')
+    const view = snapshot([prompt, script, agent], agent.id)
+    view.edges = [
+      { id: 'edge_a', sourceNodeId: prompt.id, targetNodeId: agent.id, kind: 'connection' },
+      { id: 'edge_b', sourceNodeId: script.id, targetNodeId: agent.id, kind: 'connection' },
     ]
+    view.nodePaths = {}
+    view.chains = [{ id: 'c_n_agent', tailNodeId: agent.id, path: [], nodeIds: [prompt.id, script.id, agent.id], ambiguous: true, label: '汇合', status: 'idle' }]
 
-    expect(subtreeSize(nodes, 'n_prompt')).toBe(2)
-    expect(topicRootId(nodes, 'n_agent')).toBe('n_topic')
-    expect(topicRootId(nodes, 'n_topic')).toBe('n_topic')
+    const model = buildFlowModel(view, vi.fn())
+    expect(model.edges.map((edge) => [edge.id, edge.source, edge.target])).toEqual([
+      ['edge_a', prompt.id, agent.id], ['edge_b', script.id, agent.id],
+    ])
+    expect([...deriveHighlightedPath(view)]).toEqual([prompt.id, script.id, agent.id])
+    expect(model.nodes.find((node) => node.id === agent.id)?.data.hasInputs).toBe(true)
+  })
+
+  it('offers both handle types on every unconnected node', () => {
+    for (const type of ['topic', 'candidate', 'prompt', 'agent', 'script']) {
+      const value = makeNode(`n_${type}`, type)
+      expect(inputHandleId(value)).toBe(`${type}-input`)
+      expect(outputHandleId(value)).toBe(`${type}-output`)
+    }
+  })
+
+  it('does not guess an output binding when an Agent has multiple Script targets', () => {
+    const agent = makeNode('n_agent', 'agent')
+    const first = makeNode('n_script_a', 'script')
+    const second = makeNode('n_script_b', 'script')
+    const view = snapshot([agent, first, second])
+    view.edges = [
+      { id: 'edge_a', sourceNodeId: agent.id, targetNodeId: first.id, kind: 'connection' },
+      { id: 'edge_b', sourceNodeId: agent.id, targetNodeId: second.id, kind: 'connection' },
+    ]
+    const data = buildFlowModel(view, vi.fn()).nodes.find((node) => node.id === agent.id)?.data
+    expect(data?.outputScript).toBeUndefined()
+    expect(data?.outputAmbiguous).toBe(true)
   })
 })

@@ -16,7 +16,7 @@ vi.mock('../canvas/WorkspaceCanvas', () => ({
 
 const emptyProject: WorkspaceSnapshot = {
   project: { id: 'p_one', name: '测试工程', revision: 2, activeNodeId: '' },
-  nodes: [], pending: [], runs: [], chains: [], lockedNodeIds: [],
+  nodes: [], edges: [], nodePaths: {}, pending: [], runs: [], chains: [], lockedNodeIds: [],
 }
 
 function deferred<T>() {
@@ -58,6 +58,8 @@ describe('WorkspacePage', () => {
     const api: GraphAPI = {
       addNode: vi.fn().mockResolvedValue({ projectId: 'p_one', projectRevision: 4, nodeId: 'n_created' }),
       connect: vi.fn().mockResolvedValue({ projectId: 'p_one', projectRevision: 4, nodeId: 'n_selected' }),
+      disconnect: vi.fn().mockResolvedValue({ projectId: 'p_one', projectRevision: 4, nodeId: 'n_selected' }),
+      replaceConnection: vi.fn().mockResolvedValue({ projectId: 'p_one', projectRevision: 4, nodeId: 'n_selected' }),
       moveNode: vi.fn().mockResolvedValue({ projectId: 'p_one', projectRevision: 4, nodeId: 'n_selected' }),
       setNodeLayout: vi.fn().mockResolvedValue({ projectId: 'p_one', projectRevision: 4, nodeId: 'n_selected' }),
       setNodeCollapsed: vi.fn().mockResolvedValue({ projectId: 'p_one', projectRevision: 4, nodeId: 'n_selected' }),
@@ -85,6 +87,8 @@ describe('WorkspacePage', () => {
     const api: GraphAPI = {
       addNode: vi.fn().mockResolvedValue({ projectId: 'p_one', projectRevision: 4, nodeId: 'n_created' }),
       connect: vi.fn().mockResolvedValue({ projectId: 'p_one', projectRevision: 4, nodeId: 'n_selected' }),
+      disconnect: vi.fn().mockResolvedValue({ projectId: 'p_one', projectRevision: 4, nodeId: 'n_selected' }),
+      replaceConnection: vi.fn().mockResolvedValue({ projectId: 'p_one', projectRevision: 4, nodeId: 'n_selected' }),
       moveNode: vi.fn().mockResolvedValue({ projectId: 'p_one', projectRevision: 4, nodeId: 'n_selected' }),
       setNodeLayout: vi.fn().mockResolvedValue({ projectId: 'p_one', projectRevision: 4, nodeId: 'n_selected' }),
       setNodeCollapsed: vi.fn().mockResolvedValue({ projectId: 'p_one', projectRevision: 4, nodeId: 'n_selected' }),

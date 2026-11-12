@@ -61,10 +61,7 @@ func TestAddNodeValidation(t *testing.T) {
 		want  error
 	}{
 		{"unknown type", AddNodeInput{Type: "render"}, ErrUnknownNodeType},
-		{"topic with parent", AddNodeInput{Type: valueobject.NodeTypeTopic, Parent: "n_topic"}, ErrTopicRootParent},
 		{"missing parent", AddNodeInput{Type: valueobject.NodeTypePrompt, Parent: "n_missing"}, ErrNodeNotFound},
-		{"draft parent", AddNodeInput{Type: valueobject.NodeTypePrompt, Parent: "n_draft"}, ErrNotInChain},
-		{"topic connection invalid", AddNodeInput{Type: valueobject.NodeTypePrompt, Parent: "n_topic"}, ErrNodeConnectionInvalid},
 		{"parentCandidate unsupported", AddNodeInput{Type: valueobject.NodeTypePrompt, Parent: "n_topic", ParentCandidate: intPtr(3)}, ErrNodeConnectionInvalid},
 		{"candidate must be generated", AddNodeInput{Type: valueobject.NodeTypeCandidate}, ErrNodeConnectionInvalid},
 		{"invalid position", AddNodeInput{Type: valueobject.NodeTypePrompt, Position: entity.Position{X: math.NaN()}}, ErrInvalidPosition},
@@ -93,7 +90,7 @@ func TestGraphCommandsRejectStaleProjectScope(t *testing.T) {
 	if !errors.Is(err, ErrProjectChanged) {
 		t.Fatalf("AddNode error = %v, want PROJECT_CHANGED", err)
 	}
-	if _, err := h.service.Connect(context.Background(), "n_topic", "n_draft", nil, false, wrongProjectID); !errors.Is(err, ErrProjectChanged) {
+	if _, err := h.service.Connect(context.Background(), "n_topic", "n_draft", wrongProjectID); !errors.Is(err, ErrProjectChanged) {
 		t.Fatalf("Connect error = %v, want PROJECT_CHANGED", err)
 	}
 	if _, err := h.service.MoveNode(context.Background(), "n_a", 4, 5, wrongProjectID); !errors.Is(err, ErrProjectChanged) {
@@ -122,7 +119,7 @@ func TestAddNodeConnectionMatrix(t *testing.T) {
 		t.Fatal(err)
 	}
 	agent := project.Nodes[len(project.Nodes)-1]
-	if agent.Type != valueobject.NodeTypeAgent || agent.Parent != "n_a" {
+	if agent.Type != valueobject.NodeTypeAgent || parentOf(project, agent.ID) != "n_a" || agent.WorkspaceRootID != "n_topic" {
 		t.Fatalf("agent = %+v", agent)
 	}
 
@@ -132,32 +129,41 @@ func TestAddNodeConnectionMatrix(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if added := project.Nodes[len(project.Nodes)-1]; added.Type != valueobject.NodeTypeScript || added.Parent != agent.ID {
+	if added := project.Nodes[len(project.Nodes)-1]; added.Type != valueobject.NodeTypeScript || parentOf(project, added.ID) != agent.ID {
 		t.Fatalf("script = %+v", added)
 	}
 
 	if _, err := h.service.AddNode(context.Background(), AddNodeInput{
 		Type: valueobject.NodeTypePrompt, Parent: "n_a",
-	}); !errors.Is(err, ErrNodeConnectionInvalid) {
-		t.Fatalf("prompt-to-prompt error = %v, want NODE_CONNECTION_INVALID", err)
+	}); err != nil {
+		t.Fatalf("arbitrary node connection should be accepted: %v", err)
 	}
 }
 
-func TestAddNodeEnforcesSingleScriptOutput(t *testing.T) {
+func TestSecondScriptOutputIsConnectedButRunTargetIsAmbiguous(t *testing.T) {
 	h := newHarness(t, baseProject())
-	if _, err := h.service.AddNode(context.Background(), AddNodeInput{
+	project, err := h.service.AddNode(context.Background(), AddNodeInput{
 		Type: valueobject.NodeTypeScript, Parent: "n_b",
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
-	saves := h.session.saveCount
-	if _, err := h.service.AddNode(context.Background(), AddNodeInput{
+	first := project.Nodes[len(project.Nodes)-1].ID
+	project, err = h.service.AddNode(context.Background(), AddNodeInput{
 		Type: valueobject.NodeTypeScript, Parent: "n_b",
-	}); !errors.Is(err, ErrOutputBindingConflict) {
-		t.Fatalf("error = %v, want OUTPUT_BINDING_CONFLICT", err)
+	})
+	if err != nil {
+		t.Fatalf("second script connection should be accepted: %v", err)
 	}
-	if h.session.saveCount != saves {
-		t.Fatal("conflicting output binding was saved")
+	second := project.Nodes[len(project.Nodes)-1].ID
+	if parentOf(project, first) != "n_b" || parentOf(project, second) != "n_b" {
+		t.Fatalf("script edges = %+v", project.Edges)
+	}
+	if _, _, err := h.service.BeginRun(context.Background(), "r_ambiguous", "n_b"); !errors.Is(err, ErrOutputBindingConflict) {
+		t.Fatalf("ambiguous output error = %v, want OUTPUT_BINDING_CONFLICT", err)
+	}
+	if h.service.isNodeLocked("n_b") {
+		t.Fatal("ambiguous run left a lock")
 	}
 }
 
@@ -186,81 +192,91 @@ func TestAddNodeRejectsRunLockedParent(t *testing.T) {
 	}
 }
 
-func TestConnectRequiresConfirmAndMovesSubtreeStale(t *testing.T) {
+func TestConnectAddsInputAndKeepsExistingEdges(t *testing.T) {
 	h := newHarness(t, baseProject())
-	_, err := h.service.Connect(context.Background(), "n_candidate2", "n_a", nil, false)
-	if !errors.Is(err, ErrReparentConfirmRequired) {
-		t.Fatalf("error = %v, want REPARENT_CONFIRM_REQUIRED", err)
-	}
-	if h.session.saveCount != 0 || len(*h.changes) != 0 {
-		t.Fatal("confirm-required command persisted a change")
-	}
-
-	project, err := h.service.Connect(context.Background(), "n_candidate2", "n_a", nil, true)
+	project, err := h.service.Connect(context.Background(), "n_candidate2", "n_b")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if project.Revision != 2 {
-		t.Fatalf("revision = %d", project.Revision)
+	if project.Revision != 2 || len(h.mover.calls) != 0 {
+		t.Fatalf("revision=%d moves=%+v", project.Revision, h.mover.calls)
 	}
-	child := h.node(t, "n_a")
-	if child.Parent != "n_candidate2" || child.ParentCandidate != nil {
-		t.Fatalf("child = %+v", child)
+	if parents := h.parents(t, "n_b"); len(parents) != 2 || parents[0] != "n_a" || parents[1] != "n_candidate2" {
+		t.Fatalf("parents = %+v", parents)
 	}
-	if !child.Stale || !h.node(t, "n_b").Stale {
-		t.Fatal("subtree was not marked stale")
+	if !h.node(t, "n_b").Stale {
+		t.Fatal("target was not marked stale")
 	}
 	if h.node(t, "n_c").Stale || h.node(t, "n_draft").Stale {
-		t.Fatal("node outside moved subtree was marked stale")
-	}
-	if len(h.mover.calls) != 0 {
-		t.Fatalf("same-tree move should not touch steps: %+v", h.mover.calls)
+		t.Fatal("node outside the target subtree was marked stale")
 	}
 	if len(*h.changes) != 1 {
 		t.Fatalf("changes = %+v", *h.changes)
 	}
 
 	before := h.session.saveCount
-	project, err = h.service.Connect(context.Background(), "n_candidate2", "n_a", nil, false)
+	project, err = h.service.Connect(context.Background(), "n_candidate2", "n_b")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if project.Revision != 2 || h.session.saveCount != before || len(*h.changes) != 1 {
-		t.Fatal("same parent/candidate was not idempotent")
+		t.Fatal("duplicate connection was not idempotent")
 	}
 }
 
-func TestConnectRejectsCandidateReparent(t *testing.T) {
+func TestConnectAllowsDraftNodesInEitherOrder(t *testing.T) {
 	h := newHarness(t, baseProject())
-	_, err := h.service.Connect(context.Background(), "n_candidate2", "n_candidate", nil, true)
-	if !errors.Is(err, ErrNodeConnectionInvalid) {
-		t.Fatalf("error = %v, want NODE_CONNECTION_INVALID", err)
+	project, err := h.service.Connect(context.Background(), "n_draft", "n_agent_draft")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if h.session.saveCount != 0 || h.node(t, "n_candidate").Parent != "n_topic" {
-		t.Fatal("candidate source changed")
+	if parentOf(project, "n_agent_draft") != "n_draft" {
+		t.Fatalf("edges = %+v", project.Edges)
+	}
+	if h.node(t, "n_agent_draft").Stale {
+		t.Fatal("newly connected draft should not be stale")
+	}
+	if _, err := h.service.Connect(context.Background(), "n_c", "n_draft"); err != nil {
+		t.Fatalf("connecting an existing draft as a target failed: %v", err)
+	}
+	if parents := h.parents(t, "n_draft"); len(parents) != 1 || parents[0] != "n_c" {
+		t.Fatalf("draft parents = %+v", parents)
+	}
+}
+
+func TestConnectKeepsCandidateSourceProtected(t *testing.T) {
+	h := newHarness(t, baseProject())
+	project, err := h.service.Connect(context.Background(), "n_candidate2", "n_candidate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := ""
+	for _, edge := range project.Edges {
+		if edge.TargetNodeID == "n_candidate" && edge.Kind == entity.EdgeKindCandidateSource {
+			source = edge.SourceNodeID
+		}
+	}
+	if source != "n_topic" || h.node(t, "n_candidate").CandidateSource.TopicNodeID != "n_topic" {
+		t.Fatalf("candidate source changed: %+v", project.Edges)
 	}
 }
 
 func TestConnectValidation(t *testing.T) {
 	cases := []struct {
-		name      string
-		parent    string
-		child     string
-		candidate *int
-		want      error
+		name   string
+		source string
+		target string
+		want   error
 	}{
-		{"self", "n_a", "n_a", nil, ErrSelfConnect},
-		{"cycle", "n_b", "n_a", nil, ErrCycleDetected},
-		{"topic child", "n_a", "n_topic", nil, ErrTopicRootParent},
-		{"draft parent", "n_draft", "n_c", nil, ErrNotInChain},
-		{"missing parent", "n_missing", "n_c", nil, ErrNodeNotFound},
-		{"missing child", "n_a", "n_missing", nil, ErrNodeNotFound},
-		{"invalid candidate parameter", "n_topic", "n_c", intPtr(9), ErrNodeConnectionInvalid},
+		{"self", "n_a", "n_a", ErrSelfConnect},
+		{"cycle", "n_b", "n_a", ErrCycleDetected},
+		{"missing source", "n_missing", "n_c", ErrNodeNotFound},
+		{"missing target", "n_a", "n_missing", ErrNodeNotFound},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newHarness(t, baseProject())
-			_, err := h.service.Connect(context.Background(), tc.parent, tc.child, tc.candidate, false)
+			_, err := h.service.Connect(context.Background(), tc.source, tc.target)
 			if !errors.Is(err, tc.want) {
 				t.Fatalf("error = %v, want %v", err, tc.want)
 			}
@@ -271,24 +287,55 @@ func TestConnectValidation(t *testing.T) {
 	}
 }
 
-func TestConnectDraftAgentToPrompt(t *testing.T) {
+func TestDisconnectAndReplaceProtectSourceEdges(t *testing.T) {
 	h := newHarness(t, baseProject())
-	project, err := h.service.Connect(context.Background(), "n_c", "n_agent_draft", nil, false)
+	sourceEdge := ""
+	for _, edge := range h.session.project.Edges {
+		if edge.TargetNodeID == "n_candidate" {
+			sourceEdge = edge.ID
+		}
+	}
+	if _, _, err := h.service.Disconnect(context.Background(), sourceEdge); !errors.Is(err, ErrProtectedEdge) {
+		t.Fatalf("disconnect source error = %v, want PROTECTED_EDGE", err)
+	}
+	if _, err := h.service.ReplaceConnection(context.Background(), sourceEdge, "n_c"); !errors.Is(err, ErrProtectedEdge) {
+		t.Fatalf("replace source error = %v, want PROTECTED_EDGE", err)
+	}
+	if h.session.saveCount != 0 {
+		t.Fatal("protected edge command saved")
+	}
+
+	ordinaryEdge := ""
+	for _, edge := range h.session.project.Edges {
+		if edge.TargetNodeID == "n_b" {
+			ordinaryEdge = edge.ID
+		}
+	}
+	project, targetID, err := h.service.Disconnect(context.Background(), ordinaryEdge)
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent := h.node(t, "n_agent_draft")
-	if agent.Parent != "n_c" || agent.ParentCandidate != nil || !agent.Stale {
-		t.Fatalf("agent = %+v", agent)
+	if targetID != "n_b" || parentOf(project, "n_b") != "" || !h.node(t, "n_b").Stale {
+		t.Fatalf("disconnect result = target %s edges %+v", targetID, project.Edges)
 	}
-	if project.Revision != 2 {
-		t.Fatalf("revision = %d", project.Revision)
+	if h.node(t, "n_b").WorkspaceRootID != "n_topic" {
+		t.Fatal("disconnect changed the recorded workspace root")
+	}
+	if _, err := h.service.Connect(context.Background(), "n_candidate2", "n_b"); err != nil {
+		t.Fatalf("reconnect after disconnect failed: %v", err)
 	}
 }
 
-func TestConnectCrossTreeMovesSteps(t *testing.T) {
+func TestReplaceConnectionMovesStepsAndWorkspaceRoot(t *testing.T) {
 	h := newHarness(t, projectWithSecondTree())
-	if _, err := h.service.Connect(context.Background(), "n_x", "n_a", nil, true); err != nil {
+	edgeID := ""
+	for _, edge := range h.session.project.Edges {
+		if edge.TargetNodeID == "n_a" {
+			edgeID = edge.ID
+		}
+	}
+	project, err := h.service.ReplaceConnection(context.Background(), edgeID, "n_x")
+	if err != nil {
 		t.Fatal(err)
 	}
 	if len(h.mover.calls) != 1 {
@@ -301,44 +348,68 @@ func TestConnectCrossTreeMovesSteps(t *testing.T) {
 	if len(call.nodeIDs) != 2 || call.nodeIDs[0] != "n_a" || call.nodeIDs[1] != "n_b" {
 		t.Fatalf("move nodes = %+v", call.nodeIDs)
 	}
-	child := h.node(t, "n_a")
-	if child.Parent != "n_x" || !child.Stale || !h.node(t, "n_b").Stale {
-		t.Fatalf("cross-tree move wrong: %+v", child)
+	if parentOf(project, "n_a") != "n_x" || !h.node(t, "n_a").Stale || !h.node(t, "n_b").Stale {
+		t.Fatalf("replace wrong: %+v", project.Edges)
+	}
+	if h.node(t, "n_a").WorkspaceRootID != "n_topic2" || h.node(t, "n_b").WorkspaceRootID != "n_topic2" {
+		t.Fatalf("workspace roots = %s %s", h.node(t, "n_a").WorkspaceRootID, h.node(t, "n_b").WorkspaceRootID)
 	}
 }
 
-func TestConnectCrossTreeFailures(t *testing.T) {
+func TestReplaceConnectionFailures(t *testing.T) {
+	edgeA := func(h *harness) string {
+		for _, edge := range h.session.project.Edges {
+			if edge.TargetNodeID == "n_a" {
+				return edge.ID
+			}
+		}
+		return ""
+	}
 	t.Run("move failure", func(t *testing.T) {
 		h := newHarness(t, projectWithSecondTree())
 		h.mover.err = errors.New("disk full")
-		_, err := h.service.Connect(context.Background(), "n_x", "n_a", nil, true)
+		_, err := h.service.ReplaceConnection(context.Background(), edgeA(h), "n_x")
 		if !errors.Is(err, ErrWorkspaceMoveFailed) {
 			t.Fatalf("error = %v, want WORKSPACE_MOVE_FAILED", err)
 		}
-		if h.session.saveCount != 0 || h.node(t, "n_a").Parent != "n_candidate" {
+		if h.session.saveCount != 0 || parentOf(h.session.project, "n_a") != "n_candidate" {
 			t.Fatal("graph changed after move failure")
 		}
 	})
 	t.Run("save failure rolls back movement", func(t *testing.T) {
 		h := newHarness(t, projectWithSecondTree())
 		h.session.saveErr = errors.New("save failed")
-		_, err := h.service.Connect(context.Background(), "n_x", "n_a", nil, true)
+		_, err := h.service.ReplaceConnection(context.Background(), edgeA(h), "n_x")
 		if err == nil {
 			t.Fatal("error = nil")
 		}
 		if h.mover.rollbacks != 1 {
 			t.Fatalf("rollbacks = %d", h.mover.rollbacks)
 		}
-		if h.node(t, "n_a").Parent != "n_candidate" {
+		if parentOf(h.session.project, "n_a") != "n_candidate" {
 			t.Fatal("graph changed after save failure")
 		}
 	})
-	t.Run("locked target parent", func(t *testing.T) {
+	t.Run("shared descendant is refused", func(t *testing.T) {
+		project := projectWithSecondTree()
+		project.Edges = append(project.Edges, entity.Edge{
+			ID: "e_shared_input", SourceNodeID: "n_candidate2", TargetNodeID: "n_b", Kind: entity.EdgeKindConnection,
+		})
+		h := newHarness(t, project)
+		_, err := h.service.ReplaceConnection(context.Background(), edgeA(h), "n_x")
+		if !errors.Is(err, ErrWorkspaceMigrationUnsafe) {
+			t.Fatalf("error = %v, want WORKSPACE_MIGRATION_UNSAFE", err)
+		}
+		if len(h.mover.calls) != 0 {
+			t.Fatal("steps moved while the subtree had a shared descendant")
+		}
+	})
+	t.Run("locked target source", func(t *testing.T) {
 		h := newHarness(t, projectWithSecondTree())
 		if err := h.service.AcquireRunLock(context.Background(), "r_two", "n_topic2", "n_x", []string{"n_topic2", "n_x"}); err != nil {
 			t.Fatal(err)
 		}
-		_, err := h.service.Connect(context.Background(), "n_x", "n_a", nil, true)
+		_, err := h.service.ReplaceConnection(context.Background(), edgeA(h), "n_x")
 		if !errors.Is(err, ErrRunningChainLocked) {
 			t.Fatalf("error = %v, want RUNNING_CHAIN_LOCKED", err)
 		}
@@ -351,7 +422,7 @@ func TestConnectCrossTreeFailures(t *testing.T) {
 		if err := h.service.AcquireRunLock(context.Background(), "r_a", "n_topic", "n_a", []string{"n_topic", "n_candidate", "n_a"}); err != nil {
 			t.Fatal(err)
 		}
-		_, err := h.service.Connect(context.Background(), "n_x", "n_a", nil, true)
+		_, err := h.service.ReplaceConnection(context.Background(), edgeA(h), "n_x")
 		if !errors.Is(err, ErrRunningChainLocked) {
 			t.Fatalf("error = %v, want RUNNING_CHAIN_LOCKED", err)
 		}
@@ -616,10 +687,13 @@ func TestBeginRunRejectsPromptAndAllowsAgentEntry(t *testing.T) {
 func TestBeginRunLocksBoundScriptOutputAndKeepsSiblingEditable(t *testing.T) {
 	project := baseProject()
 	project.Nodes = append(project.Nodes,
-		entity.Node{ID: "n_output", Type: valueobject.NodeTypeScript, Title: "输出", Parent: "n_b", Rounds: []entity.Round{}},
-		entity.Node{ID: "n_prompt_alt", Type: valueobject.NodeTypePrompt, Title: "另一任务", Parent: "n_candidate", Params: entity.NodeParams{Instruction: "另一任务"}},
-		entity.Node{ID: "n_agent_alt", Type: valueobject.NodeTypeAgent, Title: "另一 Agent", Parent: "n_prompt_alt"},
+		entity.Node{ID: "n_output", Type: valueobject.NodeTypeScript, Title: "输出", WorkspaceRootID: "n_topic", Rounds: []entity.Round{}},
+		entity.Node{ID: "n_prompt_alt", Type: valueobject.NodeTypePrompt, Title: "另一任务", WorkspaceRootID: "n_topic", Params: entity.NodeParams{Instruction: "另一任务"}},
+		entity.Node{ID: "n_agent_alt", Type: valueobject.NodeTypeAgent, Title: "另一 Agent", WorkspaceRootID: "n_topic"},
 	)
+	attachEdge(&project, "n_b", "n_output")
+	attachEdge(&project, "n_candidate", "n_prompt_alt")
+	attachEdge(&project, "n_prompt_alt", "n_agent_alt")
 	h := newHarness(t, project)
 	_, snapshot, err := h.service.BeginRun(context.Background(), "r_agent", "n_b")
 	if err != nil {
@@ -633,7 +707,7 @@ func TestBeginRunLocksBoundScriptOutputAndKeepsSiblingEditable(t *testing.T) {
 			t.Errorf("run did not lock %s", id)
 		}
 	}
-	if _, err := h.service.Connect(context.Background(), "n_agent_alt", "n_output", nil, true); !errors.Is(err, ErrRunningChainLocked) {
+	if _, err := h.service.Connect(context.Background(), "n_agent_alt", "n_output"); !errors.Is(err, ErrRunningChainLocked) {
 		t.Fatalf("moving a bound output during run error = %v, want RUNNING_CHAIN_LOCKED", err)
 	}
 	if _, err := h.service.UpdateNodeParams(context.Background(), "n_c", "C", entity.NodeParams{Instruction: "兄弟可编辑"}); err != nil {
@@ -650,11 +724,27 @@ func TestBeginRunLocksBoundScriptOutputAndKeepsSiblingEditable(t *testing.T) {
 func TestLockedNodeTopologyCanChange(t *testing.T) {
 	h := newHarness(t, baseProject())
 	h.node(t, "n_c").Locked = true
-	if _, err := h.service.Connect(context.Background(), "n_candidate", "n_c", nil, true); err != nil {
-		t.Fatalf("reparenting a content-locked node should be allowed: %v", err)
+	project, err := h.service.Connect(context.Background(), "n_candidate", "n_c")
+	if err != nil {
+		t.Fatalf("connecting a content-locked node should be allowed: %v", err)
 	}
-	if h.node(t, "n_c").Parent != "n_candidate" || !h.node(t, "n_c").Stale {
-		t.Fatalf("child = %+v", h.node(t, "n_c"))
+	if parents := h.parents(t, "n_c"); len(parents) != 2 || !h.node(t, "n_c").Stale {
+		t.Fatalf("child parents = %+v", parents)
+	}
+	ordinary := ""
+	for _, edge := range project.Edges {
+		if edge.TargetNodeID == "n_c" && edge.SourceNodeID == "n_candidate" {
+			ordinary = edge.ID
+		}
+	}
+	if ordinary == "" {
+		t.Fatal("new edge missing")
+	}
+	if _, _, err := h.service.Disconnect(context.Background(), ordinary); err != nil {
+		t.Fatalf("disconnecting a content-locked node should be allowed: %v", err)
+	}
+	if parentOf(h.session.project, "n_c") != "n_candidate2" {
+		t.Fatalf("remaining edge = %+v", h.session.project.Edges)
 	}
 }
 

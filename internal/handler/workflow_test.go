@@ -187,9 +187,11 @@ func TestWorkflowHandlerAddMoveUpdateSelect(t *testing.T) {
 		}
 	}
 
-	candidate := 0
-	if _, err := h.Connect(topicReceipt.NodeID, promptID, &candidate, false, topicReceipt.ProjectID); !errors.Is(err, workflow.ErrNodeConnectionInvalid) {
-		t.Fatalf("legacy candidate connection error = %v, want NODE_CONNECTION_INVALID", err)
+	if _, err := h.Connect(promptID, promptID, topicReceipt.ProjectID); !errors.Is(err, workflow.ErrSelfConnect) {
+		t.Fatalf("self connection error = %v, want SELF_CONNECT", err)
+	}
+	if _, err := h.Connect(topicReceipt.NodeID, promptID, topicReceipt.ProjectID); err != nil {
+		t.Fatalf("arbitrary node connection = %v", err)
 	}
 }
 
@@ -273,7 +275,7 @@ func TestWorkflowHandlerValidation(t *testing.T) {
 	if _, err := h.AddNode(AddNodeRequest{ProjectID: activeProjectID(t, h), Type: "render"}); !errors.Is(err, workflow.ErrUnknownNodeType) {
 		t.Fatalf("error = %v, want UNKNOWN_NODE_TYPE", err)
 	}
-	if _, err := h.Connect("", "n_child", nil, false, ""); err == nil || !strings.Contains(err.Error(), "不能为空") {
+	if _, err := h.Connect("", "n_child", ""); err == nil || !strings.Contains(err.Error(), "不能为空") {
 		t.Fatalf("Connect error = %v", err)
 	}
 	if _, err := h.MoveNode("", 1, 1, ""); err == nil || !strings.Contains(err.Error(), "不能为空") {
