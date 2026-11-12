@@ -122,7 +122,7 @@ func probeVersion(ctx context.Context, cliPath string) (string, error) {
 	if len(match) != 4 {
 		return "", fmt.Errorf("%w: cannot parse Claude CLI version from %q", ErrAgentUnavailable, strings.TrimSpace(string(out)))
 	}
-	return match[1] + "." + match[2] + "." + match[3], nil
+	return strings.Join(match[1:], "."), nil
 }
 
 func versionAtLeast(got, minimum string) bool {
