@@ -7,8 +7,10 @@ import * as valueobject$0 from "../valueobject/models.js";
 
 export interface CandidateSource {
     "topicNodeId": string;
+    "round": number;
     "artifactId": string;
     "index": number;
+    "runId": string;
 }
 
 export interface Edge {
@@ -16,6 +18,7 @@ export interface Edge {
     "sourceNodeId": string;
     "targetNodeId": string;
     "kind": string;
+    "scriptVersion": number;
 }
 
 /**
@@ -171,6 +174,7 @@ export interface Round {
 
 export interface RunArtifactReference {
     "nodeId": string;
+    "edgeId"?: string;
     "artifactId": string;
     "kind": valueobject$0.OutputKind;
     "candidateIndex"?: number | null;
@@ -193,6 +197,9 @@ export interface RunExecutionSnapshot {
     "inputs"?: RunInput[] | null;
     "artifacts": RunArtifactReference[] | null;
     "outputBinding": RunOutputBinding;
+    "outputNode"?: Node | null;
+    "outputEdge"?: Edge | null;
+    "topicBatch"?: RunTopicBatch | null;
     "outputContract": RunOutputContract;
 }
 
@@ -205,6 +212,7 @@ export interface RunInput {
 
 export interface RunOutputBinding {
     "bound": boolean;
+    "mode"?: string;
     "nodeId"?: string;
     "parentNodeId"?: string;
     "baselineVersion": number;
@@ -268,6 +276,13 @@ export interface RunStartError {
     "tokenBudget"?: number | null;
 }
 
+export interface RunStartOptions {
+    "inputEdgeIds"?: string[] | null;
+    "outputNodeId"?: string;
+    "createOutput"?: boolean;
+    "topicRerun"?: boolean;
+}
+
 /**
  * RunStartResult is the structured response to a UI start request. Expected
  * business failures stay in the response so callers can render typed details
@@ -303,6 +318,10 @@ export interface RunSummary {
     "finishedAt"?: string;
 }
 
+export interface RunTopicBatch {
+    "baselineRound": number;
+}
+
 export interface ScriptVersion {
     "n": number;
     "artifactId": string;
@@ -319,6 +338,9 @@ export interface ScriptVersionDetail {
  * TopicCandidate is one output port from an applied topic artifact.
  */
 export interface TopicCandidate {
+    "nodeId"?: string;
+    "round"?: number;
+    "runId"?: string;
     "index": number;
     "title": string;
     "angle": string;

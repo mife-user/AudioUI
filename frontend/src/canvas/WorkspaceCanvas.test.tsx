@@ -173,13 +173,13 @@ function makeSnapshot(): WorkspaceSnapshot {
     rounds: [{ n: 1, kind: OutputKind.OutputKindTopics, artifactId: 'sha256:topics-a', pendingId: 'pending-a', runId: 'r_topics_a' }],
   })
   const candidateA = makeNode('n_candidate_a', 'candidate', topicA.id, {
-    candidateSource: { topicNodeId: topicA.id, artifactId: 'sha256:topics-a', index: 0 },
+    candidateSource: { topicNodeId: topicA.id, round: 1, artifactId: 'sha256:topics-a', index: 0, runId: 'r_topics_a' },
   })
   const topicB = makeNode('n_topic_b', 'topic', '', {
     rounds: [{ n: 1, kind: OutputKind.OutputKindTopics, artifactId: 'sha256:topics-b', pendingId: 'pending-b', runId: 'r_topics_b' }],
   })
   const candidateB = makeNode('n_candidate_b', 'candidate', topicB.id, {
-    candidateSource: { topicNodeId: topicB.id, artifactId: 'sha256:topics-b', index: 0 },
+    candidateSource: { topicNodeId: topicB.id, round: 1, artifactId: 'sha256:topics-b', index: 0, runId: 'r_topics_b' },
   })
   const prompt = makeNode('n_prompt', 'prompt', candidateB.id, { params: { instruction: '写一段脚本。' } })
   const agent = makeNode('n_agent', 'agent', prompt.id)
@@ -188,10 +188,10 @@ function makeSnapshot(): WorkspaceSnapshot {
     project: { id: 'p_test', name: '测试工程', revision: 2, activeNodeId: candidateA.id },
     nodes: [topicA, candidateA, topicB, candidateB, prompt, agent, draft],
     edges: [
-      { id: 'e_topic_a', sourceNodeId: topicA.id, targetNodeId: candidateA.id, kind: 'candidate_source' },
-      { id: 'e_topic_b', sourceNodeId: topicB.id, targetNodeId: candidateB.id, kind: 'candidate_source' },
-      { id: 'e_prompt', sourceNodeId: candidateB.id, targetNodeId: prompt.id, kind: 'connection' },
-      { id: 'e_agent', sourceNodeId: prompt.id, targetNodeId: agent.id, kind: 'connection' },
+      { id: 'e_topic_a', sourceNodeId: topicA.id, targetNodeId: candidateA.id, kind: 'candidate_source', scriptVersion: 0 },
+      { id: 'e_topic_b', sourceNodeId: topicB.id, targetNodeId: candidateB.id, kind: 'candidate_source', scriptVersion: 0 },
+      { id: 'e_prompt', sourceNodeId: candidateB.id, targetNodeId: prompt.id, kind: 'connection', scriptVersion: 0 },
+      { id: 'e_agent', sourceNodeId: prompt.id, targetNodeId: agent.id, kind: 'connection', scriptVersion: 0 },
     ],
     nodePaths: {
       [topicA.id]: [topicA.id],
@@ -218,6 +218,7 @@ function makeAPI(): GraphAPI {
     moveNode: vi.fn().mockResolvedValue({ projectId: 'p_test', projectRevision: 3, nodeId: 'n_prompt' }),
     setNodeLayout: vi.fn().mockResolvedValue({ projectId: 'p_test', projectRevision: 3, nodeId: 'n_prompt' }),
     setNodeCollapsed: vi.fn().mockResolvedValue({ projectId: 'p_test', projectRevision: 3, nodeId: 'n_prompt' }),
+    setEdgeScriptVersion: vi.fn().mockResolvedValue({ projectId: 'p_test', projectRevision: 3, nodeId: 'n_prompt' }),
     selectNode: vi.fn().mockResolvedValue({ projectId: 'p_test', projectRevision: 3, nodeId: 'n_prompt' }),
     updateNodeParams: vi.fn().mockResolvedValue({ projectId: 'p_test', projectRevision: 3, nodeId: 'n_prompt' }),
     getTopicCandidates: vi.fn().mockResolvedValue([]),
@@ -314,6 +315,29 @@ describe('WorkspaceCanvas', () => {
     fireEvent.click(screen.getByRole('button', { name: '确认断开' }))
     await waitFor(() => expect(api.disconnect).toHaveBeenCalledWith('e_prompt', 'p_test'))
     expect(screen.getByTestId('edge-count')).toHaveTextContent('4')
+  })
+
+  it('binds a fixed Script version to the selected input edge', async () => {
+    const api = makeAPI()
+    const snapshot = makeSnapshot()
+    const script = makeNode('n_script_input', 'script', '', {
+      scriptVersions: [
+        { n: 1, artifactId: 'sha256:script-v1', runId: 'r_script_1' },
+        { n: 2, artifactId: 'sha256:script-v2', runId: 'r_script_2' },
+      ],
+    })
+    snapshot.nodes = [...(snapshot.nodes ?? []), script]
+    snapshot.edges = [...(snapshot.edges ?? []), {
+      id: 'e_script_agent', sourceNodeId: script.id, targetNodeId: 'n_agent', kind: 'connection', scriptVersion: 0,
+    }]
+    snapshot.project = { ...snapshot.project!, activeNodeId: 'n_agent' }
+    render(<WorkspaceCanvas snapshot={snapshot} onSelectNode={vi.fn().mockResolvedValue(undefined)} api={api} />)
+
+    fireEvent.click(screen.getByText('n_agent 的输入关系 · 2'))
+    const version = screen.getByRole('combobox', { name: '为 n_script_input → n_agent 固定 Script 版本' })
+    expect(version).toHaveValue('0')
+    fireEvent.change(version, { target: { value: '2' } })
+    await waitFor(() => expect(api.setEdgeScriptVersion).toHaveBeenCalledWith('e_script_agent', 2, 'p_test'))
   })
 
   it('shows the Candidate generation source without disconnect or replace controls', () => {

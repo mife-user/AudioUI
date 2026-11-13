@@ -24,7 +24,7 @@ func (s *Service) ReadRunGraph(ctx context.Context, scope port.RunScope) (port.R
 		result.OutputBinding = &binding
 	}
 	nodeIDs := scope.ChainPath
-	if scope.ExecutionSnapshot.Version == 3 {
+	if scope.ExecutionSnapshot.Version >= 3 {
 		nodeIDs = scope.InputNodeIDs
 		result.Edges = append([]entity.Edge(nil), scope.ExecutionSnapshot.InputEdges...)
 	} else {
@@ -46,7 +46,7 @@ func (s *Service) ReadRunNode(ctx context.Context, scope port.RunScope, nodeID s
 		return port.RunNode{}, err
 	}
 	allowedNodes := scope.ChainPath
-	if scope.ExecutionSnapshot.Version == 3 {
+	if scope.ExecutionSnapshot.Version >= 3 {
 		allowedNodes = scope.InputNodeIDs
 	}
 	if !slices.Contains(allowedNodes, nodeID) {
@@ -229,7 +229,7 @@ func (s *Service) runGraph(ctx context.Context, scope port.RunScope) (entity.Pro
 	if scope.RunID == "" || scope.ProjectID == "" || scope.NodeID == "" || scope.ChainID != "c_"+scope.NodeID {
 		return entity.Project{}, nil, port.ErrTurnNotActive
 	}
-	if scope.ExecutionSnapshot.Version == 3 {
+	if scope.ExecutionSnapshot.Version >= 3 {
 		snapshot := scope.ExecutionSnapshot
 		if snapshot.Validate() != nil || snapshot.ProjectID != scope.ProjectID || snapshot.TreeID != scope.TreeID ||
 			snapshot.NodeID != scope.NodeID || len(scope.ChainPath) != 0 || !slices.Equal(snapshot.ScopeNodeIDs(), scope.InputNodeIDs) {

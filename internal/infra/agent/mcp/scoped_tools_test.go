@@ -142,7 +142,7 @@ func TestRunMCPOptionsExposeRootlessDAGScope(t *testing.T) {
 		t.Fatal(err)
 	}
 	snapshot, err := graph.SnapshotForRun("n_agent")
-	if err != nil || snapshot.Version != 3 {
+	if err != nil || snapshot.Version != 4 {
 		t.Fatalf("rootless DAG snapshot = %+v err=%v", snapshot, err)
 	}
 	options := scopedMCPOptions(t.TempDir())
@@ -172,9 +172,9 @@ func TestRunMCPOptionsExposeRootlessDAGScope(t *testing.T) {
 func TestSnapshotReplyRejectsKindOutsideOutputContract(t *testing.T) {
 	options := scopedMCPOptions(t.TempDir())
 	project := entity.Project{Version: valueobject.ProjectFileVersion, ID: "p_scoped", Nodes: []entity.Node{
-		{ID: "n_topic", Type: valueobject.NodeTypeTopic, Rounds: []entity.Round{{N: 1, Kind: valueobject.OutputKindTopics, ArtifactID: "sha256:topics"}}},
-		{ID: "n_candidate", Type: valueobject.NodeTypeCandidate, CandidateSource: &entity.CandidateSource{TopicNodeID: "n_topic", ArtifactID: "sha256:topics", Index: 0}},
-		{ID: "n_prompt", Type: valueobject.NodeTypePrompt},
+		{ID: "n_topic", Type: valueobject.NodeTypeTopic, Rounds: []entity.Round{{N: 1, Kind: valueobject.OutputKindTopics, ArtifactID: "sha256:topics", RunID: "r_topics"}}},
+		{ID: "n_candidate", Type: valueobject.NodeTypeCandidate, CandidateSource: &entity.CandidateSource{TopicNodeID: "n_topic", Round: 1, ArtifactID: "sha256:topics", Index: 0, RunID: "r_topics"}},
+		{ID: "n_prompt", Type: valueobject.NodeTypePrompt, Params: entity.NodeParams{Instruction: "任务"}},
 		{ID: "n_agent", Type: valueobject.NodeTypeAgent},
 	}, Edges: []entity.Edge{
 		{ID: "e_n_candidate", SourceNodeID: "n_topic", TargetNodeID: "n_candidate", Kind: entity.EdgeKindCandidateSource},

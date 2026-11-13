@@ -39,7 +39,7 @@ type ProjectService interface {
 
 type WorkflowService interface {
 	BeginRun(ctx context.Context, runID, nodeID string, expectedProjectID ...string) (entity.Project, entity.RunExecutionSnapshot, error)
-	BeginRunWithInputs(ctx context.Context, runID, nodeID string, inputEdgeIDs []string, expectedProjectID ...string) (entity.Project, entity.RunExecutionSnapshot, error)
+	BeginRunWithOptions(ctx context.Context, runID, nodeID string, options entity.RunStartOptions, expectedProjectID ...string) (entity.Project, entity.RunExecutionSnapshot, error)
 	ReleaseRunLock(ctx context.Context, runID string) error
 }
 
@@ -144,10 +144,14 @@ func New(options Options) *Manager {
 }
 
 func (m *Manager) Start(ctx context.Context, nodeID string, expectedProjectID ...string) (entity.RunRecord, error) {
-	return m.StartWithInputs(ctx, nodeID, nil, expectedProjectID...)
+	return m.StartWithOptions(ctx, nodeID, entity.RunStartOptions{}, expectedProjectID...)
 }
 
 func (m *Manager) StartWithInputs(ctx context.Context, nodeID string, inputEdgeIDs []string, expectedProjectID ...string) (entity.RunRecord, error) {
+	return m.StartWithOptions(ctx, nodeID, entity.RunStartOptions{InputEdgeIDs: inputEdgeIDs}, expectedProjectID...)
+}
+
+func (m *Manager) StartWithOptions(ctx context.Context, nodeID string, options entity.RunStartOptions, expectedProjectID ...string) (entity.RunRecord, error) {
 	if err := ctx.Err(); err != nil {
 		return entity.RunRecord{}, err
 	}
@@ -193,14 +197,14 @@ func (m *Manager) StartWithInputs(ctx context.Context, nodeID string, inputEdgeI
 		_ = m.gate.Release(runID)
 	}()
 
-	project, executionSnapshot, err := m.opts.Workflow.BeginRunWithInputs(ctx, runID, nodeID, inputEdgeIDs, expectedProjectID...)
+	project, executionSnapshot, err := m.opts.Workflow.BeginRunWithOptions(ctx, runID, nodeID, options, expectedProjectID...)
 	if err != nil {
 		return entity.RunRecord{}, err
 	}
 	lockAcquired = true
 	executionSnapshot = executionSnapshot.Clone()
 	chainPath := executionSnapshot.ChainPath
-	if executionSnapshot.Version != 3 && len(chainPath) < 1 {
+	if executionSnapshot.Version < 3 && len(chainPath) < 1 {
 		return entity.RunRecord{}, errors.New("NOT_IN_CHAIN: empty run path")
 	}
 	treeID := executionSnapshot.TreeID
@@ -221,7 +225,7 @@ func (m *Manager) StartWithInputs(ctx context.Context, nodeID string, inputEdgeI
 		return entity.RunRecord{}, err
 	}
 	if runContext.TreeID != treeID || runContext.NodeID != nodeID || !slices.Equal(runContext.ChainPath, chainPath) ||
-		executionSnapshot.Version == 3 && !slices.Equal(runContext.InputNodeIDs, executionSnapshot.ScopeNodeIDs()) ||
+		executionSnapshot.Version >= 3 && !slices.Equal(runContext.InputNodeIDs, executionSnapshot.ScopeNodeIDs()) ||
 		runContext.Hashes.ContextHash == "" || runContext.Hashes.AncestorHash == "" || runContext.Hashes.ParamsHash == "" {
 		return entity.RunRecord{}, errors.New("RUN_CONTEXT_SCOPE_INVALID")
 	}
@@ -654,7 +658,7 @@ func (m *Manager) RecordRunPending(ctx context.Context, scope port.RunScope, pen
 	if state == nil || !sameScope(state.scope, scope) || pending.RunID != scope.RunID || pending.NodeID != scope.NodeID {
 		return port.ErrTurnNotActive
 	}
-	if scope.ExecutionSnapshot.Version == 3 && (pending.ExecutionSnapshot == nil || !reflect.DeepEqual(*pending.ExecutionSnapshot, scope.ExecutionSnapshot)) {
+	if scope.ExecutionSnapshot.Version >= 3 && (pending.ExecutionSnapshot == nil || !reflect.DeepEqual(*pending.ExecutionSnapshot, scope.ExecutionSnapshot)) {
 		return ErrRunPendingConflict
 	}
 	// The reply callback already holds a lease if finish has begun closing the run.

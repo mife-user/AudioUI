@@ -112,8 +112,10 @@ func (s *Service) AddNode(ctx context.Context, input AddNodeInput) (entity.Proje
 		if err != nil {
 			return entity.Project{}, err
 		}
+		parent, _ := graph.Node(input.Parent)
 		project.Edges = append(project.Edges, entity.Edge{
 			ID: edgeID, SourceNodeID: input.Parent, TargetNodeID: id, Kind: entity.EdgeKindConnection,
+			ScriptVersion: scriptVersionAtConnection(project.Version, parent),
 		})
 	}
 	if err := bindUnassignedWorkspaces(&project); err != nil {
@@ -141,7 +143,8 @@ func (s *Service) Connect(ctx context.Context, sourceID, targetID string, expect
 	if err != nil {
 		return entity.Project{}, err
 	}
-	if _, err := requireNode(graph, sourceID, "source"); err != nil {
+	source, err := requireNode(graph, sourceID, "source")
+	if err != nil {
 		return entity.Project{}, err
 	}
 	if _, err := requireNode(graph, targetID, "target"); err != nil {
@@ -170,6 +173,7 @@ func (s *Service) Connect(ctx context.Context, sourceID, targetID string, expect
 	}
 	project.Edges = append(project.Edges, entity.Edge{
 		ID: edgeID, SourceNodeID: sourceID, TargetNodeID: targetID, Kind: entity.EdgeKindConnection,
+		ScriptVersion: scriptVersionAtConnection(project.Version, source),
 	})
 	if hadInputs {
 		markSubtreeStale(&project, descendants)
@@ -252,7 +256,8 @@ func (s *Service) ReplaceConnection(ctx context.Context, edgeID, sourceID string
 	if edge.Kind == entity.EdgeKindCandidateSource {
 		return entity.Project{}, fmt.Errorf("%w: 候选生成来源不能改挂", ErrProtectedEdge)
 	}
-	if _, err := requireNode(graph, sourceID, "source"); err != nil {
+	source, err := requireNode(graph, sourceID, "source")
+	if err != nil {
 		return entity.Project{}, err
 	}
 	if sourceID == edge.TargetNodeID {
@@ -278,6 +283,7 @@ func (s *Service) ReplaceConnection(ctx context.Context, edgeID, sourceID string
 	for i := range project.Edges {
 		if project.Edges[i].ID == edgeID {
 			project.Edges[i].SourceNodeID = sourceID
+			project.Edges[i].ScriptVersion = scriptVersionAtConnection(project.Version, source)
 			break
 		}
 	}
@@ -323,6 +329,66 @@ func (s *Service) ReplaceConnection(ctx context.Context, edgeID, sourceID string
 	saved, err := s.opts.Project.Save(ctx, project)
 	if err != nil {
 		return entity.Project{}, errors.Join(err, rollbackMove(move))
+	}
+	s.changed(saved.ID, saved.Revision)
+	return saved, nil
+}
+
+func scriptVersionAtConnection(projectVersion int, source *entity.Node) int {
+	if projectVersion < valueobject.ProjectFileVersion || source.Type != valueobject.NodeTypeScript || len(source.ScriptVersions) == 0 {
+		return 0
+	}
+	return source.ScriptVersions[len(source.ScriptVersions)-1].N
+}
+
+func (s *Service) SetEdgeScriptVersion(ctx context.Context, edgeID string, version int, expectedProjectID ...string) (entity.Project, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return entity.Project{}, err
+	}
+	if version < 0 {
+		return entity.Project{}, ErrInvalidInput
+	}
+	project, graph, err := s.loadCurrentForProject(ctx, firstExpectedProjectID(expectedProjectID))
+	if err != nil {
+		return entity.Project{}, err
+	}
+	if project.Version < valueobject.ProjectFileVersion {
+		return entity.Project{}, ErrInvalidInput
+	}
+	edge, ok := graph.Edge(edgeID)
+	if !ok || edge.Kind != entity.EdgeKindConnection {
+		return entity.Project{}, ErrEdgeNotFound
+	}
+	source, _ := graph.Node(edge.SourceNodeID)
+	if source.Type != valueobject.NodeTypeScript || version > len(source.ScriptVersions) {
+		return entity.Project{}, ErrScriptVersionNotFound
+	}
+	if edge.ScriptVersion == version {
+		return project, nil
+	}
+	if err := s.ensureEditable(edge.SourceNodeID, edge.TargetNodeID); err != nil {
+		return entity.Project{}, err
+	}
+	for i := range project.Edges {
+		if project.Edges[i].ID == edgeID {
+			project.Edges[i].ScriptVersion = version
+			break
+		}
+	}
+	descendants, err := graph.Subtree(edge.TargetNodeID)
+	if err != nil {
+		return entity.Project{}, err
+	}
+	markSubtreeStale(&project, descendants)
+	if err := validateFinalGraph(&project); err != nil {
+		return entity.Project{}, fmt.Errorf("图校验失败: %w", err)
+	}
+	project.Revision++
+	saved, err := s.opts.Project.Save(ctx, project)
+	if err != nil {
+		return entity.Project{}, err
 	}
 	s.changed(saved.ID, saved.Revision)
 	return saved, nil

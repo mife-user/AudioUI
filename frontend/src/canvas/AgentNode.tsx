@@ -1,7 +1,7 @@
 import { memo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Handle, Position, type NodeProps } from '@xyflow/react'
-import type { RunStartError } from '../../bindings/audio-ui/internal/domain/entity'
+import type { RunStartError, RunStartOptions } from '../../bindings/audio-ui/internal/domain/entity'
 import { formatRunStartError } from './runStartError'
 import { nodeHandleLayoutKey, type CanvasFlowNode, type RunInputOption } from './flowModel'
 import { NodeCollapseControl, NodeResizeHandles, NodeSizeControl } from './NodeLayoutControls'
@@ -29,8 +29,10 @@ function runInputRoleLabel(role: RunInputOption['role']): string {
   }
 }
 
+const CREATE_OUTPUT_TARGET = '__create_output__'
+
 export const AgentNode = memo(function AgentNode({ id, data, selected }: NodeProps<CanvasFlowNode>) {
-  const { node, projectId, runningLocked, pathHighlighted, mutationsDisabled, globalRunBusy, runSubmitting, runStatus, pendingCount = 0, outputScript, outputAmbiguous, runInputs = [], onStartRun, onAddChild } = data
+  const { node, projectId, runningLocked, pathHighlighted, mutationsDisabled, globalRunBusy, runSubmitting, runStatus, pendingCount = 0, outputScript, outputScripts = [], outputAmbiguous, runInputs = [], onStartRun } = data
   const requiredHandles = [
     { id: 'agent-input', type: 'target' as const },
     { id: 'agent-output', type: 'source' as const },
@@ -40,14 +42,15 @@ export const AgentNode = memo(function AgentNode({ id, data, selected }: NodePro
   const [starting, setStarting] = useState(false)
   const [inputDialogOpen, setInputDialogOpen] = useState(false)
   const [selectedInputIDs, setSelectedInputIDs] = useState<string[]>([])
+  const [selectedOutputID, setSelectedOutputID] = useState('')
   const startInFlight = useRef(false)
   const versions = outputScript?.scriptVersions ?? []
   const latestVersion = versions[versions.length - 1]
   const outputSummary = outputAmbiguous
-    ? '已连接多个或共享的 Script，暂不能确定输出目标'
+    ? '存在多个或共享的 Script 输出；运行前必须确认本次目标'
     : outputScript
-      ? latestVersion ? `绑定 ${outputScript.title} · v${latestVersion.n}` : `绑定 ${outputScript.title} · 等待首个结果`
-      : '未指定输出 · 合法结果自动创建 Script'
+      ? latestVersion ? `默认目标 ${outputScript.title} · v${latestVersion.n}` : `默认目标 ${outputScript.title} · 等待首个结果`
+      : '无现有输出 · 本次运行预留新 Script'
   const status = runningLocked
     ? `${runStatus === 'starting' ? '启动中' : '执行中'} · 只读`
     : starting || runSubmitting ? '正在启动' : runStatusLabel(runStatus)
@@ -67,23 +70,25 @@ export const AgentNode = memo(function AgentNode({ id, data, selected }: NodePro
   })
   const hasPromptTask = selectedOptions.some((input) => input.role === 'task')
   const hasUnsupportedInput = selectedOptions.some((input) => input.role === 'unsupported')
+  const outputSelectionRequired = outputAmbiguous || outputScripts.length > 1
 
   function openRunInputDialog() {
     if (runDisabled || startInFlight.current) return
     setRunFailure(null)
     setSelectedInputIDs(runInputs.map((input) => input.edgeId))
+    setSelectedOutputID(outputScripts.length === 0
+      ? CREATE_OUTPUT_TARGET
+      : !outputAmbiguous && outputScripts.length === 1 ? outputScripts[0].id : '')
     setInputDialogOpen(true)
   }
 
-  async function startRun(inputEdgeIDs?: string[]) {
+  async function startRun(options?: RunStartOptions) {
     if (startInFlight.current || runningLocked || node.locked || globalRunBusy || mutationsDisabled) return
     startInFlight.current = true
     setStarting(true)
     setRunFailure(null)
     try {
-      const result = inputEdgeIDs === undefined
-        ? await onStartRun?.(node.id, projectId ?? '')
-        : await onStartRun?.(node.id, projectId ?? '', inputEdgeIDs)
+      const result = await onStartRun?.(node.id, projectId ?? '', options)
       if (result?.error) setRunFailure(result.error)
     } catch (failure) {
       setRunFailure({ code: 'RUN_START_FAILED', message: failure instanceof Error ? failure.message : String(failure) })
@@ -94,11 +99,17 @@ export const AgentNode = memo(function AgentNode({ id, data, selected }: NodePro
   }
 
   async function confirmRun() {
+    if (!selectedOutputID) return
     const defaultOrder = runInputs.map((input) => input.edgeId)
     const unchanged = selectedInputIDs.length === defaultOrder.length
       && selectedInputIDs.every((edgeID, index) => edgeID === defaultOrder[index])
+    const options: RunStartOptions = {
+      inputEdgeIds: unchanged ? undefined : selectedInputIDs,
+      outputNodeId: selectedOutputID === CREATE_OUTPUT_TARGET ? undefined : selectedOutputID,
+      createOutput: selectedOutputID === CREATE_OUTPUT_TARGET,
+    }
     setInputDialogOpen(false)
-    await startRun(unchanged ? undefined : selectedInputIDs)
+    await startRun(options)
   }
 
   function toggleInput(input: RunInputOption, checked: boolean) {
@@ -145,17 +156,6 @@ export const AgentNode = memo(function AgentNode({ id, data, selected }: NodePro
       <div id={`node-content-${node.id}`} className="canvas-node-content agent-node-content nowheel" hidden={Boolean(node.collapsed)}>
         <p className="canvas-node-hint">运行前将校验输入与输出。</p>
         <p className="agent-output-summary"><span>输出契约</span>{outputSummary}</p>
-        {!outputScript && !outputAmbiguous ? (
-          <button
-            type="button"
-            className="node-add-child nodrag"
-            disabled={runningLocked || mutationsDisabled || globalRunBusy}
-            onClick={() => onAddChild(node.id, 'script')}
-            aria-label={`为 ${node.title} 指定空 Script 输出`}
-          >
-            ＋ 指定空 Script 输出
-          </button>
-        ) : null}
         {runFailure ? <p className="agent-run-error" id={`agent-run-error-${node.id}`} role="alert">{formatRunStartError(runFailure)}</p> : null}
         <button
           type="button"
@@ -211,6 +211,29 @@ export const AgentNode = memo(function AgentNode({ id, data, selected }: NodePro
             <p id={`agent-run-input-description-${node.id}`} className="agent-run-input-description">
               默认包含所有直接输入。Prompt 是任务，Candidate 与 Script 是上下文；可取消输入并调整顺序。
             </p>
+            <section className="agent-run-output" aria-label="运行输出目标">
+              <strong>本次运行输出目标</strong>
+              {outputScripts.length ? (
+                <label>
+                  <span>Script 节点</span>
+                  <select
+                    aria-label="本次运行 Script 输出目标"
+                    value={selectedOutputID}
+                    onChange={(event) => setSelectedOutputID(event.currentTarget.value)}
+                  >
+                    {outputSelectionRequired ? <option value="">请选择输出目标</option> : null}
+                    {outputScripts.map((script) => {
+                      const version = script.scriptVersions?.[script.scriptVersions.length - 1]
+                      return <option key={script.id} value={script.id}>{script.title}{version ? ` · v${version.n}` : ' · 空节点'}</option>
+                    })}
+                    <option value={CREATE_OUTPUT_TARGET}>新建并行 Script</option>
+                  </select>
+                </label>
+              ) : (
+                <p>本次运行将预留新 Script；节点与连接仅在合法结果提交时创建。</p>
+              )}
+              {outputScripts.length ? <p>新建并行 Script 也只会在合法结果提交时创建，不会提前污染工程图。</p> : null}
+            </section>
             {runInputs.length > 0 ? (
               <ol className="agent-run-input-list">
                 {orderedInputOptions.map((input, index) => {
@@ -249,16 +272,18 @@ export const AgentNode = memo(function AgentNode({ id, data, selected }: NodePro
                 ? '至少选择一个 Prompt 任务。'
                 : hasUnsupportedInput
                   ? '存在不兼容输入，请取消选择；连接不会被删除。'
-                  : selectedOptions.some((input) => input.role === 'task' && !input.taskReady)
-                    ? '将先保存被选中的 Prompt 草稿，再冻结本次输入。'
-                    : '运行输入会按上方顺序冻结；未选择的连线保持不变。'}
+                  : !selectedOutputID
+                    ? '有多个 Script 输出，请明确选择本次唯一目标。'
+                    : selectedOptions.some((input) => input.role === 'task' && !input.taskReady)
+                      ? '将先保存被选中的 Prompt 草稿，再冻结本次输入。'
+                      : '运行输入与唯一输出目标会按本次选择冻结；未选择的连线保持不变。'}
             </p>
             <footer className="agent-run-input-actions">
               <button type="button" className="agent-run-input-cancel" onClick={() => setInputDialogOpen(false)}>取消</button>
               <button
                 type="button"
                 className="agent-run-input-confirm"
-                disabled={!hasPromptTask || hasUnsupportedInput || runDisabled}
+                disabled={!hasPromptTask || hasUnsupportedInput || !selectedOutputID || runDisabled}
                 onClick={() => void confirmRun()}
               >
                 {starting ? '正在启动…' : '确认并运行'}

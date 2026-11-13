@@ -30,7 +30,6 @@ function draftFromNode(node: Node): PromptDraft {
 }
 
 function draftError(draft: PromptDraft): string {
-  if (!draft.title.trim()) return '提示词标题不能为空。'
   if (draft.scenes && !/^\d+$/.test(draft.scenes)) return '场景数必须是非负整数。'
   if (draft.duration && !/^\d+$/.test(draft.duration)) return '总时长必须是非负整数。'
   return ''
@@ -78,7 +77,6 @@ export function PromptParameters({ node, projectId, disabled, onSave, onRegister
   registerCallback.current = onRegisterFlush
 
   const validationError = draftError(draft)
-  const titleErrorId = `prompt-title-error-${node.id}`
   const taskErrorId = `prompt-task-error-${node.id}`
   const saveErrorId = `prompt-save-error-${node.id}`
 
@@ -101,7 +99,7 @@ export function PromptParameters({ node, projectId, disabled, onSave, onRegister
 
       setSaveState('saving')
       setSaveError('')
-      const synced = await saveCallback.current(node.id, value.title.trim(), paramsFromDraft(value), projectId)
+      const synced = await saveCallback.current(node.id, value.title.trim() || node.title, paramsFromDraft(value), projectId)
       if (version === editVersion.current && currentProjectId.current === projectId && currentNodeId.current === node.id) {
         savedVersion.current = version
         syncPending.current = synced === false
@@ -229,37 +227,34 @@ export function PromptParameters({ node, projectId, disabled, onSave, onRegister
   return (
     <div className="prompt-parameters">
       <label className="topic-field" htmlFor={`prompt-title-${node.id}`}>
-        <span>标题</span>
+        <span>节点名称（可选）</span>
         <input
           id={`prompt-title-${node.id}`}
           className="nodrag"
           type="text"
           value={draft.title}
           maxLength={80}
-          required
+          placeholder="留空时保留当前名称"
           disabled={disabled}
-          aria-invalid={Boolean(draft.title.trim() === '')}
-          aria-describedby={draft.title.trim() === '' ? titleErrorId : undefined}
           onCompositionStart={startComposition}
           onCompositionEnd={(event) => finishComposition('title', event.currentTarget.value)}
           onChange={(event) => updateField('title', event.currentTarget.value)}
         />
-        {draft.title.trim() === '' ? <span className="topic-field-error" id={titleErrorId}>提示词标题不能为空。</span> : null}
       </label>
       <label className="topic-field" htmlFor={`prompt-instruction-${node.id}`}>
-        <span>任务</span>
+        <span>提示词内容</span>
         <textarea
           id={`prompt-instruction-${node.id}`}
           className="nodrag nowheel"
           rows={4}
           value={draft.instruction}
           disabled={disabled}
-          aria-describedby={validationError && draft.title.trim() ? taskErrorId : undefined}
+          aria-describedby={validationError ? taskErrorId : undefined}
           onCompositionStart={startComposition}
           onCompositionEnd={(event) => finishComposition('instruction', event.currentTarget.value)}
           onChange={(event) => updateField('instruction', event.currentTarget.value)}
         />
-        {validationError && draft.title.trim() ? <span className="topic-field-error" id={taskErrorId}>{validationError}</span> : null}
+        {validationError ? <span className="topic-field-error" id={taskErrorId}>{validationError}</span> : null}
       </label>
       <div className="prompt-constraints">
         <label className="topic-field" htmlFor={`prompt-scenes-${node.id}`}>

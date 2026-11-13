@@ -82,6 +82,7 @@ type targetSection struct {
 	NodeType       valueobject.NodeType   `json:"nodeType"`
 	OutputKind     valueobject.OutputKind `json:"outputKind"`
 	ProjectVersion int                    `json:"-"`
+	TopicBatch     *entity.RunTopicBatch  `json:"topicBatch,omitempty"`
 }
 
 type workspaceSection struct {
@@ -108,6 +109,7 @@ type workspaceRootIdentity struct {
 
 type ancestorIdentity struct {
 	NodeID          string                 `json:"nodeId"`
+	SourceEdgeID    string                 `json:"sourceEdgeId,omitempty"`
 	NodeType        valueobject.NodeType   `json:"nodeType"`
 	Title           string                 `json:"title"`
 	Params          entity.NodeParams      `json:"params"`
@@ -403,7 +405,7 @@ func (b *Builder) resolveSnapshot(ctx context.Context, input Input, includeWorks
 	if snapshot.ProjectID != project.ID || snapshot.NodeID != input.NodeID {
 		return resolvedInput{}, fmt.Errorf("%w: snapshot does not match project and target", ErrWorkspaceScope)
 	}
-	if snapshot.Version == 3 {
+	if snapshot.Version >= 3 {
 		return b.resolveDAGSnapshot(ctx, input, snapshot, includeWorkspace)
 	}
 	if snapshot.PathNodes[0].Type != valueobject.NodeTypeTopic {
@@ -551,6 +553,7 @@ func (b *Builder) resolveSnapshot(ctx context.Context, input Input, includeWorks
 		target: targetSection{
 			TreeID: snapshot.TreeID, ChainPath: append([]string(nil), snapshot.ChainPath...),
 			NodeID: target.ID, NodeType: target.Type, OutputKind: kind, ProjectVersion: snapshot.ProjectVersion,
+			TopicBatch: snapshot.TopicBatch,
 		},
 		params: params, targetParams: target.Params, taskNodeID: taskNodeID,
 		outputBinding: outputBinding, outputContract: outputContract,
@@ -623,6 +626,7 @@ func (b *Builder) resolveDAGSnapshot(ctx context.Context, input Input, snapshot 
 			cached.identity.NodeType = node.Type
 			cached.identity.Title = node.Title
 			cached.identity.Params = node.Params
+			cached.identity.SourceEdgeID = reference.EdgeID
 			cached.shared = true
 			ancestors = append(ancestors, cached)
 			continue
@@ -631,6 +635,7 @@ func (b *Builder) resolveDAGSnapshot(ctx context.Context, input Input, snapshot 
 		if err != nil {
 			return resolvedInput{}, err
 		}
+		ancestor.identity.SourceEdgeID = reference.EdgeID
 		if reference.CandidateIndex != nil {
 			number := *reference.CandidateIndex + 1
 			ancestor.identity.CandidateNumber = &number
@@ -877,6 +882,12 @@ func inputHashes(input resolvedInput) (valueobject.ContextHashes, error) {
 		return valueobject.ContextHashes{}, err
 	}
 	var paramsMaterial any = input.params
+	if input.target.TopicBatch != nil {
+		paramsMaterial = struct {
+			Params     entity.NodeParams     `json:"params"`
+			TopicBatch *entity.RunTopicBatch `json:"topicBatch"`
+		}{input.targetParams, input.target.TopicBatch}
+	}
 	if input.outputContract != nil && input.dag {
 		paramsMaterial = struct {
 			Tasks          []taskInputSection        `json:"tasks"`
@@ -906,8 +917,12 @@ func outputContract(target targetSection, binding *entity.RunOutputBinding) []st
 			"只根据当前路径与任务工作；禁止直接修改工程图。",
 			"工作区文件仅提供逻辑路径与大小，不自动注入文件内容；二进制资源仅通过路径引用。",
 			"有歧义时调用 ask_user；使用 reply(kind=topics)提交选题结果。",
-			"合法 topics reply 由应用自动生成全部 Candidate 节点并锁定 Topic；不需要人工应用。",
 			fmt.Sprintf("reply 的 node_id 必须是 %s，kind 必须是 %s。", target.NodeID, target.OutputKind),
+		}
+		if target.TopicBatch == nil {
+			contract = append(contract, "合法 topics reply 由应用自动生成首批 Candidate 节点并锁定 Topic；不需要人工应用。")
+		} else {
+			contract = append(contract, fmt.Sprintf("这是 Topic 重跑，沿用锁定参数并基于第 %d 批次生成新结果；合法 reply 进入待确认预览，确认后创建独立 Candidate 批次。", target.TopicBatch.BaselineRound))
 		}
 		return append(contract, `topics payload: {"topics":[{"title":"...","angle":"...","hook":"..."}]}；候选为 3–10 条。`)
 	}
@@ -936,6 +951,8 @@ func outputContract(target targetSection, binding *entity.RunOutputBinding) []st
 		switch {
 		case binding == nil || !binding.Bound:
 			contract = append(contract, "当前没有绑定 Script 输出节点；合法 reply 会自动创建直接 Script 节点并写入首个不可变版本，不需要人工确认。")
+		case binding.Mode == entity.RunOutputModeCreate:
+			contract = append(contract, fmt.Sprintf("本次输出目标是新建 Script 节点 %s；该节点和版本仅在合法 reply 原子提交时创建。", binding.NodeID))
 		case binding.BaselineVersion == 0:
 			contract = append(contract, fmt.Sprintf("输出绑定到空 Script 节点 %s；合法 reply 会自动写入首个不可变版本，不需要人工确认。", binding.NodeID))
 		default:

@@ -36,6 +36,13 @@ func TestTurnGateRequiresOwnerToRelease(t *testing.T) {
 	}
 }
 
+func TestErrorCodePreservesPromptTaskEmpty(t *testing.T) {
+	err := fmt.Errorf("%w: Prompt n_prompt has no task", entity.ErrPromptTaskEmpty)
+	if got := ErrorCode(err); got != "PROMPT_TASK_EMPTY" {
+		t.Fatalf("ErrorCode() = %q, want PROMPT_TASK_EMPTY", got)
+	}
+}
+
 func TestStartRunUsesOneShotSpecAndPersistsTerminalUsage(t *testing.T) {
 	h := newRunHarness(t)
 	record, err := h.manager.Start(context.Background(), "n_topic")
@@ -115,7 +122,7 @@ func TestStartWithInputsSupportsRootlessDAGSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if record.TreeID != "" || len(record.ChainPath) != 0 || record.ExecutionSnapshot == nil || record.ExecutionSnapshot.Version != 3 {
+	if record.TreeID != "" || len(record.ChainPath) != 0 || record.ExecutionSnapshot == nil || record.ExecutionSnapshot.Version != 4 {
 		t.Fatalf("rootless run record = %+v", record.RunSummary)
 	}
 	if h.toolFactory.scope.TreeID != "" || len(h.toolFactory.scope.ChainPath) != 0 ||
@@ -765,10 +772,10 @@ type fakeWorkflow struct {
 }
 
 func (w *fakeWorkflow) BeginRun(ctx context.Context, runID, nodeID string, expectedProjectID ...string) (entity.Project, entity.RunExecutionSnapshot, error) {
-	return w.BeginRunWithInputs(ctx, runID, nodeID, nil, expectedProjectID...)
+	return w.BeginRunWithOptions(ctx, runID, nodeID, entity.RunStartOptions{}, expectedProjectID...)
 }
 
-func (w *fakeWorkflow) BeginRunWithInputs(_ context.Context, _ string, nodeID string, inputEdgeIDs []string, expectedProjectID ...string) (entity.Project, entity.RunExecutionSnapshot, error) {
+func (w *fakeWorkflow) BeginRunWithOptions(_ context.Context, _ string, nodeID string, options entity.RunStartOptions, expectedProjectID ...string) (entity.Project, entity.RunExecutionSnapshot, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if len(expectedProjectID) > 0 && expectedProjectID[0] != "" && expectedProjectID[0] != w.project.ID {
@@ -781,12 +788,16 @@ func (w *fakeWorkflow) BeginRunWithInputs(_ context.Context, _ string, nodeID st
 	if err != nil {
 		return entity.Project{}, entity.RunExecutionSnapshot{}, err
 	}
-	snapshot, err := graph.SnapshotForRunWithInputs(nodeID, inputEdgeIDs)
+	snapshot, err := graph.SnapshotForRunWithOptions(nodeID, options)
 	if err != nil {
 		return entity.Project{}, entity.RunExecutionSnapshot{}, err
 	}
 	w.locked = true
 	return w.project.Clone(), snapshot, nil
+}
+
+func (w *fakeWorkflow) BeginRunWithInputs(ctx context.Context, runID, nodeID string, inputEdgeIDs []string, expectedProjectID ...string) (entity.Project, entity.RunExecutionSnapshot, error) {
+	return w.BeginRunWithOptions(ctx, runID, nodeID, entity.RunStartOptions{InputEdgeIDs: inputEdgeIDs}, expectedProjectID...)
 }
 func (w *fakeWorkflow) ReleaseRunLock(context.Context, string) error {
 	w.mu.Lock()

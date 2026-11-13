@@ -22,7 +22,7 @@ func rootlessBoundScriptProject() entity.Project {
 			{ID: "n_output", Type: valueobject.NodeTypeScript, Title: "输出", ScriptVersions: []entity.ScriptVersion{{N: 1, ArtifactID: "sha256:output-v1", RunID: "r_old"}}, Rounds: []entity.Round{}},
 		},
 		Edges: []entity.Edge{
-			{ID: "e_source_prompt", SourceNodeID: "n_source", TargetNodeID: "n_prompt", Kind: entity.EdgeKindConnection},
+			{ID: "e_source_prompt", SourceNodeID: "n_source", TargetNodeID: "n_prompt", Kind: entity.EdgeKindConnection, ScriptVersion: 1},
 			{ID: "e_prompt_agent", SourceNodeID: "n_prompt", TargetNodeID: "n_agent", Kind: entity.EdgeKindConnection},
 			{ID: "e_agent_output", SourceNodeID: "n_agent", TargetNodeID: "n_output", Kind: entity.EdgeKindConnection},
 		},
@@ -32,7 +32,7 @@ func rootlessBoundScriptProject() entity.Project {
 func TestRootlessDAGReplyPersistsSnapshotAndConfirmsFrozenOutput(t *testing.T) {
 	h := newPendingHarness(t, rootlessBoundScriptProject())
 	scope := beginReplyScopeWithInputs(t, h, "r_rootless_dag", "n_agent", []string{"e_prompt_agent"})
-	if scope.TreeID != "" || len(scope.ChainPath) != 0 || scope.ExecutionSnapshot.Version != 3 ||
+	if scope.TreeID != "" || len(scope.ChainPath) != 0 || scope.ExecutionSnapshot.Version != 4 ||
 		!slices.Equal(scope.InputNodeIDs, scope.ExecutionSnapshot.ScopeNodeIDs()) {
 		t.Fatalf("rootless run scope = %+v", scope)
 	}
@@ -41,12 +41,12 @@ func TestRootlessDAGReplyPersistsSnapshotAndConfirmsFrozenOutput(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if first.Status != valueobject.PendingPending || first.ExecutionSnapshot == nil || first.ExecutionSnapshot.Version != 3 ||
+	if first.Status != valueobject.PendingPending || first.ExecutionSnapshot == nil || first.ExecutionSnapshot.Version != 4 ||
 		len(first.ChainPath) != 0 || first.OutputBinding == nil || !first.OutputBinding.Bound {
 		t.Fatalf("DAG reply pending = %+v", first)
 	}
 	stored, err := h.service.GetPending(context.Background(), first.ID, h.session.project.ID)
-	if err != nil || stored.Pending.ExecutionSnapshot == nil || stored.Pending.ExecutionSnapshot.Version != 3 {
+	if err != nil || stored.Pending.ExecutionSnapshot == nil || stored.Pending.ExecutionSnapshot.Version != 4 {
 		t.Fatalf("persisted DAG snapshot = %+v err=%v", stored.Pending.ExecutionSnapshot, err)
 	}
 	revision := h.session.project.Revision

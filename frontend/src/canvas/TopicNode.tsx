@@ -1,7 +1,7 @@
 import { memo } from 'react'
 import { Handle, Position, type NodeProps } from '@xyflow/react'
 import { TopicParameters } from './TopicParameters'
-import { candidateAt, nodeHandleLayoutKey, type CanvasFlowNode } from './flowModel'
+import { candidateForNode, nodeHandleLayoutKey, type CanvasFlowNode } from './flowModel'
 import { NodeCollapseControl, NodeResizeHandles, NodeSizeControl } from './NodeLayoutControls'
 import { PendingNodeEntry } from '../ui/PendingNodeEntry'
 import { NodeRunRequestEntry } from '../ui/NodeRunRequestEntry'
@@ -25,7 +25,7 @@ export const TopicNode = memo(function TopicNode({ id, data, selected }: NodePro
     projectId,
     runningLocked,
     pathHighlighted,
-    topicCandidateIndexes,
+    topicCandidates = [],
     candidates,
     candidateError,
     candidateLoading = false,
@@ -41,7 +41,7 @@ export const TopicNode = memo(function TopicNode({ id, data, selected }: NodePro
   const requiredHandles = [
     { id: 'topic-input', type: 'target' as const },
     { id: 'topic-output', type: 'source' as const },
-    ...topicCandidateIndexes.map((index) => ({ id: `topic-candidate-${index}`, type: 'source' as const })),
+    ...topicCandidates.map((candidate) => ({ id: `topic-candidate-${candidate.nodeId}`, type: 'source' as const })),
   ]
   useMeasuredNodeHandles(id, nodeHandleLayoutKey('topic', data), projectId ?? '', requiredHandles, data.onNodeHandlesMeasured)
   const runState = runSubmitting ? '正在启动' : runStatusLabel(runStatus)
@@ -53,7 +53,7 @@ export const TopicNode = memo(function TopicNode({ id, data, selected }: NodePro
         ? runState ? `${runState} · 待处理 ${pendingCount}` : `待处理 · ${pendingCount}`
         : runState
 
-  const candidateCountLabel = candidateLoading ? '候选读取中' : candidateError ? '候选读取失败' : `候选 ${topicCandidateIndexes.length}`
+  const candidateCountLabel = candidateLoading ? '候选读取中' : candidateError ? '候选读取失败' : `候选 ${topicCandidates.length}`
 
   return (
     <>
@@ -88,10 +88,10 @@ export const TopicNode = memo(function TopicNode({ id, data, selected }: NodePro
           <PendingNodeEntry node={node} pendingIds={pendingResultIds} />
           {!node.collapsed ? <NodeSizeControl node={node} disabled={mutationsDisabled} onApply={data.onSetNodeLayout} /> : null}
           <NodeCollapseControl node={node} disabled={mutationsDisabled} onToggle={data.onSetNodeCollapsed} />
-          {topicCandidateIndexes.map((index) => (
+          {topicCandidates.map((candidate) => (
             <Handle
-              key={`${node.id}-topic-candidate-${index}`}
-              id={`topic-candidate-${index}`}
+              key={`${node.id}-topic-candidate-${candidate.nodeId}`}
+              id={`topic-candidate-${candidate.nodeId}`}
               type="source"
               position={Position.Right}
               isConnectable={false}
@@ -107,27 +107,28 @@ export const TopicNode = memo(function TopicNode({ id, data, selected }: NodePro
             disabled={runningLocked || node.locked || (data.paramsEditingDisabled ?? mutationsDisabled)}
             runBlocked={mutationsDisabled}
             globalRunBusy={globalRunBusy ?? false}
+            allowLockedRerun={node.locked}
+            rerunPending={pendingCount > 0}
             onSave={onUpdateTopicParams ?? (async () => undefined)}
             onRun={onStartRun ?? (async () => ({}))}
             onRegisterFlush={data.onRegisterTopicFlush}
           />
           {candidateError ? <p className="canvas-node-hint topic-candidate-error" role="alert">候选读取失败：{candidateError}</p> : null}
           {candidateLoading ? <p className="canvas-node-hint topic-candidate-hint" role="status">正在读取候选内容…</p> : null}
-          {topicCandidateIndexes.length ? (
+          {topicCandidates.length ? (
             <div className="topic-candidate-list" aria-label={`${node.title} 的候选节点`}>
-              {topicCandidateIndexes.map((index) => {
-                const candidate = candidateAt(candidates, index)
-                const candidateNodeId = data.candidateNodeIds[index]
+              {topicCandidates.map((source) => {
+                const candidate = candidateForNode(candidates, source.nodeId)
                 return (
-                  <div className="topic-candidate-row" key={`${node.id}-${index}`}>
-                    <span className="topic-candidate-index">{index + 1}</span>
-                    <span className="topic-candidate-title">{candidate?.title ?? `候选 ${index + 1}`}</span>
+                  <div className="topic-candidate-row" key={source.nodeId}>
+                    <span className="topic-candidate-index">第 {source.round} 批 · #{source.index + 1}</span>
+                    <span className="topic-candidate-title">{candidate?.title ?? `候选 ${source.index + 1}`}</span>
                     <button
                       type="button"
                       className="topic-candidate-locate nodrag nopan nowheel"
-                      aria-label={`定位候选 ${index + 1}`}
-                      disabled={!candidateNodeId || !data.onLocateNode}
-                      onClick={() => candidateNodeId && data.onLocateNode?.(candidateNodeId)}
+                      aria-label={`定位第 ${source.round} 批候选 ${source.index + 1}`}
+                      disabled={!data.onLocateNode}
+                      onClick={() => data.onLocateNode?.(source.nodeId)}
                     >
                       定位
                     </button>

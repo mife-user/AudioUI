@@ -78,10 +78,14 @@ func (s *Service) AcquireRunLock(ctx context.Context, runID, treeID, nodeID stri
 // while holding the same workflow mutex used by graph commands. The caller
 // builds context from the returned immutable snapshot.
 func (s *Service) BeginRun(ctx context.Context, runID, nodeID string, expectedProjectID ...string) (entity.Project, entity.RunExecutionSnapshot, error) {
-	return s.BeginRunWithInputs(ctx, runID, nodeID, nil, expectedProjectID...)
+	return s.BeginRunWithOptions(ctx, runID, nodeID, entity.RunStartOptions{}, expectedProjectID...)
 }
 
 func (s *Service) BeginRunWithInputs(ctx context.Context, runID, nodeID string, inputEdgeIDs []string, expectedProjectID ...string) (entity.Project, entity.RunExecutionSnapshot, error) {
+	return s.BeginRunWithOptions(ctx, runID, nodeID, entity.RunStartOptions{InputEdgeIDs: inputEdgeIDs}, expectedProjectID...)
+}
+
+func (s *Service) BeginRunWithOptions(ctx context.Context, runID, nodeID string, options entity.RunStartOptions, expectedProjectID ...string) (entity.Project, entity.RunExecutionSnapshot, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := ctx.Err(); err != nil {
@@ -98,17 +102,36 @@ func (s *Service) BeginRunWithInputs(ctx context.Context, runID, nodeID string, 
 	if err != nil {
 		return entity.Project{}, entity.RunExecutionSnapshot{}, err
 	}
-	if node.Locked {
+	if node.Locked && !(options.TopicRerun && node.Type == valueobject.NodeTypeTopic) {
 		return entity.Project{}, entity.RunExecutionSnapshot{}, fmt.Errorf("%w: %s", ErrNodeLocked, nodeID)
+	}
+	if options.TopicRerun && node.Type != valueobject.NodeTypeTopic {
+		return entity.Project{}, entity.RunExecutionSnapshot{}, ErrRunEntryUnavailable
 	}
 	if err := validateRunEntry(node); err != nil {
 		return entity.Project{}, entity.RunExecutionSnapshot{}, err
 	}
-	snapshot, err := graph.SnapshotForRunWithInputs(nodeID, inputEdgeIDs)
+	if options.TopicRerun {
+		store, err := s.pendingStore(ctx, project.ID)
+		if err != nil {
+			return entity.Project{}, entity.RunExecutionSnapshot{}, err
+		}
+		items, err := store.List(ctx)
+		if err != nil {
+			return entity.Project{}, entity.RunExecutionSnapshot{}, err
+		}
+		for _, pending := range items {
+			if pending.NodeID == nodeID && pending.ExecutionSnapshot != nil && pending.ExecutionSnapshot.TopicBatch != nil &&
+				(pending.Status == valueobject.PendingPending || pending.Status == valueobject.PendingInvalid) {
+				return entity.Project{}, entity.RunExecutionSnapshot{}, ErrTopicBatchPending
+			}
+		}
+	}
+	snapshot, err := graph.SnapshotForRunWithOptions(nodeID, options)
 	if err != nil {
 		return entity.Project{}, entity.RunExecutionSnapshot{}, err
 	}
-	if snapshot.Version != 3 {
+	if snapshot.Version < 3 {
 		if err := validateRunPath(graph, snapshot.TreeID, nodeID, snapshot.ChainPath); err != nil {
 			return entity.Project{}, entity.RunExecutionSnapshot{}, err
 		}

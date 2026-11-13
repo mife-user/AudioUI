@@ -2,11 +2,11 @@
 
 > 本文面向开发。产品概念与流程见 [product.md](product.md)；Agent 细节见 [agent-protocol.md](agent-protocol.md)。
 
-## U15/U16 多上游无环图运行与版本引用（U15 已通过用户验收）
+## U15/U16 多上游无环图运行与版本引用（U15 已验收；U16 实施中）
 
-用户已确认各阶段可按任意创建顺序有方向地连接、允许多个上游但禁止成环；U14 显式边及单路径过渡已于 2026-11-12 通过用户验收。U15 无 Topic/DAG 运行、v3 快照、输入选择与工作区隔离已完成实现、自检并通过用户界面验收；U16 逐边版本、并行结果和 Topic 新批次仍未实现。技术范围见 [ADR-030](decisions.md#adr-030-多上游无环图与版本引用草案)。
+用户已确认各阶段可按任意创建顺序有方向地连接、允许多个上游但禁止成环；U14 显式边及单路径过渡已于 2026-11-12 通过用户验收。U15 无 Topic/DAG 运行、v3 快照、输入选择与工作区隔离已完成实现、自检并通过用户界面验收。U16 设计已于 2026-11-13 确认并进入实现：工程格式 v5 为 Script 来源边持久化版本，Agent 运行快照 v4 冻结逐边版本与单一输出目标，Topic 重跑结果经待确认事务创建独立候选批次；实现、自检和用户验收状态以路线图为准。技术范围见 [ADR-030](decisions.md#adr-030-多上游无环图与版本引用草案)。
 
-U15 保留旧有效 Topic 单路径的 v2 快照；无 Topic 或 DAG 汇合使用 v3 输入快照，冻结选中边、顺序/角色、必要祖先子图、产物版本和输出绑定。工作区输入来源按根与节点隔离只读，目标工作区为唯一写入位置，无 Topic 工程使用独立 `workspace/`。本批仍使用发送时最新 Script 版本，不扩展到 U16 的逐边版本或并行输出；实现、自检和用户验收状态以路线图为准。
+U15 保留旧有效 Topic 单路径的 v2 快照；无 Topic 或 DAG 汇合使用 v3 输入快照，冻结选中边、顺序/角色、必要祖先子图、产物版本和输出绑定。U16 的 v4 快照按来源边冻结 Script 版本与 artifact，并将输出目标（既有 Script 或预留的新 Script ID）固定到运行；已有结果确认后追加，显式并行目标仅在合法结果提交事务中创建。工作区输入来源按根与节点隔离只读，目标工作区为唯一写入位置，无 Topic 工程使用独立 `workspace/`。
 
 **U14 过渡方案（已通过用户验收）**：以显式边和稳定边 ID 取代单父拓扑；现有有效单路径保留运行，其余尚无安全执行设计的拓扑先明确拒绝运行，不删边、不扩大工作区授权。候选来源独立保护；新增连接和显式断开不迁移工作区，显式改挂仅在迁移范围可确定时执行。细节和门禁见 [ADR-030](decisions.md#u14-实施与运行过渡方案已通过用户验收)。
 
@@ -221,7 +221,7 @@ UI / handler
 ```
 
 - 图写入只在 `service/workflow`，handler 只做参数转换；`ProjectSession.Save` 是唯一持久化入口。变更回调带写入快照所属的 projectId，不在 workflow 锁内二次查询当前工程。
-- `parentCandidate` 为 0 基；候选数量从父 topic 最新已应用 `topics` 产物读取，不复制到 project.json。工作台 `GetTopicCandidates(nodeId, projectId)` 读取最新已应用 topics round 所引用的 artifact，校验节点类型、round kind、artifact ID 与 payload 后返回稳定索引及候选字段；不存在已应用轮次时返回空列表，损坏或不可读时失败关闭。
+- `parentCandidate` 为 0 基；候选数量从父 topic 已应用 `topics` 产物读取，不复制到 project.json。工作台列出 Topic 最新批次时按最新 round 读取；Candidate 节点则按自身冻结的 round、artifact、run ID 与索引精确读取，不能用 Topic 最新批次替代历史来源。不存在来源或来源不匹配时失败关闭。
 - 待应用摘要来自工程作用域工作台快照；`GetPending`、`ApplyPending`、`DiscardPending` 与 `GetTopicCandidates` 均携带调用方的 `projectId`，在工程操作锁内校验活动工程，避免工程切换竞态将请求路由到另一工程。
 - `AcquireRunLock` 记录 topic 根 → 运行节点的真实父子路径；路径节点与共享祖先只读，路径外分支可编辑。`EnsureExecutable` 拒绝内容锁定、运行路径与草稿节点。
 - `SelectNode` 只写 `activeNodeId`，不递增 revision、不触发 `OnChange`。
@@ -266,7 +266,7 @@ M2 收口后 `sessions.json` 不再写入；M2 开发期保留 M1 Wails binding 
 
 - 原子写入：临时文件 + `Sync` + 重命名；新建工程与迁移先在 `data/projects/` 下的隐藏 staging 目录（`.creating-*` / `.m1-migration-*`）写完整目录，再整体重命名到 `projects/<id>`。
 - 工程级锁：单实例锁；所有写命令按 `workflow.mu → ProjectSession` 操作锁排序。`ProjectSession.WithExclusive` 与 `New/Open` 共用操作锁，pending 多文件事务期间工程不能切换。
-- Schema 版本：`project.json`、`pending.json`、`pending.txn.json`、`runs.json` 带 `version`；`config.json` 无版本，缺省预算在读取时归一为 1,000,000。
+- Schema 版本：`project.json`、`pending.json`、`pending.txn.json`、`runs.json` 带 `version`；U16 将 `project.json` 升为 v5，Script 来源边持久化 `scriptVersion`（0 表示未绑定），Candidate 来源包含运行 ID 以区分相同 artifact 的不同批次。v1～v4 开发工程不迁移。`config.json` 无版本，缺省预算在读取时归一为 1,000,000。
 - 运行索引/详情：`runs.json` 只存摘要；`runs/<runId>.json` 存 transcript 与上下文预览。先写详情再写索引；索引引用缺失详情视为损坏，孤立详情不进入列表。
 - pending 原文与索引分离；创建/应用/丢弃先原子写 `pending.txn.json` 和必需原文/CAS，再保存带目标 revision 的 `project.json`，最后更新 `pending.json` 并删除日志。工程加载/打开按 base/target revision 回滚未提交事务或幂等重放已提交事务；日志损坏、revision 无法判定或恢复失败时拒绝暴露工程。原文上限 256 KiB，无效 Schema 也保留原文；`pending` 与 `invalid` 计入每树 50 条上限，应用/丢弃释放名额。
 - 结构化产物规范化使用保留 `json.Number` 精度的确定性 JSON；payload SHA-256 为 CAS ID。`Round.Kind` 是当前产物种类的授权真相，CAS `meta.json` 仅为首次写入元数据；元数据种类不一致时按轮次种类校验 payload。

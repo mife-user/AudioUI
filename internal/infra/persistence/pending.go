@@ -257,8 +257,7 @@ func samePendingIdentity(left, right entity.Pending) bool {
 		left.ContextHash == right.ContextHash && left.AncestorHash == right.AncestorHash &&
 		left.ParamsHash == right.ParamsHash && left.CreatedAt == right.CreatedAt &&
 		left.OutputSchemaVersion == right.OutputSchemaVersion &&
-		sameOutputBinding(left.OutputBinding, right.OutputBinding) &&
-		left.ResultNodeID == right.ResultNodeID && slices.Equal(left.CreatedNodeIDs, right.CreatedNodeIDs)
+		sameOutputBinding(left.OutputBinding, right.OutputBinding)
 }
 
 func sameOutputBinding(left, right *entity.RunOutputBinding) bool {
@@ -346,7 +345,7 @@ func validatePending(pending entity.Pending) error {
 		return fmt.Errorf("%w: status %q", ErrInvalidPending, pending.Status)
 	}
 	if pending.OutputBinding != nil {
-		if pending.OutputSchemaVersion != 1 || pending.ChainID != "c_"+pending.NodeID || len(pending.ChainPath) == 0 && (pending.ExecutionSnapshot == nil || pending.ExecutionSnapshot.Version != 3) || (pending.ExecutionSnapshot == nil || pending.ExecutionSnapshot.Version != 3) && pending.ChainPath[0] == "" || (pending.ExecutionSnapshot == nil || pending.ExecutionSnapshot.Version != 3) && pending.ChainPath[len(pending.ChainPath)-1] != pending.NodeID {
+		if pending.OutputSchemaVersion != 1 || pending.ChainID != "c_"+pending.NodeID || len(pending.ChainPath) == 0 && (pending.ExecutionSnapshot == nil || pending.ExecutionSnapshot.Version < 3 || pending.ExecutionSnapshot.Version > 4) || (pending.ExecutionSnapshot == nil || pending.ExecutionSnapshot.Version < 3 || pending.ExecutionSnapshot.Version > 4) && pending.ChainPath[0] == "" || (pending.ExecutionSnapshot == nil || pending.ExecutionSnapshot.Version < 3 || pending.ExecutionSnapshot.Version > 4) && pending.ChainPath[len(pending.ChainPath)-1] != pending.NodeID {
 			return fmt.Errorf("%w: invalid output contract identity", ErrInvalidPending)
 		}
 		if snapshot := pending.ExecutionSnapshot; snapshot != nil && (snapshot.Validate() != nil || snapshot.NodeID != pending.NodeID ||
@@ -362,9 +361,12 @@ func validatePending(pending entity.Pending) error {
 			if err := valueobject.ValidateID(binding.ParentNodeID); err != nil {
 				return fmt.Errorf("%w: output parent node id: %v", ErrInvalidPending, err)
 			}
+			versionedCreate := pending.ExecutionSnapshot != nil && pending.ExecutionSnapshot.Version == 4 && binding.Mode == entity.RunOutputModeCreate
 			if pending.Kind != valueobject.OutputKindScript || binding.ParentNodeID != pending.NodeID || binding.NodeID == binding.ParentNodeID ||
 				binding.BaselineVersion < 0 || (binding.BaselineVersion == 0) != (binding.BaselineArtifactID == "") ||
-				pending.ResultNodeID != binding.NodeID || len(pending.CreatedNodeIDs) != 0 {
+				pending.ResultNodeID != binding.NodeID || !versionedCreate && len(pending.CreatedNodeIDs) != 0 ||
+				versionedCreate && pending.Status == valueobject.PendingApplied && (len(pending.CreatedNodeIDs) != 1 || pending.CreatedNodeIDs[0] != binding.NodeID) ||
+				versionedCreate && pending.Status != valueobject.PendingApplied && len(pending.CreatedNodeIDs) != 0 {
 				return fmt.Errorf("%w: invalid output binding", ErrInvalidPending)
 			}
 		} else {

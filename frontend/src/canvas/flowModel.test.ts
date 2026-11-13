@@ -26,6 +26,7 @@ function snapshot(nodes: Node[], activeNodeId = 'n_prompt'): WorkspaceSnapshot {
     sourceNodeId: node.parent ?? '',
     targetNodeId: node.id,
     kind: node.candidateSource?.topicNodeId === node.parent ? 'candidate_source' : 'connection',
+    scriptVersion: 0,
   }))
   const nodePaths: Record<string, string[]> = {}
   for (const node of nodes) {
@@ -83,7 +84,7 @@ describe('flowModel', () => {
   it('derives all v2 edges and handles from authoritative node relationships', () => {
     const topic = makeNode('n_topic', 'topic')
     const candidate = makeNode('n_candidate', 'candidate', topic.id, {
-      candidateSource: { topicNodeId: topic.id, artifactId: 'sha256:topics', index: 2 },
+      candidateSource: { topicNodeId: topic.id, round: 1, artifactId: 'sha256:topics', index: 2, runId: 'r_topics' },
     })
     const prompt = makeNode('n_prompt', 'prompt', candidate.id)
     const agent = makeNode('n_agent', 'agent', prompt.id)
@@ -93,12 +94,12 @@ describe('flowModel', () => {
     const nextPrompt = makeNode('n_next_prompt', 'prompt', script.id)
     const graph = snapshot([topic, candidate, prompt, agent, script, nextPrompt])
     const model = buildFlowModel(graph, vi.fn(), {
-      [topic.id]: [{ index: 2, title: '候选三', angle: '角度', hook: '开场' }],
+      [topic.id]: [{ nodeId: candidate.id, round: 1, runId: 'r_topics', index: 2, title: '候选三', angle: '角度', hook: '开场' }],
     })
 
     expect(model.nodes.map((node) => node.type)).toEqual(['topic', 'candidate', 'prompt', 'agent', 'script', 'prompt'])
     expect(model.edges.map((edge) => [edge.sourceHandle, edge.targetHandle])).toEqual([
-      ['topic-candidate-2', 'candidate-input'],
+      ['topic-candidate-n_candidate', 'candidate-input'],
       ['candidate-output', 'prompt-input'],
       ['prompt-output', 'agent-input'],
       ['agent-output', 'script-input'],
@@ -114,15 +115,40 @@ describe('flowModel', () => {
       nodeId: candidate.id, x: 0, y: 0, width: candidate.size.width, height: candidate.size.height,
     })
     expect(model.nodes.find((node) => node.id === candidate.id)?.data.candidate).toEqual({
-      index: 2, title: '候选三', angle: '角度', hook: '开场',
+      nodeId: candidate.id, round: 1, runId: 'r_topics', index: 2, title: '候选三', angle: '角度', hook: '开场',
     })
     expect(model.nodes.find((node) => node.id === agent.id)?.data.outputScript?.id).toBe(script.id)
+  })
+
+  it('keeps duplicate candidate indexes distinct by batch and node identity', () => {
+    const topic = makeNode('n_topic', 'topic')
+    const first = makeNode('n_candidate_first', 'candidate', topic.id, {
+      candidateSource: { topicNodeId: topic.id, round: 1, artifactId: 'sha256:topics-1', index: 0, runId: 'r_topics_1' },
+    })
+    const second = makeNode('n_candidate_second', 'candidate', topic.id, {
+      candidateSource: { topicNodeId: topic.id, round: 2, artifactId: 'sha256:topics-2', index: 0, runId: 'r_topics_2' },
+    })
+    const view = snapshot([topic, first, second])
+    const model = buildFlowModel(view, vi.fn(), {
+      [topic.id]: [
+        { nodeId: second.id, round: 2, index: 0, runId: 'r_topics_2', title: '新候选' },
+        { nodeId: first.id, round: 1, index: 0, runId: 'r_topics_1', title: '旧候选' },
+      ],
+    })
+    const topicData = model.nodes.find((node) => node.id === topic.id)?.data
+
+    expect(topicData?.topicCandidates.map((candidate) => candidate.nodeId)).toEqual([first.id, second.id])
+    expect(model.nodes.find((node) => node.id === first.id)?.data.candidate?.title).toBe('旧候选')
+    expect(model.nodes.find((node) => node.id === second.id)?.data.candidate?.title).toBe('新候选')
+    expect(model.edges.map((edge) => edge.sourceHandle)).toEqual([
+      `topic-candidate-${first.id}`, `topic-candidate-${second.id}`,
+    ])
   })
 
   it('waits for dynamic topic candidate handles and both endpoint layouts before drawing', () => {
     const topic = makeNode('n_topic', 'topic')
     const candidate = makeNode('n_candidate', 'candidate', topic.id, {
-      candidateSource: { topicNodeId: topic.id, artifactId: 'sha256:topics', index: 0 },
+      candidateSource: { topicNodeId: topic.id, round: 1, artifactId: 'sha256:topics', index: 0, runId: 'r_topics' },
     })
     const graph = snapshot([topic, candidate])
     const model = buildFlowModel(graph, vi.fn())
@@ -137,13 +163,13 @@ describe('flowModel', () => {
     expect(buildFlowEdges(model.nodes, graph.edges ?? [], {})).toEqual([])
     expect(buildFlowEdges(model.nodes, graph.edges ?? [], { [topic.id]: ready[topic.id] })).toEqual([])
     expect(buildFlowEdges(model.nodes, graph.edges ?? [], ready)).toHaveLength(1)
-    expect(buildFlowEdges(model.nodes, graph.edges ?? [], ready)[0]?.sourceHandle).toBe('topic-candidate-0')
+    expect(buildFlowEdges(model.nodes, graph.edges ?? [], ready)[0]?.sourceHandle).toBe('topic-candidate-n_candidate')
   })
 
   it('updates edge obstacles from live node positions and resize dimensions', () => {
     const topic = makeNode('n_topic', 'topic')
     const candidate = makeNode('n_candidate', 'candidate', topic.id, {
-      candidateSource: { topicNodeId: topic.id, artifactId: 'sha256:topics', index: 0 },
+      candidateSource: { topicNodeId: topic.id, round: 1, artifactId: 'sha256:topics', index: 0, runId: 'r_topics' },
     })
     const view = snapshot([topic, candidate])
     const model = buildFlowModel(view, vi.fn())
@@ -160,7 +186,7 @@ describe('flowModel', () => {
   it('uses live measurements before saved dimensions while a node is resizing', () => {
     const topic = makeNode('n_topic', 'topic')
     const candidate = makeNode('n_candidate', 'candidate', topic.id, {
-      candidateSource: { topicNodeId: topic.id, artifactId: 'sha256:topics', index: 0 },
+      candidateSource: { topicNodeId: topic.id, round: 1, artifactId: 'sha256:topics', index: 0, runId: 'r_topics' },
     })
     const view = snapshot([topic, candidate])
     const model = buildFlowModel(view, vi.fn())
@@ -177,7 +203,7 @@ describe('flowModel', () => {
   it('exposes Agent run state and its direct Script binding without deriving extra graph rules', () => {
     const topic = makeNode('n_topic', 'topic')
     const candidate = makeNode('n_candidate', 'candidate', topic.id, {
-      candidateSource: { topicNodeId: topic.id, artifactId: 'sha256:topics', index: 0 },
+      candidateSource: { topicNodeId: topic.id, round: 1, artifactId: 'sha256:topics', index: 0, runId: 'r_topics' },
     })
     const prompt = makeNode('n_prompt', 'prompt', candidate.id)
     const agent = makeNode('n_agent', 'agent', prompt.id)
@@ -208,7 +234,7 @@ describe('flowModel', () => {
   it('keeps pending Script results on the frozen output after the Agent is rebound', () => {
     const topic = makeNode('n_topic', 'topic')
     const candidate = makeNode('n_candidate', 'candidate', topic.id, {
-      candidateSource: { topicNodeId: topic.id, artifactId: 'sha256:topics', index: 0 },
+      candidateSource: { topicNodeId: topic.id, round: 1, artifactId: 'sha256:topics', index: 0, runId: 'r_topics' },
     })
     const prompt = makeNode('n_prompt', 'prompt', candidate.id)
     const agent = makeNode('n_agent', 'agent', prompt.id)
@@ -254,7 +280,7 @@ describe('flowModel', () => {
   it('locks only the in-flight target path and its direct Script output', () => {
     const topic = makeNode('n_topic', 'topic')
     const candidate = makeNode('n_candidate', 'candidate', topic.id, {
-      candidateSource: { topicNodeId: topic.id, artifactId: 'sha256:topics', index: 0 },
+      candidateSource: { topicNodeId: topic.id, round: 1, artifactId: 'sha256:topics', index: 0, runId: 'r_topics' },
     })
     const prompt = makeNode('n_prompt', 'prompt', candidate.id)
     const agent = makeNode('n_agent', 'agent', prompt.id)
@@ -307,8 +333,8 @@ describe('flowModel', () => {
     const agent = makeNode('n_agent', 'agent', 'n_unrelated')
     const view = snapshot([prompt, script, agent], agent.id)
     view.edges = [
-      { id: 'edge_a', sourceNodeId: prompt.id, targetNodeId: agent.id, kind: 'connection' },
-      { id: 'edge_b', sourceNodeId: script.id, targetNodeId: agent.id, kind: 'connection' },
+      { id: 'edge_a', sourceNodeId: prompt.id, targetNodeId: agent.id, kind: 'connection', scriptVersion: 0 },
+      { id: 'edge_b', sourceNodeId: script.id, targetNodeId: agent.id, kind: 'connection', scriptVersion: 0 },
     ]
     view.nodePaths = {}
     view.chains = [{ id: 'c_n_agent', tailNodeId: agent.id, path: [], nodeIds: [prompt.id, script.id, agent.id], ambiguous: true, label: '汇合', status: 'idle' }]
@@ -335,8 +361,8 @@ describe('flowModel', () => {
     const second = makeNode('n_script_b', 'script')
     const view = snapshot([agent, first, second])
     view.edges = [
-      { id: 'edge_a', sourceNodeId: agent.id, targetNodeId: first.id, kind: 'connection' },
-      { id: 'edge_b', sourceNodeId: agent.id, targetNodeId: second.id, kind: 'connection' },
+      { id: 'edge_a', sourceNodeId: agent.id, targetNodeId: first.id, kind: 'connection', scriptVersion: 0 },
+      { id: 'edge_b', sourceNodeId: agent.id, targetNodeId: second.id, kind: 'connection', scriptVersion: 0 },
     ]
     const data = buildFlowModel(view, vi.fn()).nodes.find((node) => node.id === agent.id)?.data
     expect(data?.outputScript).toBeUndefined()

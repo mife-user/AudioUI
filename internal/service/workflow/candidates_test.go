@@ -38,6 +38,29 @@ func (s mismatchedArtifactStore) Get(ctx context.Context, _ string) (entity.Arti
 	return entity.Artifact{ID: "sha256:" + strings.Repeat("f", 64)}, append([]byte(nil), s.payload...), nil
 }
 
+func removeCandidateNodes(project *entity.Project) {
+	candidateIDs := make(map[string]bool)
+	for _, node := range project.Nodes {
+		if node.Type == valueobject.NodeTypeCandidate {
+			candidateIDs[node.ID] = true
+		}
+	}
+	nodes := project.Nodes[:0]
+	for _, node := range project.Nodes {
+		if !candidateIDs[node.ID] {
+			nodes = append(nodes, node)
+		}
+	}
+	project.Nodes = nodes
+	edges := project.Edges[:0]
+	for _, edge := range project.Edges {
+		if !candidateIDs[edge.SourceNodeID] && !candidateIDs[edge.TargetNodeID] {
+			edges = append(edges, edge)
+		}
+	}
+	project.Edges = edges
+}
+
 func artifactWithTopics(t *testing.T, store port.ArtifactStore, payload string) string {
 	t.Helper()
 	artifact, err := store.Put(context.Background(), []byte(payload), entity.ArtifactMeta{
@@ -95,6 +118,11 @@ func TestGetTopicCandidatesUsesAppliedArtifactAndProjectScope(t *testing.T) {
 		{N: 1, Kind: valueobject.OutputKindTopics, ArtifactID: older},
 		{N: 2, Kind: valueobject.OutputKindTopics, ArtifactID: latest},
 	}
+	for index := range project.Nodes {
+		if project.Nodes[index].CandidateSource != nil {
+			project.Nodes[index].CandidateSource.ArtifactID = latest
+		}
+	}
 	session := &fakeSession{project: project}
 	reader := NewArtifactCandidateCounter(&fakeArtifactProvider{store: store})
 	service := New(Options{Project: session, CandidateReader: reader})
@@ -118,6 +146,7 @@ func TestGetTopicCandidatesUsesAppliedArtifactAndProjectScope(t *testing.T) {
 		t.Fatalf("reloaded candidates = %+v err=%v", candidates, err)
 	}
 
+	removeCandidateNodes(&session.project)
 	session.project.Nodes[0].Rounds = nil
 	candidates, err = service.GetTopicCandidates(context.Background(), "n_topic", "p_test")
 	if err != nil || len(candidates) != 0 {
@@ -164,6 +193,7 @@ func TestGetTopicCandidatesFailsClosedForBrokenArtifacts(t *testing.T) {
 	for name, test := range cases {
 		t.Run(name, func(t *testing.T) {
 			project := baseProject()
+			removeCandidateNodes(&project)
 			project.Nodes[0].Rounds = []entity.Round{{N: 1, Kind: test.kind, ArtifactID: test.artifact}}
 			service := New(Options{
 				Project:         &fakeSession{project: project},

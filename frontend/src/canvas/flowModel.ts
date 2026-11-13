@@ -1,5 +1,5 @@
 import { MarkerType, type Edge, type Node as FlowNode } from '@xyflow/react'
-import type { CandidateSource, Edge as ProjectEdge, Node, NodeParams, PendingSummary, RunStartResult, ScriptVersionDetail, WorkspaceSnapshot } from '../../bindings/audio-ui/internal/domain/entity'
+import type { CandidateSource, Edge as ProjectEdge, Node, NodeParams, PendingSummary, RunStartOptions, RunStartResult, ScriptVersionDetail, WorkspaceSnapshot } from '../../bindings/audio-ui/internal/domain/entity'
 import { OutputKind, PendingStatus } from '../../bindings/audio-ui/internal/domain/valueobject'
 import type { TopicCandidateFixture } from './graphApi'
 import type { CanvasEdgeData } from './edgeRouting'
@@ -8,6 +8,14 @@ import { canvasNodeRects } from './nodeRects'
 export const COLLAPSED_NODE_HEIGHT = 56
 
 export type ChildNodeType = 'prompt' | 'agent' | 'script'
+
+export type TopicCandidateOption = {
+  nodeId: string
+  round: number
+  artifactId: string
+  index: number
+  runId: string
+}
 
 export type RunInputOption = {
   edgeId: string
@@ -23,13 +31,13 @@ export type CanvasNodeData = {
   runningLocked: boolean
   pathHighlighted: boolean
   hasInputs: boolean
-  topicCandidateIndexes: number[]
-  candidateNodeIds: Record<number, string>
+  topicCandidates: TopicCandidateOption[]
   candidates: TopicCandidateFixture[]
   candidate?: TopicCandidateFixture
   candidateError?: string
   candidateLoading?: boolean
   outputScript?: Node
+  outputScripts?: Node[]
   outputAmbiguous?: boolean
   mutationsDisabled: boolean
   paramsEditingDisabled?: boolean
@@ -44,7 +52,7 @@ export type CanvasNodeData = {
   runInputs?: RunInputOption[]
   onUpdateTopicParams?: (nodeId: string, title: string, params: NodeParams, projectId: string) => Promise<boolean | void>
   onUpdateNodeParams?: (nodeId: string, title: string, params: NodeParams, projectId: string) => Promise<boolean | void>
-  onStartRun?: (nodeId: string, projectId: string, inputEdgeIds?: string[]) => Promise<RunStartResult>
+  onStartRun?: (nodeId: string, projectId: string, options?: RunStartOptions) => Promise<RunStartResult>
   onGetScriptVersion?: (nodeId: string, version: number, projectId: string) => Promise<ScriptVersionDetail>
   onRegisterPromptFlush?: (nodeId: string, projectId: string, flush: () => Promise<boolean>) => () => void
   onRegisterTopicFlush?: (nodeId: string, projectId: string, flush: () => Promise<boolean>) => () => void
@@ -84,9 +92,9 @@ type CanvasCallbacks = {
   onLocateNode?: CanvasNodeData['onLocateNode']
 }
 
-export function candidateAt(candidates: TopicCandidateFixture[] | undefined, index: number | null | undefined): TopicCandidateFixture | undefined {
-  if (index === null || index === undefined) return undefined
-  return candidates?.find((candidate, position) => (candidate.index ?? position) === index)
+export function candidateForNode(candidates: TopicCandidateFixture[] | undefined, nodeId: string | undefined): TopicCandidateFixture | undefined {
+  if (!nodeId) return undefined
+  return candidates?.find((candidate) => candidate.nodeId === nodeId)
 }
 
 export function inputHandleId(node: Node): string | null {
@@ -114,7 +122,7 @@ export function outputHandleId(node: Node): string | null {
 function edgeSourceHandle(edge: ProjectEdge, parent: Node, child: Node): string | null {
   if (edge.kind === 'candidate_source') {
     if (parent.type !== 'topic' || child.type !== 'candidate' || !child.candidateSource) return null
-    return `topic-candidate-${child.candidateSource.index}`
+    return `topic-candidate-${child.id}`
   }
   return outputHandleId(parent)
 }
@@ -137,9 +145,9 @@ export function nodeHandleLayoutKey(type: CanvasFlowNode['type'], data: CanvasNo
     return JSON.stringify({
       type,
       collapsed: Boolean(data.node.collapsed),
-      candidates: data.topicCandidateIndexes.map((index) => {
-        const candidate = candidateAt(data.candidates, index)
-        return { index, title: candidate?.title ?? '', angle: candidate?.angle ?? '', hook: candidate?.hook ?? '' }
+      candidates: data.topicCandidates.map((source) => {
+        const candidate = candidateForNode(data.candidates, source.nodeId)
+        return { ...source, title: candidate?.title ?? '' }
       }),
     })
   }
@@ -147,6 +155,9 @@ export function nodeHandleLayoutKey(type: CanvasFlowNode['type'], data: CanvasNo
     return JSON.stringify({
       type,
       collapsed: Boolean(data.node.collapsed),
+      sourceRound: data.node.candidateSource?.round,
+      sourceRunId: data.node.candidateSource?.runId,
+      sourceArtifactId: data.node.candidateSource?.artifactId,
       sourceIndex: data.node.candidateSource?.index,
       title: data.candidate?.title ?? data.node.title,
       angle: data.candidate?.angle ?? '',
@@ -225,8 +236,7 @@ export function buildFlowModel(
   const projectEdges = snapshot.edges ?? []
   const projectNodeById = new Map(projectNodes.map((node) => [node.id, node]))
   const projectId = snapshot.project?.id ?? ''
-  const candidateIndexesByTopic = new Map<string, number[]>()
-  const candidateNodeIdsByTopic = new Map<string, Record<number, string>>()
+  const topicCandidatesById = new Map<string, TopicCandidateOption[]>()
   const incomingCount = new Map<string, number>()
   const scriptsByAgent = new Map<string, Node[]>()
   const runInputsByAgent = new Map<string, RunInputOption[]>()
@@ -249,12 +259,16 @@ export function buildFlowModel(
     }
     if (edge.kind === 'candidate_source' && sourceNode?.type === 'topic'
       && targetNode?.type === 'candidate' && targetNode.candidateSource?.topicNodeId === sourceNode.id) {
-      const indexes = candidateIndexesByTopic.get(sourceNode.id) ?? []
-      indexes.push(targetNode.candidateSource.index)
-      candidateIndexesByTopic.set(sourceNode.id, indexes)
-      const candidateNodeIds = candidateNodeIdsByTopic.get(sourceNode.id) ?? {}
-      candidateNodeIds[targetNode.candidateSource.index] = targetNode.id
-      candidateNodeIdsByTopic.set(sourceNode.id, candidateNodeIds)
+      const source = targetNode.candidateSource
+      const candidates = topicCandidatesById.get(sourceNode.id) ?? []
+      candidates.push({
+        nodeId: targetNode.id,
+        round: source.round,
+        artifactId: source.artifactId,
+        index: source.index,
+        runId: source.runId,
+      })
+      topicCandidatesById.set(sourceNode.id, candidates)
     }
     if (sourceNode?.type === 'agent' && targetNode?.type === 'script') {
       const scripts = scriptsByAgent.get(sourceNode.id) ?? []
@@ -262,7 +276,9 @@ export function buildFlowModel(
       scriptsByAgent.set(sourceNode.id, scripts)
     }
   }
-  for (const indexes of candidateIndexesByTopic.values()) indexes.sort((left, right) => left - right)
+  for (const candidates of topicCandidatesById.values()) {
+    candidates.sort((left, right) => left.round - right.round || left.index - right.index || left.nodeId.localeCompare(right.nodeId))
+  }
   const outputForAgent = (id: string): Node | undefined => {
     const scripts = scriptsByAgent.get(id) ?? []
     return scripts.length === 1 && incomingCount.get(scripts[0].id) === 1 ? scripts[0] : undefined
@@ -310,13 +326,13 @@ export function buildFlowModel(
         runningLocked: locked.has(node.id),
         pathHighlighted: highlighted.has(node.id),
         hasInputs: (incomingCount.get(node.id) ?? 0) > 0,
-        topicCandidateIndexes: candidateIndexesByTopic.get(node.id) ?? [],
-        candidateNodeIds: candidateNodeIdsByTopic.get(node.id) ?? {},
+        topicCandidates: topicCandidatesById.get(node.id) ?? [],
         candidates: candidateFixtures[node.id] ?? [],
-        candidate: source ? candidateAt(candidateFixtures[candidateTopicId], source.index) : undefined,
+        candidate: source ? candidateForNode(candidateFixtures[candidateTopicId], node.id) : undefined,
         candidateError: candidateTopicId ? callbacks.candidateErrors?.[candidateTopicId] : callbacks.candidateErrors?.[node.id],
         candidateLoading: candidateTopicId ? callbacks.candidateLoading?.[candidateTopicId] : callbacks.candidateLoading?.[node.id] ?? false,
         outputScript: node.type === 'agent' ? outputForAgent(node.id) : undefined,
+        outputScripts: node.type === 'agent' ? scriptsByAgent.get(node.id) ?? [] : undefined,
         outputAmbiguous: node.type === 'agent' && (scriptsByAgent.get(node.id)?.length ?? 0) > 0 && !outputForAgent(node.id),
         runInputs: node.type === 'agent' ? runInputsByAgent.get(node.id) ?? [] : undefined,
         mutationsDisabled,

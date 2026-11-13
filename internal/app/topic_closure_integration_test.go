@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -78,7 +79,9 @@ func TestTopicRunAndCandidateProjectionWithControlledAgentDriver(t *testing.T) {
 
 	driver.blockNodeID = topicReceipt.NodeID
 	startResult := make(chan entity.RunStartResult, 1)
-	go func() { startResult <- handler.NewRunService(manager).Start(topicReceipt.NodeID, project.ID) }()
+	go func() {
+		startResult <- handler.NewRunService(manager).Start(topicReceipt.NodeID, project.ID, entity.RunStartOptions{})
+	}()
 	select {
 	case <-driver.sendStarted:
 	case <-time.After(5 * time.Second):
@@ -87,7 +90,7 @@ func TestTopicRunAndCandidateProjectionWithControlledAgentDriver(t *testing.T) {
 	if !manager.IsBusy() {
 		t.Fatal("run did not hold the global turn gate")
 	}
-	busy := handler.NewRunService(manager).Start(invalidTopicReceipt.NodeID, project.ID)
+	busy := handler.NewRunService(manager).Start(invalidTopicReceipt.NodeID, project.ID, entity.RunStartOptions{})
 	if busy.Error == nil || busy.Error.Code != "BUSY" {
 		t.Fatalf("second run error = %+v, want BUSY", busy.Error)
 	}
@@ -170,7 +173,7 @@ func TestTopicRunAndCandidateProjectionWithControlledAgentDriver(t *testing.T) {
 		t.Fatalf("legacy topic port connection error = %v, want NODE_CONNECTION_INVALID", err)
 	}
 
-	invalidRun := handler.NewRunService(manager).Start(invalidTopicReceipt.NodeID, project.ID)
+	invalidRun := handler.NewRunService(manager).Start(invalidTopicReceipt.NodeID, project.ID, entity.RunStartOptions{})
 	if invalidRun.Error != nil || invalidRun.Run == nil {
 		t.Fatalf("invalid topic run result = %+v", invalidRun)
 	}
@@ -521,9 +524,9 @@ func TestLocalScriptClosureWithControlledAgentDriver(t *testing.T) {
 	}
 	run := func(nodeID string) entity.RunRecord {
 		t.Helper()
-		result := runs.Start(nodeID, project.ID)
+		result := runs.Start(nodeID, project.ID, entity.RunStartOptions{})
 		if result.Error != nil || result.Run == nil {
-			t.Fatalf("start %s: result=%+v", nodeID, result)
+			t.Fatalf("start %s: error=%+v result=%+v", nodeID, result.Error, result)
 		}
 		waitForTopicClosure(t, func() bool { return !manager.IsBusy() })
 		record, err := runs.GetRun(result.Run.ID)
@@ -547,7 +550,7 @@ func TestLocalScriptClosureWithControlledAgentDriver(t *testing.T) {
 		t.Fatalf("topic execution snapshot = %+v", topicRun.ExecutionSnapshot)
 	}
 	topicPrompt := driver.promptForRun(topicRun.ID)
-	if !bytes.Contains([]byte(topicPrompt), []byte("自动生成全部 Candidate 节点")) || bytes.Contains([]byte(topicPrompt), []byte("产物须经用户应用")) {
+	if !bytes.Contains([]byte(topicPrompt), []byte("自动生成首批 Candidate 节点")) || bytes.Contains([]byte(topicPrompt), []byte("产物须经用户应用")) {
 		t.Fatalf("topic context does not describe automatic Candidate generation: %s", topicPrompt)
 	}
 	candidates, err := workflowSetup.handler.GetTopicCandidates(topicID, project.ID)
@@ -598,7 +601,7 @@ func TestLocalScriptClosureWithControlledAgentDriver(t *testing.T) {
 		t.Fatalf("disconnect extra input: %v", err)
 	}
 
-	if result := runs.Start(promptA, project.ID); result.Error == nil || result.Error.Code != "RUN_ENTRY_UNAVAILABLE" || manager.IsBusy() {
+	if result := runs.Start(promptA, project.ID, entity.RunStartOptions{}); result.Error == nil || result.Error.Code != "RUN_ENTRY_UNAVAILABLE" || manager.IsBusy() {
 		t.Fatalf("prompt run result = %+v, busy=%t", result, manager.IsBusy())
 	}
 
@@ -606,13 +609,15 @@ func TestLocalScriptClosureWithControlledAgentDriver(t *testing.T) {
 		kind: valueobject.OutputKindScript, payload: []byte(validScriptAClosureFixture), requestID: "script-a-first",
 	})
 	firstAgentRun := run(agentA)
-	if firstAgentRun.ExecutionSnapshot == nil || firstAgentRun.ExecutionSnapshot.OutputBinding.Bound {
+	if firstAgentRun.ExecutionSnapshot == nil || firstAgentRun.ExecutionSnapshot.Version != 4 ||
+		!firstAgentRun.ExecutionSnapshot.OutputBinding.Bound || firstAgentRun.ExecutionSnapshot.OutputBinding.Mode != entity.RunOutputModeCreate ||
+		firstAgentRun.ExecutionSnapshot.OutputEdge == nil {
 		t.Fatalf("unbound Agent snapshot = %+v", firstAgentRun.ExecutionSnapshot)
 	}
 	firstPrompt := driver.promptForRun(firstAgentRun.ID)
 	if !bytes.Contains([]byte(firstPrompt), []byte("凌晨面包房")) || bytes.Contains([]byte(firstPrompt), []byte("旧唱片店")) ||
 		!bytes.Contains([]byte(firstPrompt), []byte(promptParams.Instruction)) || !bytes.Contains([]byte(firstPrompt), []byte(`"duration": 30`)) ||
-		!bytes.Contains([]byte(firstPrompt), []byte("自动创建直接 Script 节点")) {
+		!bytes.Contains([]byte(firstPrompt), []byte("该节点和版本仅在合法 reply 原子提交时创建")) {
 		t.Fatalf("first Agent context did not isolate candidate A and preserve the prompt: %s", firstPrompt)
 	}
 	current, err = projects.service.Current(context.Background())
@@ -674,8 +679,9 @@ func TestLocalScriptClosureWithControlledAgentDriver(t *testing.T) {
 		!bytes.Contains([]byte(secondPrompt), []byte("追加新版本")) {
 		t.Fatalf("reparented Agent context did not use candidate B and preserve the prompt: %s", secondPrompt)
 	}
-	if firstAgentRun.ExecutionSnapshot.ChainPath[1] != candidateIDs[0] || secondAgentRun.ExecutionSnapshot.ChainPath[1] != candidateIDs[1] {
-		t.Fatalf("run snapshots changed across reparent: first=%v second=%v", firstAgentRun.ExecutionSnapshot.ChainPath, secondAgentRun.ExecutionSnapshot.ChainPath)
+	if !slices.Contains(firstAgentRun.ExecutionSnapshot.ScopeNodeIDs(), candidateIDs[0]) ||
+		!slices.Contains(secondAgentRun.ExecutionSnapshot.ScopeNodeIDs(), candidateIDs[1]) {
+		t.Fatalf("run snapshots changed across reparent: first=%v second=%v", firstAgentRun.ExecutionSnapshot.ScopeNodeIDs(), secondAgentRun.ExecutionSnapshot.ScopeNodeIDs())
 	}
 
 	pendingItems, err := workflowSetup.handler.ListPending(project.ID)
@@ -782,11 +788,11 @@ func TestLocalScriptClosureWithControlledAgentDriver(t *testing.T) {
 		t.Fatal(err)
 	}
 	persistedFirstRun, err := runStore.Load(context.Background(), firstAgentRun.ID)
-	if err != nil || persistedFirstRun.ExecutionSnapshot == nil || persistedFirstRun.ExecutionSnapshot.ChainPath[1] != candidateIDs[0] {
+	if err != nil || persistedFirstRun.ExecutionSnapshot == nil || !slices.Contains(persistedFirstRun.ExecutionSnapshot.ScopeNodeIDs(), candidateIDs[0]) {
 		t.Fatalf("original run snapshot after reparent = %+v err=%v", persistedFirstRun.ExecutionSnapshot, err)
 	}
 	persistedSecondRun, err := runStore.Load(context.Background(), secondAgentRun.ID)
-	if err != nil || persistedSecondRun.ExecutionSnapshot == nil || persistedSecondRun.ExecutionSnapshot.ChainPath[1] != candidateIDs[1] {
+	if err != nil || persistedSecondRun.ExecutionSnapshot == nil || !slices.Contains(persistedSecondRun.ExecutionSnapshot.ScopeNodeIDs(), candidateIDs[1]) {
 		t.Fatalf("reparented run snapshot = %+v err=%v", persistedSecondRun.ExecutionSnapshot, err)
 	}
 }

@@ -3,6 +3,7 @@ package persistence
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -64,12 +65,12 @@ func TestProjectLoadCompletesCommittedPendingTransaction(t *testing.T) {
 	layout := testLayout(t.TempDir())
 	projects := NewProjectStore(layout)
 	project := sampleProject("p_test")
-	project.Nodes[0].Rounds = []entity.Round{{N: 1, Kind: valueobject.OutputKindTopics, ArtifactID: "sha256:topic"}}
+	project.Nodes[0].Rounds = []entity.Round{{N: 1, Kind: valueobject.OutputKindTopics, ArtifactID: "sha256:topic", RunID: "r_topic"}}
 	project.ActiveNodeID = "n_script"
 	project.Nodes = append(project.Nodes,
 		entity.Node{
 			ID: "n_candidate", Type: valueobject.NodeTypeCandidate, Title: "候选", Size: entity.DefaultNodeSize(valueobject.NodeTypeCandidate),
-			CandidateSource: &entity.CandidateSource{TopicNodeID: "n_root", ArtifactID: "sha256:topic", Index: 0}, Rounds: []entity.Round{},
+			CandidateSource: &entity.CandidateSource{TopicNodeID: "n_root", Round: 1, ArtifactID: "sha256:topic", Index: 0, RunID: "r_topic"}, Rounds: []entity.Round{},
 		},
 		entity.Node{ID: "n_prompt", Type: valueobject.NodeTypePrompt, Title: "提示词", Size: entity.DefaultNodeSize(valueobject.NodeTypePrompt), Rounds: []entity.Round{}},
 		entity.Node{ID: "n_agent", Type: valueobject.NodeTypeAgent, Title: "Agent", Size: entity.DefaultNodeSize(valueobject.NodeTypeAgent), Rounds: []entity.Round{}},
@@ -154,7 +155,7 @@ func TestCommittedRootlessDAGScriptReplyRecovery(t *testing.T) {
 			{ID: "n_output", Type: valueobject.NodeTypeScript, Title: "输出", Size: entity.DefaultNodeSize(valueobject.NodeTypeScript), ScriptVersions: []entity.ScriptVersion{{N: 1, ArtifactID: "sha256:output-v1", RunID: "r_old"}}, Rounds: []entity.Round{}},
 		},
 		Edges: []entity.Edge{
-			{ID: "e_source_prompt", SourceNodeID: "n_source", TargetNodeID: "n_prompt", Kind: entity.EdgeKindConnection},
+			{ID: "e_source_prompt", SourceNodeID: "n_source", TargetNodeID: "n_prompt", Kind: entity.EdgeKindConnection, ScriptVersion: 1},
 			{ID: "e_prompt_agent", SourceNodeID: "n_prompt", TargetNodeID: "n_agent", Kind: entity.EdgeKindConnection},
 			{ID: "e_agent_output", SourceNodeID: "n_agent", TargetNodeID: "n_output", Kind: entity.EdgeKindConnection},
 		},
@@ -164,7 +165,7 @@ func TestCommittedRootlessDAGScriptReplyRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	snapshot, err := graph.SnapshotForRunWithInputs("n_agent", []string{"e_prompt_agent"})
-	if err != nil || snapshot.Version != 3 || snapshot.OutputBinding.NodeID != "n_output" {
+	if err != nil || snapshot.Version != 4 || snapshot.OutputBinding.NodeID != "n_output" {
 		t.Fatalf("rootless DAG snapshot = %+v err=%v", snapshot, err)
 	}
 	if err := projects.Create(ctx, project); err != nil {
@@ -204,8 +205,166 @@ func TestCommittedRootlessDAGScriptReplyRecovery(t *testing.T) {
 		t.Fatalf("rootless DAG transaction recovery: %v", err)
 	}
 	stored, err := pendingStore.Load(ctx, pending.ID)
-	if err != nil || stored.Status != valueobject.PendingApplied || stored.ExecutionSnapshot == nil || stored.ExecutionSnapshot.Version != 3 {
+	if err != nil || stored.Status != valueobject.PendingApplied || stored.ExecutionSnapshot == nil || stored.ExecutionSnapshot.Version != 4 {
 		t.Fatalf("recovered DAG pending = %+v err=%v", stored, err)
+	}
+}
+
+func TestCommittedCreateOutputDAGReplyRecovery(t *testing.T) {
+	ctx := context.Background()
+	layout := testLayout(t.TempDir())
+	projects := NewProjectStore(layout)
+	project := entity.Project{
+		Version: valueobject.ProjectFileVersion, ID: "p_dag_create", Name: "DAG 新建输出", Revision: 1, ActiveNodeID: "n_agent",
+		Nodes: []entity.Node{
+			{ID: "n_prompt", Type: valueobject.NodeTypePrompt, Title: "任务", Position: entity.Position{X: 10, Y: 20}, Size: entity.DefaultNodeSize(valueobject.NodeTypePrompt), Params: entity.NodeParams{Instruction: "续写"}, Rounds: []entity.Round{}},
+			{ID: "n_agent", Type: valueobject.NodeTypeAgent, Title: "Agent", Position: entity.Position{X: 30, Y: 20}, Size: entity.DefaultNodeSize(valueobject.NodeTypeAgent), Rounds: []entity.Round{}},
+		},
+		Edges: []entity.Edge{{ID: "e_prompt_agent", SourceNodeID: "n_prompt", TargetNodeID: "n_agent", Kind: entity.EdgeKindConnection}},
+	}
+	graph, err := entity.NewGraph(&project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := graph.SnapshotForRunWithOptions("n_agent", entity.RunStartOptions{CreateOutput: true})
+	if err != nil || snapshot.Version != 4 || snapshot.OutputBinding.Mode != entity.RunOutputModeCreate || snapshot.OutputEdge == nil {
+		t.Fatalf("create-output snapshot = %+v err=%v", snapshot, err)
+	}
+	if err := projects.Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	projectPaths, err := paths.ResolveProject(layout, project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pendingStore := NewPendingStore(projectPaths.Dir)
+	artifactPayload := []byte(`{"scenes":[{"duration":1,"narration":"新旁白"}],"title":"新脚本"}`)
+	artifactID := "sha256:" + hashPayload(artifactPayload)
+	pending := entity.Pending{
+		ID: "pa_create", RunID: "r_create", ChainID: "c_n_agent", ChainPath: []string{}, NodeID: "n_agent",
+		Kind: valueobject.OutputKindScript, Status: valueobject.PendingApplied, ArtifactID: artifactID,
+		OutputBinding: &snapshot.OutputBinding, OutputSchemaVersion: snapshot.OutputContract.SchemaVersion,
+		ExecutionSnapshot: &snapshot, ResultNodeID: snapshot.OutputBinding.NodeID,
+		CreatedNodeIDs: []string{snapshot.OutputBinding.NodeID}, CreatedAt: "2026-11-13T00:00:00Z",
+	}
+	meta := entity.ArtifactMeta{
+		Kind: valueobject.OutputKindScript, NodeID: pending.ResultNodeID, CreatedAt: pending.CreatedAt,
+		SourceRunID: pending.RunID, SourcePendingID: pending.ID,
+	}
+	if err := pendingStore.SaveTransaction(ctx, entity.PendingTransaction{
+		Version: valueobject.PendingTransactionFileVersion, BaseRevision: 1, TargetRevision: 2,
+		Pending: pending, Payload: artifactPayload, ArtifactPayload: artifactPayload, ArtifactMeta: &meta,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	project.Revision = 2
+	project.Nodes = append(project.Nodes, entity.Node{
+		ID: pending.ResultNodeID, Type: valueobject.NodeTypeScript, Title: "新脚本", Size: entity.DefaultNodeSize(valueobject.NodeTypeScript),
+		ScriptVersions: []entity.ScriptVersion{{N: 1, ArtifactID: artifactID, RunID: pending.RunID}}, Rounds: []entity.Round{},
+	})
+	project.Edges = append(project.Edges, *snapshot.OutputEdge)
+	if err := projects.Save(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := projects.Load(ctx, project.ID)
+	if err != nil || len(loaded.Nodes) != 3 || loaded.Nodes[2].ID != pending.ResultNodeID {
+		t.Fatalf("create-output recovery nodes=%+v err=%v", loaded.Nodes, err)
+	}
+	stored, err := pendingStore.Load(ctx, pending.ID)
+	if err != nil || stored.Status != valueobject.PendingApplied || stored.CreatedNodeIDs[0] != pending.ResultNodeID {
+		t.Fatalf("recovered create-output pending = %+v err=%v", stored, err)
+	}
+	if _, _, err := NewArtifactStore(projectPaths.Dir).Get(ctx, artifactID); err != nil {
+		t.Fatalf("create-output artifact recovery: %v", err)
+	}
+	if _, found, err := pendingStore.LoadTransaction(ctx); err != nil || found {
+		t.Fatalf("create-output transaction remains: found=%v err=%v", found, err)
+	}
+}
+
+func TestCommittedTopicBatchReplyRecovery(t *testing.T) {
+	ctx := context.Background()
+	layout := testLayout(t.TempDir())
+	projects := NewProjectStore(layout)
+	project := sampleProject("p_topic_batch")
+	firstPayload := []byte(`{"topics":[{"title":"旧一"},{"title":"旧二"},{"title":"旧三"}]}`)
+	firstArtifactID := "sha256:" + hashPayload(firstPayload)
+	project.Nodes[0].Locked = true
+	project.Nodes[0].Rounds = []entity.Round{{N: 1, Kind: valueobject.OutputKindTopics, ArtifactID: firstArtifactID, PendingID: "pa_first", RunID: "r_first"}}
+	for index := 0; index < 3; index++ {
+		id := fmt.Sprintf("n_candidate_old_%d", index)
+		project.Nodes = append(project.Nodes, entity.Node{
+			ID: id, Type: valueobject.NodeTypeCandidate, Title: fmt.Sprintf("旧候选 %d", index+1), Size: entity.DefaultNodeSize(valueobject.NodeTypeCandidate),
+			CandidateSource: &entity.CandidateSource{TopicNodeID: "n_root", Round: 1, ArtifactID: firstArtifactID, Index: index, RunID: "r_first"},
+			Rounds:          []entity.Round{},
+		})
+		linkNodes(&project, "n_root", id)
+	}
+	graph, err := entity.NewGraph(&project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := graph.SnapshotForRunWithOptions("n_root", entity.RunStartOptions{TopicRerun: true})
+	if err != nil || snapshot.TopicBatch == nil || snapshot.TopicBatch.BaselineRound != 1 {
+		t.Fatalf("topic batch snapshot = %+v err=%v", snapshot, err)
+	}
+	if err := projects.Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	projectPaths, err := paths.ResolveProject(layout, project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pendingStore := NewPendingStore(projectPaths.Dir)
+	artifactPayload := []byte(`{"topics":[{"angle":"新方向一","hook":"新开场一","title":"新一"},{"angle":"新方向二","hook":"新开场二","title":"新二"},{"angle":"新方向三","hook":"新开场三","title":"新三"}]}`)
+	artifactID := "sha256:" + hashPayload(artifactPayload)
+	pending := entity.Pending{
+		ID: "pa_topic_batch", RunID: "r_topic_batch", ChainID: "c_n_root", ChainPath: []string{"n_root"}, NodeID: "n_root",
+		Kind: valueobject.OutputKindTopics, Status: valueobject.PendingApplied, ArtifactID: artifactID,
+		OutputBinding: &snapshot.OutputBinding, OutputSchemaVersion: snapshot.OutputContract.SchemaVersion,
+		ExecutionSnapshot: &snapshot, CreatedNodeIDs: []string{"n_candidate_new_0", "n_candidate_new_1", "n_candidate_new_2"},
+		CreatedAt: "2026-11-13T00:00:00Z",
+	}
+	meta := entity.ArtifactMeta{
+		Kind: valueobject.OutputKindTopics, NodeID: pending.NodeID, CreatedAt: pending.CreatedAt,
+		SourceRunID: pending.RunID, SourcePendingID: pending.ID,
+	}
+	if err := pendingStore.SaveTransaction(ctx, entity.PendingTransaction{
+		Version: valueobject.PendingTransactionFileVersion, BaseRevision: 1, TargetRevision: 2,
+		Pending: pending, Payload: artifactPayload, ArtifactPayload: artifactPayload, ArtifactMeta: &meta,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	project.Revision = 2
+	project.Nodes[0].Rounds = append(project.Nodes[0].Rounds, entity.Round{
+		N: 2, Kind: valueobject.OutputKindTopics, ArtifactID: artifactID, PendingID: pending.ID, RunID: pending.RunID,
+	})
+	for index, id := range pending.CreatedNodeIDs {
+		project.Nodes = append(project.Nodes, entity.Node{
+			ID: id, Type: valueobject.NodeTypeCandidate, Title: fmt.Sprintf("新候选 %d", index+1), Size: entity.DefaultNodeSize(valueobject.NodeTypeCandidate),
+			CandidateSource: &entity.CandidateSource{TopicNodeID: "n_root", Round: 2, ArtifactID: artifactID, Index: index, RunID: pending.RunID},
+			Rounds:          []entity.Round{},
+		})
+		linkNodes(&project, "n_root", id)
+	}
+	if err := projects.Save(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := projects.Load(ctx, project.ID)
+	if err != nil || len(loaded.Nodes) != 7 || len(loaded.Nodes[0].Rounds) != 2 {
+		t.Fatalf("topic batch recovery nodes=%d rounds=%+v err=%v", len(loaded.Nodes), loaded.Nodes[0].Rounds, err)
+	}
+	stored, err := pendingStore.Load(ctx, pending.ID)
+	if err != nil || stored.Status != valueobject.PendingApplied || stored.ExecutionSnapshot == nil || stored.ExecutionSnapshot.TopicBatch == nil {
+		t.Fatalf("recovered topic batch pending = %+v err=%v", stored, err)
+	}
+	if _, _, err := NewArtifactStore(projectPaths.Dir).Get(ctx, artifactID); err != nil {
+		t.Fatalf("topic batch artifact recovery: %v", err)
+	}
+	if _, found, err := pendingStore.LoadTransaction(ctx); err != nil || found {
+		t.Fatalf("topic batch transaction remains: found=%v err=%v", found, err)
 	}
 }
 
@@ -257,7 +416,7 @@ func TestCommittedTopicReplyRecoveryValidatesCandidateGraphAssociation(t *testin
 				for index, id := range pending.CreatedNodeIDs {
 					project.Nodes = append(project.Nodes, entity.Node{
 						ID: id, Type: valueobject.NodeTypeCandidate, Title: "候选", Size: entity.DefaultNodeSize(valueobject.NodeTypeCandidate),
-						CandidateSource: &entity.CandidateSource{TopicNodeID: "n_root", ArtifactID: artifactID, Index: index},
+						CandidateSource: &entity.CandidateSource{TopicNodeID: "n_root", Round: 1, ArtifactID: artifactID, Index: index, RunID: pending.RunID},
 						Rounds:          []entity.Round{},
 					})
 					linkNodes(&project, "n_root", id)
@@ -312,9 +471,9 @@ func TestCommittedScriptReplyRecoveryValidatesVersionAssociation(t *testing.T) {
 			projects := NewProjectStore(layout)
 			project := sampleProject("p_test")
 			project.Nodes[0].Locked = true
-			project.Nodes[0].Rounds = []entity.Round{{N: 1, Kind: valueobject.OutputKindTopics, ArtifactID: "sha256:topics"}}
+			project.Nodes[0].Rounds = []entity.Round{{N: 1, Kind: valueobject.OutputKindTopics, ArtifactID: "sha256:topics", RunID: "r_topics"}}
 			project.Nodes = append(project.Nodes,
-				entity.Node{ID: "n_candidate", Type: valueobject.NodeTypeCandidate, Title: "候选", Size: entity.DefaultNodeSize(valueobject.NodeTypeCandidate), CandidateSource: &entity.CandidateSource{TopicNodeID: "n_root", ArtifactID: "sha256:topics", Index: 0}, Rounds: []entity.Round{}},
+				entity.Node{ID: "n_candidate", Type: valueobject.NodeTypeCandidate, Title: "候选", Size: entity.DefaultNodeSize(valueobject.NodeTypeCandidate), CandidateSource: &entity.CandidateSource{TopicNodeID: "n_root", Round: 1, ArtifactID: "sha256:topics", Index: 0, RunID: "r_topics"}, Rounds: []entity.Round{}},
 				entity.Node{ID: "n_prompt", Type: valueobject.NodeTypePrompt, Title: "提示词", Size: entity.DefaultNodeSize(valueobject.NodeTypePrompt), Rounds: []entity.Round{}},
 				entity.Node{ID: "n_agent", Type: valueobject.NodeTypeAgent, Title: "Agent", Size: entity.DefaultNodeSize(valueobject.NodeTypeAgent), Rounds: []entity.Round{}},
 				entity.Node{ID: "n_script", Type: valueobject.NodeTypeScript, Title: "脚本", Size: entity.DefaultNodeSize(valueobject.NodeTypeScript), ScriptVersions: []entity.ScriptVersion{{N: 1, ArtifactID: "sha256:old-script", RunID: "r_old"}}, Rounds: []entity.Round{}},

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef } from 'react'
-import type { GraphMutationReceipt, RunStartResult, WorkspaceSnapshot } from '../../bindings/audio-ui/internal/domain/entity'
+import type { GraphMutationReceipt, RunStartOptions, RunStartResult, WorkspaceSnapshot } from '../../bindings/audio-ui/internal/domain/entity'
 import type { WorkspaceStatus } from '../api/workspace'
 import { useWorkspaceStore } from '../stores/workspaceStore'
 import { useRunRequestContext } from '../hooks/runRequests'
@@ -13,7 +13,7 @@ type Props = {
   onRetry: () => void
   onGraphMutation?: (receipt: GraphMutationReceipt) => void | Promise<void>
   onRegisterDraftFlush?: (flush: (projectId: string) => Promise<boolean>) => () => void
-  onStartRun?: (nodeId: string, projectId: string) => Promise<RunStartResult>
+  onStartRun?: (nodeId: string, projectId: string, options?: RunStartOptions) => Promise<RunStartResult>
   api?: GraphAPI
 }
 

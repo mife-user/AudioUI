@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 
 	"audio-ui/internal/domain/entity"
 	"audio-ui/internal/domain/port"
@@ -12,6 +13,7 @@ import (
 
 type TopicCandidateReader interface {
 	Read(ctx context.Context, projectID string, node entity.Node) ([]entity.TopicCandidate, error)
+	ReadSource(ctx context.Context, projectID string, source entity.CandidateSource) (entity.TopicCandidate, error)
 }
 
 type artifactCandidateCounter struct {
@@ -87,6 +89,41 @@ func (c *artifactCandidateCounter) Read(ctx context.Context, projectID string, n
 	return candidates, nil
 }
 
+func (c *artifactCandidateCounter) ReadSource(ctx context.Context, projectID string, source entity.CandidateSource) (entity.TopicCandidate, error) {
+	if source.Round <= 0 || source.RunID == "" || source.ArtifactID == "" || source.Index < 0 || c.stores == nil {
+		return entity.TopicCandidate{}, ErrCandidateInvalid
+	}
+	store, err := c.stores.ForProject(ctx, projectID)
+	if err != nil {
+		return entity.TopicCandidate{}, err
+	}
+	artifact, payload, err := store.Get(ctx, source.ArtifactID)
+	if err != nil {
+		return entity.TopicCandidate{}, err
+	}
+	if artifact.ID != source.ArtifactID || artifact.Kind != valueobject.OutputKindTopics {
+		return entity.TopicCandidate{}, ErrCandidateInvalid
+	}
+	if err := valueobject.ValidateStructuredPayload(valueobject.OutputKindTopics, payload); err != nil {
+		return entity.TopicCandidate{}, err
+	}
+	var document struct {
+		Topics []struct {
+			Title string `json:"title"`
+			Angle string `json:"angle"`
+			Hook  string `json:"hook"`
+		} `json:"topics"`
+	}
+	if err := json.Unmarshal(payload, &document); err != nil || source.Index >= len(document.Topics) {
+		return entity.TopicCandidate{}, ErrCandidateInvalid
+	}
+	candidate := document.Topics[source.Index]
+	return entity.TopicCandidate{
+		Round: source.Round, RunID: source.RunID, Index: source.Index,
+		Title: candidate.Title, Angle: candidate.Angle, Hook: candidate.Hook,
+	}, nil
+}
+
 func (s *Service) GetTopicCandidates(ctx context.Context, nodeID, expectedProjectID string) ([]entity.TopicCandidate, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -109,7 +146,7 @@ func (s *Service) GetTopicCandidates(ctx context.Context, nodeID, expectedProjec
 		if err != nil {
 			return fmt.Errorf("图状态无效: %w", err)
 		}
-		if err := graph.ValidateForest(); err != nil {
+		if err := graph.Validate(); err != nil {
 			return fmt.Errorf("图状态无效: %w", err)
 		}
 		node, err := requireNode(graph, nodeID, "node")
@@ -122,7 +159,32 @@ func (s *Service) GetTopicCandidates(ctx context.Context, nodeID, expectedProjec
 		if s.opts.CandidateReader == nil {
 			return fmt.Errorf("%w: candidate source unavailable", ErrCandidateInvalid)
 		}
-		candidates, err = s.opts.CandidateReader.Read(ctx, project.ID, *node)
+		if project.Version < valueobject.ProjectFileVersion {
+			candidates, err = s.opts.CandidateReader.Read(ctx, project.ID, *node)
+		} else {
+			candidates = make([]entity.TopicCandidate, 0)
+			for _, childID := range graph.Children(node.ID) {
+				child, ok := graph.Node(childID)
+				if !ok || child.Type != valueobject.NodeTypeCandidate || child.CandidateSource == nil || child.CandidateSource.TopicNodeID != node.ID {
+					continue
+				}
+				candidate, readErr := s.opts.CandidateReader.ReadSource(ctx, project.ID, *child.CandidateSource)
+				if readErr != nil {
+					return fmt.Errorf("%w: %v", ErrCandidateInvalid, readErr)
+				}
+				candidate.NodeID = child.ID
+				candidates = append(candidates, candidate)
+			}
+			sort.Slice(candidates, func(i, j int) bool {
+				if candidates[i].Round != candidates[j].Round {
+					return candidates[i].Round < candidates[j].Round
+				}
+				if candidates[i].Index != candidates[j].Index {
+					return candidates[i].Index < candidates[j].Index
+				}
+				return candidates[i].NodeID < candidates[j].NodeID
+			})
+		}
 		if err != nil {
 			return fmt.Errorf("%w: %v", ErrCandidateInvalid, err)
 		}

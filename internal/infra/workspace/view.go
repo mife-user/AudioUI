@@ -156,7 +156,7 @@ func NewSnapshotRunView(layout valueobject.Layout, projectID string, snapshot en
 	if err := valueobject.ValidateID(projectID); err != nil {
 		return nil, err
 	}
-	if err := snapshot.Validate(); err != nil || snapshot.ProjectID != projectID || snapshot.Version != 3 {
+	if err := snapshot.Validate(); err != nil || snapshot.ProjectID != projectID || snapshot.Version < 3 || snapshot.Version > 4 {
 		return nil, fmt.Errorf("%w: invalid DAG execution snapshot", paths.ErrWorkspaceScopeInvalid)
 	}
 	projectPaths, err := paths.ResolveProject(layout, projectID)

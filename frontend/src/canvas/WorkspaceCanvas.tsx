@@ -13,8 +13,8 @@ import {
   type NodeChange,
   type NodeMouseHandler,
 } from '@xyflow/react'
-import type { GraphMutationReceipt, Node, NodeParams, RunStartResult, WorkspaceSnapshot } from '../../bindings/audio-ui/internal/domain/entity'
-import { startRun as startRunAPI, startRunWithInputs as startRunWithInputsAPI } from '../api/runs'
+import type { Edge as ProjectEdge, GraphMutationReceipt, Node, NodeParams, RunStartOptions, RunStartResult, WorkspaceSnapshot } from '../../bindings/audio-ui/internal/domain/entity'
+import { startRun as startRunAPI } from '../api/runs'
 import { graphAPI, type GraphAPI, type TopicCandidateFixture } from './graphApi'
 import { allocateNodePosition, NODE_LAYOUT_GAP } from './nodePosition'
 import { COLLAPSED_NODE_HEIGHT, buildFlowEdges, buildFlowModel, inputHandleId, nodeMap, outputHandleId, type CanvasFlowNode, type ChildNodeType } from './flowModel'
@@ -59,7 +59,7 @@ type Props = {
   onRegisterNodeLocator?: (locator: NodeLocator) => () => void
   api?: GraphAPI
   candidateFixtures?: Record<string, TopicCandidateFixture[]>
-  onStartRun?: (nodeId: string, projectId: string, inputEdgeIds?: string[]) => Promise<RunStartResult>
+  onStartRun?: (nodeId: string, projectId: string, options?: RunStartOptions) => Promise<RunStartResult>
 }
 
 type PendingSync = {
@@ -220,6 +220,7 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFl
   const [notice, setNotice] = useState('')
   const [busy, setBusy] = useState(false)
   const [connectSubmitting, setConnectSubmitting] = useState(false)
+  const [scriptVersionSavingEdgeIDs, setScriptVersionSavingEdgeIDs] = useState<Set<string>>(() => new Set())
   const [paramsSaveCount, setParamsSaveCount] = useState(0)
   const [runSubmittingNodeId, setRunSubmittingNodeId] = useState('')
   const [runSubmittingInputNodeIDs, setRunSubmittingInputNodeIDs] = useState<string[]>([])
@@ -240,6 +241,7 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFl
   const [createMenu, setCreateMenu] = useState<CreateMenuState | null>(null)
   const createInFlight = useRef(false)
   const connectInFlight = useRef(false)
+  const scriptVersionInFlight = useRef(new Set<string>())
   const runStartInFlight = useRef(false)
   const runRequestSequence = useRef(0)
   const promptFlushers = useRef(new Map<string, RegisteredFlush>())
@@ -625,7 +627,36 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFl
     }
   }, [api, syncMutation])
 
-  const startNodeRun = useCallback(async (nodeId: string, ownerProjectId: string, inputEdgeIDs?: string[]): Promise<RunStartResult> => {
+  const updateEdgeScriptVersion = useCallback(async (edge: ProjectEdge, version: number) => {
+    if (currentProjectId.current !== projectId || mutationBlockedRef.current || runStartInFlight.current || scriptVersionInFlight.current.has(edge.id)) return
+    const current = snapshotRef.current
+    const liveEdge = (current.edges ?? []).find((candidate) => candidate.id === edge.id)
+    if (!liveEdge || liveEdge.sourceNodeId !== edge.sourceNodeId || liveEdge.targetNodeId !== edge.targetNodeId || liveEdge.kind !== 'connection') return
+    if ((liveEdge.scriptVersion ?? 0) === version) return
+    const source = (current.nodes ?? []).find((candidate) => candidate.id === liveEdge.sourceNodeId)
+    if (source?.type !== 'script') return
+    const locked = new Set(current.lockedNodeIds ?? [])
+    if (locked.has(liveEdge.sourceNodeId) || locked.has(liveEdge.targetNodeId)) return
+
+    scriptVersionInFlight.current.add(edge.id)
+    setScriptVersionSavingEdgeIDs((currentIDs) => new Set(currentIDs).add(edge.id))
+    try {
+      const receipt = await api.setEdgeScriptVersion(edge.id, version, projectId)
+      if (currentProjectId.current !== projectId || receipt.projectId !== projectId) return
+      await syncMutation(receipt, 'Script 输入版本')
+    } catch (failure) {
+      if (currentProjectId.current === projectId) setError(`保存 Script 输入版本失败：${errorMessage(failure)}`)
+    } finally {
+      scriptVersionInFlight.current.delete(edge.id)
+      setScriptVersionSavingEdgeIDs((currentIDs) => {
+        const next = new Set(currentIDs)
+        next.delete(edge.id)
+        return next
+      })
+    }
+  }, [api, projectId, syncMutation])
+
+  const startNodeRun = useCallback(async (nodeId: string, ownerProjectId: string, options?: RunStartOptions): Promise<RunStartResult> => {
     if (currentProjectId.current !== ownerProjectId) {
       return { error: { code: 'PROJECT_CHANGED', message: '工程已切换，未启动运行。' } }
     }
@@ -642,7 +673,7 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFl
     try {
       const current = snapshotRef.current
       const incomingEdges = (current.edges ?? []).filter((edge) => edge.targetNodeId === nodeId && edge.kind === 'connection')
-      const selectedEdges = new Set(inputEdgeIDs ?? incomingEdges.map((edge) => edge.id))
+      const selectedEdges = new Set(options?.inputEdgeIds ?? incomingEdges.map((edge) => edge.id))
       const nodeById = new Map((current.nodes ?? []).map((node) => [node.id, node]))
       const selectedPromptIDs = new Set<string>()
       const selectedInputNodeIDs = new Set<string>()
@@ -665,14 +696,8 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFl
       if (pendingSyncRef.current?.receipt.projectId === ownerProjectId || runStartBlockedRef.current) {
         return { error: { code: 'WORKSPACE_SYNC_STALE', message: '请先完成当前工程操作与快照同步。' } }
       }
-      if (onStartRun) {
-        return inputEdgeIDs === undefined
-          ? await onStartRun(nodeId, ownerProjectId)
-          : await onStartRun(nodeId, ownerProjectId, inputEdgeIDs)
-      }
-      return inputEdgeIDs === undefined
-        ? await startRunAPI(nodeId, ownerProjectId)
-        : await startRunWithInputsAPI(nodeId, ownerProjectId, inputEdgeIDs)
+      if (onStartRun) return await onStartRun(nodeId, ownerProjectId, options)
+      return await startRunAPI(nodeId, ownerProjectId, options)
     } catch (failure) {
       return { error: { code: 'RUN_START_FAILED', message: errorMessage(failure) } }
     } finally {
@@ -1115,10 +1140,12 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFl
           <summary>{selectedNode.title} 的输入关系 · {incomingEdges.length}</summary>
           <ul aria-label={`${selectedNode.title} 的输入关系`}>
             {incomingEdges.map((edge) => {
-              const sourceTitle = byId.get(edge.sourceNodeId)?.title ?? edge.sourceNodeId
+              const source = byId.get(edge.sourceNodeId)
+              const sourceTitle = source?.title ?? edge.sourceNodeId
               const targetLocked = model.nodes.find((node) => node.id === selectedNode.id)?.data.runningLocked
               const sourceLocked = model.nodes.find((node) => node.id === edge.sourceNodeId)?.data.runningLocked
               const disabled = mutationBlocked || targetLocked || sourceLocked
+              const versionSaving = scriptVersionSavingEdgeIDs.has(edge.id)
               const replacement = replacementSources[edge.id] ?? ''
               return (
                 <li key={edge.id}>
@@ -1127,6 +1154,20 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFl
                     <span className="canvas-input-protected">候选生成来源 · 不可更改</span>
                   ) : (
                     <div className="canvas-input-actions">
+                      {source?.type === 'script' ? (
+                        <label>
+                          固定版本
+                          <select
+                            aria-label={`为 ${sourceTitle} → ${selectedNode.title} 固定 Script 版本`}
+                            value={edge.scriptVersion ?? 0}
+                            disabled={disabled || versionSaving}
+                            onChange={(event) => void updateEdgeScriptVersion(edge, Number(event.currentTarget.value))}
+                          >
+                            <option value={0}>未绑定</option>
+                            {source.scriptVersions?.map((version) => <option key={version.n} value={version.n}>v{version.n}</option>)}
+                          </select>
+                        </label>
+                      ) : null}
                       <label>
                         新上游
                         <select

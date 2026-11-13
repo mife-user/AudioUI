@@ -33,10 +33,6 @@ export function RespondQuestion(runID: string, requestID: string, answer: string
     return $Call.ByID(1072161310, runID, requestID, answer, via);
 }
 
-export function Start(nodeID: string, projectID: string): $CancellablePromise<entity$0.RunStartResult> {
-    return $Call.ByID(885076375, nodeID, projectID);
-}
-
-export function StartWithInputs(nodeID: string, projectID: string, inputEdgeIDs: string[] | null): $CancellablePromise<entity$0.RunStartResult> {
-    return $Call.ByID(1873587738, nodeID, projectID, inputEdgeIDs);
+export function Start(nodeID: string, projectID: string, options: entity$0.RunStartOptions): $CancellablePromise<entity$0.RunStartResult> {
+    return $Call.ByID(885076375, nodeID, projectID, options);
 }

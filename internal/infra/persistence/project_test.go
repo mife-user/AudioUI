@@ -97,11 +97,11 @@ func TestProjectStorePersistedSchemaHasNoDerivedEdgesOrChains(t *testing.T) {
 	layout := testLayout(t.TempDir())
 	store := NewProjectStore(layout)
 	project := sampleProject("p_test")
-	project.Nodes[0].Rounds = []entity.Round{{N: 1, Kind: valueobject.OutputKindTopics, ArtifactID: "sha256:x"}}
+	project.Nodes[0].Rounds = []entity.Round{{N: 1, Kind: valueobject.OutputKindTopics, ArtifactID: "sha256:x", RunID: "r_topics"}}
 	project.Nodes = append(project.Nodes,
 		entity.Node{
 			ID: "n_candidate", Type: valueobject.NodeTypeCandidate, Title: "候选", Size: entity.DefaultNodeSize(valueobject.NodeTypeCandidate),
-			CandidateSource: &entity.CandidateSource{TopicNodeID: "n_root", ArtifactID: "sha256:x", Index: 0},
+			CandidateSource: &entity.CandidateSource{TopicNodeID: "n_root", Round: 1, ArtifactID: "sha256:x", Index: 0, RunID: "r_topics"},
 			Rounds:          []entity.Round{},
 		},
 		entity.Node{
@@ -158,9 +158,9 @@ func TestProjectStorePersistsMultipleUpstreamEdgesAndReopens(t *testing.T) {
 	layout := testLayout(t.TempDir())
 	store := NewProjectStore(layout)
 	project := sampleProject("p_test")
-	project.Nodes[0].Rounds = []entity.Round{{N: 1, Kind: valueobject.OutputKindTopics, ArtifactID: "sha256:topics"}}
+	project.Nodes[0].Rounds = []entity.Round{{N: 1, Kind: valueobject.OutputKindTopics, ArtifactID: "sha256:topics", RunID: "r_topics"}}
 	project.Nodes = append(project.Nodes,
-		entity.Node{ID: "n_candidate", Type: valueobject.NodeTypeCandidate, Title: "候选", Size: entity.DefaultNodeSize(valueobject.NodeTypeCandidate), CandidateSource: &entity.CandidateSource{TopicNodeID: "n_root", ArtifactID: "sha256:topics", Index: 0}, Rounds: []entity.Round{}},
+		entity.Node{ID: "n_candidate", Type: valueobject.NodeTypeCandidate, Title: "候选", Size: entity.DefaultNodeSize(valueobject.NodeTypeCandidate), CandidateSource: &entity.CandidateSource{TopicNodeID: "n_root", Round: 1, ArtifactID: "sha256:topics", Index: 0, RunID: "r_topics"}, Rounds: []entity.Round{}},
 		entity.Node{ID: "n_prompt", Type: valueobject.NodeTypePrompt, Title: "任务", Size: entity.DefaultNodeSize(valueobject.NodeTypePrompt), Rounds: []entity.Round{}},
 		entity.Node{ID: "n_agent", Type: valueobject.NodeTypeAgent, Title: "Agent", Size: entity.DefaultNodeSize(valueobject.NodeTypeAgent), Rounds: []entity.Round{}},
 		entity.Node{ID: "n_script", Type: valueobject.NodeTypeScript, Title: "脚本", Size: entity.DefaultNodeSize(valueobject.NodeTypeScript), Rounds: []entity.Round{}},

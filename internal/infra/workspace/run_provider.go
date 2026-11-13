@@ -20,7 +20,7 @@ func (p *RunProvider) OpenRun(ctx context.Context, projectID string, snapshot en
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if snapshot.Version == 3 {
+	if snapshot.Version >= 3 {
 		return NewSnapshotRunView(p.layout, projectID, snapshot)
 	}
 	return NewRunView(p.layout, projectID, snapshot.TreeID, snapshot.NodeID, snapshot.ChainPath)

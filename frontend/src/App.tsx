@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { fetchEnvironment, fetchRecentLogs, type EnvironmentDTO, type LogEntryDTO } from './api/system'
+import type { RunStartOptions } from './api/runs'
 import { pendingAPI } from './api/pending'
 import type { GraphMutationReceipt } from '../bindings/audio-ui/internal/domain/entity'
 import { useWorkspaceBridge } from './hooks/useWorkspaceBridge'
@@ -117,7 +118,7 @@ function App() {
     await bridge.openProject(projectId)
   }, [bridge, prepareProjectChange])
   const refreshGraph = useCallback((receipt: GraphMutationReceipt) => bridge.syncGraphMutation(receipt), [bridge])
-  const startNodeRun = useCallback((nodeId: string, projectId: string, inputEdgeIds?: string[]) => bridge.startRun(nodeId, projectId, inputEdgeIds), [bridge])
+  const startNodeRun = useCallback((nodeId: string, projectId: string, options?: RunStartOptions) => bridge.startRun(nodeId, projectId, options), [bridge])
   const onSelectRun = useCallback((runId: string) => bridge.selectRun(runId), [bridge])
   const onRetryRun = useCallback((runId: string) => bridge.retryRun(runId), [bridge])
   const onGetPending = useCallback((id: string, projectId: string) => pendingAPI.getPending(id, projectId), [])

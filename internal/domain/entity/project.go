@@ -78,8 +78,10 @@ type Round struct {
 
 type CandidateSource struct {
 	TopicNodeID string `json:"topicNodeId"`
+	Round       int    `json:"round"`
 	ArtifactID  string `json:"artifactId"`
 	Index       int    `json:"index"`
+	RunID       string `json:"runId"`
 }
 
 type ScriptVersion struct {
@@ -95,10 +97,11 @@ type ScriptVersionDetail struct {
 }
 
 type Edge struct {
-	ID           string `json:"id"`
-	SourceNodeID string `json:"sourceNodeId"`
-	TargetNodeID string `json:"targetNodeId"`
-	Kind         string `json:"kind"`
+	ID            string `json:"id"`
+	SourceNodeID  string `json:"sourceNodeId"`
+	TargetNodeID  string `json:"targetNodeId"`
+	Kind          string `json:"kind"`
+	ScriptVersion int    `json:"scriptVersion"`
 }
 
 const (

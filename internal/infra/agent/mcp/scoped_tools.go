@@ -89,7 +89,7 @@ func validateRunToolOptions(options Options) error {
 	if scope.RunID == "" || scope.ProjectID == "" || scope.NodeID == "" || scope.ChainID != "c_"+scope.NodeID {
 		return errors.New("invalid MCP run scope")
 	}
-	if scope.ExecutionSnapshot.Version == 3 {
+	if scope.ExecutionSnapshot.Version >= 3 {
 		snapshot := scope.ExecutionSnapshot
 		if snapshot.Validate() != nil || snapshot.ProjectID != scope.ProjectID || snapshot.TreeID != scope.TreeID ||
 			snapshot.NodeID != scope.NodeID || len(scope.ChainPath) != 0 || !slices.Equal(snapshot.ScopeNodeIDs(), scope.InputNodeIDs) {
@@ -101,7 +101,7 @@ func validateRunToolOptions(options Options) error {
 	if scope.ContextHash == "" || scope.AncestorHash == "" || scope.ParamsHash == "" {
 		return errors.New("MCP run scope is missing context hashes")
 	}
-	if scope.ExecutionSnapshot.Version != 0 && scope.ExecutionSnapshot.Version != 3 {
+	if scope.ExecutionSnapshot.Version != 0 && scope.ExecutionSnapshot.Version < 3 {
 		snapshot := scope.ExecutionSnapshot
 		if snapshot.Validate() != nil || snapshot.ProjectID != scope.ProjectID || snapshot.TreeID != scope.TreeID || snapshot.NodeID != scope.NodeID || !slices.Equal(snapshot.ChainPath, scope.ChainPath) {
 			return errors.New("invalid MCP execution snapshot")

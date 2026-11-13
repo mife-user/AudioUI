@@ -80,7 +80,7 @@ func (s PendingStatus) Valid() bool {
 
 const (
 	DAGProjectVersion             = 4
-	ProjectFileVersion            = DAGProjectVersion
+	ProjectFileVersion            = 5
 	RunsFileVersion               = 1
 	PendingFileVersion            = 1
 	PendingTransactionFileVersion = 1

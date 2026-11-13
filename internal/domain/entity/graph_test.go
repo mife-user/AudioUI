@@ -162,7 +162,7 @@ func intPtr(value int) *int { return &value }
 
 func dagProject() Project {
 	project := graphProject()
-	project.Version = valueobject.ProjectFileVersion
+	project.Version = valueobject.DAGProjectVersion
 	for i := range project.Nodes {
 		node := &project.Nodes[i]
 		if node.ID != "n_draft" {
@@ -297,6 +297,19 @@ func TestDAGRunSnapshotRejectsAmbiguousInputsAndOutputs(t *testing.T) {
 	}
 	if _, err := graph.SnapshotForRun("n_agent"); !errors.Is(err, ErrOutputBindingConflict) {
 		t.Fatalf("multiple outputs error = %v", err)
+	}
+}
+
+func TestDAGRunSnapshotReportsEmptyPromptTask(t *testing.T) {
+	project := dagProject()
+	project.Version = valueobject.ProjectFileVersion
+	project.Nodes[2].Params.Instruction = " \t\n "
+	graph, err := NewGraph(&project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := graph.SnapshotForRunWithOptions("n_agent", RunStartOptions{CreateOutput: true}); !errors.Is(err, ErrPromptTaskEmpty) {
+		t.Fatalf("empty Prompt task error = %v, want PROMPT_TASK_EMPTY", err)
 	}
 }
 

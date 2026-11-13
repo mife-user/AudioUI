@@ -8,6 +8,8 @@ export function formatRunStartError(failure: RunStartError): string {
       return '已有运行正在进行，当前无法启动另一个运行。'
     case 'NODE_LOCKED':
       return '此选题已应用候选并锁定，不能再次执行。'
+    case 'PROMPT_TASK_EMPTY':
+      return '请先填写提示词内容，再启动 Agent。'
     case 'RUNNING_CHAIN_LOCKED':
       return '此节点位于运行中的路径，当前不能编辑或再次执行。'
     case 'CONTEXT_TOO_LARGE':

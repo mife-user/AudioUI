@@ -58,7 +58,7 @@ func TestRunStartRequiresNodeAndProjectScope(t *testing.T) {
 		{name: "missing project", nodeID: "n_topic"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			result := service.Start(test.nodeID, test.projectID)
+			result := service.Start(test.nodeID, test.projectID, entity.RunStartOptions{})
 			if result.Run != nil || result.Error == nil || result.Error.Code != "INVALID_INPUT" {
 				t.Fatalf("start result = %+v, want structured INVALID_INPUT", result)
 			}
@@ -80,7 +80,7 @@ func TestRunStartWithInputsPassesSelectedEdgeOrderAndProjectScope(t *testing.T) 
 		Workspaces: runWorkspaceProviderStub{}, RunStores: runStoreProviderStub{}, RunConfigs: runConfigPathsStub{},
 		ToolServers: runToolServerFactoryStub{}, Permissions: runPermissionFactoryStub{}, Driver: runAgentDriverStub{},
 	})
-	result := NewRunService(manager).StartWithInputs("n_agent", " p_test ", []string{"e_second", "e_first"})
+	result := NewRunService(manager).Start("n_agent", " p_test ", entity.RunStartOptions{InputEdgeIDs: []string{"e_second", "e_first"}})
 	if result.Run != nil || result.Error == nil || result.Error.Message != "CAPTURED_RUN_START" {
 		t.Fatalf("run start result = %+v", result)
 	}
@@ -96,8 +96,8 @@ type inputCapturingWorkflow struct {
 	err          error
 }
 
-func (w *inputCapturingWorkflow) BeginRunWithInputs(_ context.Context, _, _ string, inputEdgeIDs []string, projectIDs ...string) (entity.Project, entity.RunExecutionSnapshot, error) {
-	w.inputEdgeIDs = append([]string(nil), inputEdgeIDs...)
+func (w *inputCapturingWorkflow) BeginRunWithOptions(_ context.Context, _, _ string, options entity.RunStartOptions, projectIDs ...string) (entity.Project, entity.RunExecutionSnapshot, error) {
+	w.inputEdgeIDs = append([]string(nil), options.InputEdgeIDs...)
 	w.projectIDs = append([]string(nil), projectIDs...)
 	return entity.Project{}, entity.RunExecutionSnapshot{}, w.err
 }

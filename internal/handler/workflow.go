@@ -109,6 +109,26 @@ func (h *WorkflowService) ReplaceConnection(edgeID, sourceID, projectID string) 
 	return entity.GraphMutationReceipt{}, errors.New("EDGE_RECEIPT_MISSING_EDGE")
 }
 
+func (h *WorkflowService) SetEdgeScriptVersion(edgeID string, version int, projectID string) (entity.GraphMutationReceipt, error) {
+	edgeID = strings.TrimSpace(edgeID)
+	projectID = strings.TrimSpace(projectID)
+	if edgeID == "" || projectID == "" {
+		return entity.GraphMutationReceipt{}, errors.New("连接 ID 与工程 ID 不能为空")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	projectValue, err := h.service.SetEdgeScriptVersion(ctx, edgeID, version, projectID)
+	if err != nil {
+		return entity.GraphMutationReceipt{}, err
+	}
+	for _, edge := range projectValue.Edges {
+		if edge.ID == edgeID {
+			return mutationReceipt(projectValue, edge.TargetNodeID), nil
+		}
+	}
+	return entity.GraphMutationReceipt{}, errors.New("EDGE_RECEIPT_MISSING_EDGE")
+}
+
 func (h *WorkflowService) MoveNode(id string, x, y float64, projectID string) (entity.GraphMutationReceipt, error) {
 	id = strings.TrimSpace(id)
 	projectID = strings.TrimSpace(projectID)

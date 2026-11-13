@@ -44,7 +44,7 @@ function renderPrompt(onSave = vi.fn<SaveParams>().mockResolvedValue(true)) {
 describe('PromptParameters', () => {
   it('persists task and optional constraints before the Agent starts', async () => {
     const { onSave, getFlush } = renderPrompt()
-    fireEvent.change(screen.getByRole('textbox', { name: '任务' }), { target: { value: '按候选写一段旁白。' } })
+    fireEvent.change(screen.getByRole('textbox', { name: '提示词内容' }), { target: { value: '按候选写一段旁白。' } })
     fireEvent.change(screen.getByRole('spinbutton', { name: '场景数约束' }), { target: { value: '5' } })
 
     await waitFor(() => expect(getFlush()).toBeTypeOf('function'))
@@ -56,12 +56,40 @@ describe('PromptParameters', () => {
     expect(screen.getByRole('status')).toHaveTextContent('已保存')
   })
 
+  it('allows the canvas name to be empty while saving task content', async () => {
+    const onSave = vi.fn<SaveParams>().mockResolvedValue(true)
+    const { getFlush } = renderPrompt(onSave)
+    fireEvent.change(screen.getByRole('textbox', { name: '节点名称（可选）' }), { target: { value: '' } })
+    fireEvent.change(screen.getByRole('textbox', { name: '提示词内容' }), { target: { value: '只靠正文启动。' } })
+
+    await waitFor(() => expect(getFlush()).toBeTypeOf('function'))
+    await act(async () => { await expect(getFlush()?.()).resolves.toBe(true) })
+    expect(onSave).toHaveBeenCalledWith('n_prompt', '脚本任务', {
+      instruction: '只靠正文启动。',
+      constraints: { scenes: 3, duration: 90 },
+    }, 'p_test')
+    expect(screen.getByRole('textbox', { name: '节点名称（可选）' })).toHaveValue('')
+  })
+
+  it('saves an empty task draft without blocking on its optional name', async () => {
+    const { onSave, getFlush } = renderPrompt()
+    fireEvent.change(screen.getByRole('textbox', { name: '节点名称（可选）' }), { target: { value: '' } })
+    fireEvent.change(screen.getByRole('textbox', { name: '提示词内容' }), { target: { value: '' } })
+
+    await waitFor(() => expect(getFlush()).toBeTypeOf('function'))
+    await act(async () => { await expect(getFlush()?.()).resolves.toBe(true) })
+    expect(onSave).toHaveBeenCalledWith('n_prompt', '脚本任务', {
+      instruction: '',
+      constraints: { scenes: 3, duration: 90 },
+    }, 'p_test')
+  })
+
   it('waits for input composition to finish before saving the final Prompt draft', async () => {
     vi.useFakeTimers()
     try {
       const onSave = vi.fn<SaveParams>().mockResolvedValue(true)
       renderPrompt(onSave)
-      const task = screen.getByRole('textbox', { name: '任务' })
+      const task = screen.getByRole('textbox', { name: '提示词内容' })
       const finalValue = '中文输入😀\n第二行'
 
       fireEvent.compositionStart(task)
@@ -88,7 +116,7 @@ describe('PromptParameters', () => {
       .mockRejectedValueOnce(new Error('disk full'))
       .mockResolvedValueOnce(true)
     const { getFlush } = renderPrompt(onSave)
-    const task = screen.getByRole('textbox', { name: '任务' })
+    const task = screen.getByRole('textbox', { name: '提示词内容' })
     fireEvent.change(task, { target: { value: '保存失败后仍保留的任务。' } })
 
     await waitFor(() => expect(getFlush()).toBeTypeOf('function'))

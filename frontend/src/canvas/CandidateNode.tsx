@@ -29,7 +29,7 @@ export const CandidateNode = memo(function CandidateNode({ id, data, selected }:
       <header className="canvas-node-head">
         <span className="canvas-node-kind candidate-kind">候选</span>
         <strong title={candidate?.title ?? node.title}>{candidate?.title ?? node.title}</strong>
-        <span className="canvas-node-status">来源 #{sourceIndex + 1}</span>
+        <span className="canvas-node-status">第 {node.candidateSource?.round ?? '未知'} 批 · 候选 #{sourceIndex + 1}</span>
         {!node.collapsed ? <NodeSizeControl node={node} disabled={mutationsDisabled} onApply={data.onSetNodeLayout} /> : null}
         <NodeCollapseControl node={node} disabled={mutationsDisabled} onToggle={data.onSetNodeCollapsed} />
       </header>
@@ -42,7 +42,8 @@ export const CandidateNode = memo(function CandidateNode({ id, data, selected }:
             <p className="candidate-detail"><span>开场</span>{candidate.hook || '未提供'}</p>
           </>
         ) : null}
-        <p className="candidate-source-id">{node.candidateSource?.artifactId ?? '候选来源缺失'}</p>
+        <p className="candidate-source-meta">节点 {node.id} · 运行 {node.candidateSource?.runId ?? '来源缺失'}</p>
+        <p className="candidate-source-id">Artifact {node.candidateSource?.artifactId ?? '候选来源缺失'}</p>
         <button
           type="button"
           className="node-add-child nodrag"

@@ -51,7 +51,7 @@ func validateAppliedReplyGraph(project entity.Project, pending entity.Pending, a
 	if pending.Status != valueobject.PendingApplied || pending.OutputBinding == nil {
 		return nil
 	}
-	dagSnapshot := pending.ExecutionSnapshot != nil && pending.ExecutionSnapshot.Version == 3
+	dagSnapshot := pending.ExecutionSnapshot != nil && pending.ExecutionSnapshot.Version >= 3
 	if pending.OutputSchemaVersion != 1 || pending.ChainID != "c_"+pending.NodeID ||
 		(!dagSnapshot && (len(pending.ChainPath) == 0 || pending.ChainPath[len(pending.ChainPath)-1] != pending.NodeID)) ||
 		(dagSnapshot && (pending.ExecutionSnapshot.Validate() != nil || pending.ExecutionSnapshot.NodeID != pending.NodeID ||
@@ -86,6 +86,26 @@ func validateAppliedReplyGraph(project entity.Project, pending entity.Pending, a
 				return fmt.Errorf("DAG input edge does not match persisted graph")
 			}
 		}
+		if snapshot.Version == 4 {
+			frozenEdge := snapshot.OutputEdge
+			liveEdge, ok := graph.Edge(frozenEdge.ID)
+			if !ok || liveEdge != *frozenEdge {
+				return fmt.Errorf("DAG output edge does not match persisted graph")
+			}
+			if snapshot.OutputBinding.Mode == entity.RunOutputModeExisting {
+				frozenNode := snapshot.OutputNode
+				liveNode, ok := graph.Node(snapshot.OutputBinding.NodeID)
+				if !ok || frozenNode == nil {
+					return fmt.Errorf("DAG output node is missing")
+				}
+				liveCopy := liveNode.Clone()
+				liveCopy.Stale = frozenNode.Stale
+				liveCopy.ScriptVersions = append([]entity.ScriptVersion(nil), frozenNode.ScriptVersions...)
+				if !samePendingSnapshotNode(&liveCopy, *frozenNode) {
+					return fmt.Errorf("DAG output node does not match frozen baseline")
+				}
+			}
+		}
 	} else {
 		path, err := graph.PathToRoot(pending.NodeID)
 		if err != nil || !slices.Equal(path, pending.ChainPath) {
@@ -98,6 +118,42 @@ func validateAppliedReplyGraph(project entity.Project, pending entity.Pending, a
 	}
 	binding := pending.OutputBinding
 	if pending.Kind == valueobject.OutputKindTopics {
+		if snapshot := pending.ExecutionSnapshot; snapshot != nil && snapshot.TopicBatch != nil {
+			if target.Type != valueobject.NodeTypeTopic || binding.Bound || pending.ResultNodeID != "" ||
+				!target.Locked || target.Stale || len(target.Rounds) != snapshot.TopicBatch.BaselineRound+1 {
+				return fmt.Errorf("topic batch result identity is invalid")
+			}
+			round := target.Rounds[len(target.Rounds)-1]
+			if round.N != snapshot.TopicBatch.BaselineRound+1 || round.PendingID != pending.ID || round.RunID != pending.RunID ||
+				round.Kind != pending.Kind || round.ArtifactID != pending.ArtifactID {
+				return fmt.Errorf("topic batch round does not reference pending result")
+			}
+			var output struct {
+				Topics []json.RawMessage `json:"topics"`
+			}
+			if err := json.Unmarshal(artifactPayload, &output); err != nil || len(output.Topics) != len(pending.CreatedNodeIDs) {
+				return fmt.Errorf("topic batch candidates do not match artifact")
+			}
+			indices := make(map[int]struct{}, len(pending.CreatedNodeIDs))
+			for _, id := range pending.CreatedNodeIDs {
+				node, ok := graph.Node(id)
+				sourceEdge, hasSourceEdge := graph.EdgeBetween(target.ID, id)
+				if !ok || node.Type != valueobject.NodeTypeCandidate || !hasSourceEdge || sourceEdge.Kind != entity.EdgeKindCandidateSource ||
+					node.CandidateSource == nil || node.CandidateSource.TopicNodeID != target.ID ||
+					node.CandidateSource.Round != round.N || node.CandidateSource.ArtifactID != pending.ArtifactID ||
+					node.CandidateSource.RunID != pending.RunID || node.CandidateSource.Index < 0 || node.CandidateSource.Index >= len(output.Topics) {
+					return fmt.Errorf("candidate %s does not match topic batch", id)
+				}
+				if _, exists := indices[node.CandidateSource.Index]; exists {
+					return fmt.Errorf("duplicate topic batch candidate index %d", node.CandidateSource.Index)
+				}
+				indices[node.CandidateSource.Index] = struct{}{}
+			}
+			if len(indices) != len(output.Topics) {
+				return fmt.Errorf("topic batch candidate set is incomplete")
+			}
+			return nil
+		}
 		if target.Type != valueobject.NodeTypeTopic || binding.Bound || pending.ResultNodeID != "" || len(pending.CreatedNodeIDs) == 0 || !target.Locked || target.Stale || len(target.Rounds) != 1 {
 			return fmt.Errorf("topic result identity is invalid")
 		}
@@ -164,7 +220,10 @@ func validateAppliedReplyGraph(project entity.Project, pending entity.Pending, a
 		return fmt.Errorf("Script output scope is invalid")
 	}
 	if binding.Bound {
-		if binding.ParentNodeID != target.ID || binding.NodeID != pending.ResultNodeID || output.ID != binding.NodeID || len(pending.CreatedNodeIDs) != 0 {
+		versionedCreate := dagSnapshot && pending.ExecutionSnapshot.Version == 4 && binding.Mode == entity.RunOutputModeCreate
+		if binding.ParentNodeID != target.ID || binding.NodeID != pending.ResultNodeID || output.ID != binding.NodeID ||
+			!versionedCreate && len(pending.CreatedNodeIDs) != 0 ||
+			versionedCreate && (len(pending.CreatedNodeIDs) != 1 || pending.CreatedNodeIDs[0] != binding.NodeID) {
 			return fmt.Errorf("bound Script identity is invalid")
 		}
 		if len(output.ScriptVersions) != binding.BaselineVersion+1 {

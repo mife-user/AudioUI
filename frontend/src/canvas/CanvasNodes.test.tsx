@@ -4,6 +4,7 @@ import type { HandleProps, NodeProps, NodeResizerProps } from '@xyflow/react'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type { Node, PendingDetail, PendingSummary, ScriptVersionDetail } from '../../bindings/audio-ui/internal/domain/entity'
 import { NodeType, OutputKind, PendingStatus } from '../../bindings/audio-ui/internal/domain/valueobject'
+import { PendingArtifactCard } from '../ui/PendingArtifactCard'
 import { PendingControllerProvider, usePendingController } from '../hooks/usePendingController'
 import type { CanvasFlowNode, RunInputOption } from './flowModel'
 import { AgentNode } from './AgentNode'
@@ -61,8 +62,7 @@ function nodeData(nodeValue: Node, overrides: Partial<CanvasFlowNode['data']> = 
     runningLocked: false,
     pathHighlighted: false,
     hasInputs: Boolean(nodeValue.parent),
-    topicCandidateIndexes: [],
-    candidateNodeIds: {},
+    topicCandidates: [],
     candidates: [],
     mutationsDisabled: false,
     onAddChild: vi.fn(),
@@ -201,19 +201,18 @@ describe('M2-12A canvas nodes', () => {
   it('renders protected candidate anchors alongside manual Topic and Candidate ports', () => {
     const topic = node('n_topic', 'topic')
     const candidate = node('n_candidate', 'candidate', topic.id, {
-      candidateSource: { topicNodeId: topic.id, artifactId: 'sha256:topics', index: 1 },
+      candidateSource: { topicNodeId: topic.id, round: 1, artifactId: 'sha256:topics', index: 1, runId: 'r_topics' },
     })
     const onLocateNode = vi.fn()
     const { container } = render(
       <>
         <TopicNode {...nodeProps(topic, nodeData(topic, {
-          topicCandidateIndexes: [1],
-          candidateNodeIds: { 1: candidate.id },
-          candidates: [{ index: 1, title: '谱面演示', angle: '转场', hook: '先看谱面' }],
+          topicCandidates: [{ nodeId: candidate.id, round: 1, artifactId: 'sha256:topics', index: 1, runId: 'r_topics' }],
+          candidates: [{ nodeId: candidate.id, round: 1, runId: 'r_topics', index: 1, title: '谱面演示', angle: '转场', hook: '先看谱面' }],
           onLocateNode,
         }))} />
         <CandidateNode {...nodeProps(candidate, nodeData(candidate, {
-          candidate: { index: 1, title: '谱面演示', angle: '转场', hook: '先看谱面' },
+          candidate: { nodeId: candidate.id, round: 1, runId: 'r_topics', index: 1, title: '谱面演示', angle: '转场', hook: '先看谱面' },
         }))} />
       </>,
     )
@@ -227,9 +226,9 @@ describe('M2-12A canvas nodes', () => {
     expect(screen.getByLabelText('连接到 谱面演示')).toHaveAttribute('data-connectable', 'true')
     expect(screen.getByLabelText('n_topic 的候选节点')).toBeInTheDocument()
     expect(container.querySelector('.topic-candidate-index')).toHaveTextContent('2')
-    expect(container.querySelector('.canvas-node-head [data-handle="topic-candidate-1"]')).toBeInTheDocument()
-    expect(container.querySelector('.topic-candidate-row [data-handle="topic-candidate-1"]')).toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: '定位候选 2' }))
+    expect(container.querySelector('.canvas-node-head [data-handle="topic-candidate-n_candidate"]')).toBeInTheDocument()
+    expect(container.querySelector('.topic-candidate-row [data-handle="topic-candidate-n_candidate"]')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '定位第 1 批候选 2' }))
     expect(onLocateNode).toHaveBeenCalledWith(candidate.id)
     expect(screen.getByLabelText('从 谱面演示 新增提示词')).toBeEnabled()
   })
@@ -237,11 +236,12 @@ describe('M2-12A canvas nodes', () => {
   it('keeps all candidate anchors on the Topic header for a ten-candidate list', () => {
     const topic = node('n_topic', 'topic', '', { size: { width: 200, height: 140 } })
     const indexes = Array.from({ length: 10 }, (_value, index) => index)
-    const candidates = indexes.map((index) => ({ index, title: `候选标题 ${index + 1}` }))
-    const candidateNodeIds = Object.fromEntries(indexes.map((index) => [index, `n_candidate_${index}`]))
+    const topicCandidates = indexes.map((index) => ({
+      nodeId: `n_candidate_${index}`, round: 1, artifactId: 'sha256:topics', index, runId: 'r_topics',
+    }))
+    const candidates = topicCandidates.map((source) => ({ ...source, title: `候选标题 ${source.index + 1}` }))
     const { container } = render(<TopicNode {...nodeProps(topic, nodeData(topic, {
-      topicCandidateIndexes: indexes,
-      candidateNodeIds,
+      topicCandidates,
       candidates,
     }))} />)
 
@@ -259,7 +259,7 @@ describe('M2-12A canvas nodes', () => {
     expect(screen.getByLabelText('n_draft 输出端口')).toHaveAttribute('data-handle', 'prompt-output')
     expect(screen.getByRole('button', { name: '从 n_draft 新增 Agent' })).toBeEnabled()
     expect(screen.queryByRole('button', { name: /运行/ })).not.toBeInTheDocument()
-    expect(screen.getByRole('textbox', { name: '任务' })).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: '提示词内容' })).toBeInTheDocument()
   })
 
   it('shows connected prompt parameters and exposes Agent creation instead of execution', () => {
@@ -275,21 +275,45 @@ describe('M2-12A canvas nodes', () => {
 
   it('starts local execution after confirming the default direct inputs', async () => {
     const agent = node('n_agent', 'agent', 'n_prompt')
-    const onAddChild = vi.fn()
     const onStartRun = vi.fn().mockResolvedValue({})
     const runInputs: RunInputOption[] = [{
       edgeId: 'e_prompt_agent', sourceNodeId: 'n_prompt', sourceType: NodeType.NodeTypePrompt,
       title: '任务', role: 'task', taskReady: true,
     }]
-    render(<AgentNode {...nodeProps(agent, nodeData(agent, { onAddChild, onStartRun, projectId: 'p_test', runInputs }))} />)
+    render(<AgentNode {...nodeProps(agent, nodeData(agent, { onStartRun, projectId: 'p_test', runInputs }))} />)
 
-    expect(screen.getByText('未指定输出 · 合法结果自动创建 Script')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: '为 n_agent 指定空 Script 输出' }))
-    expect(onAddChild).toHaveBeenCalledWith('n_agent', 'script')
+    expect(screen.getByText('无现有输出 · 本次运行预留新 Script')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '运行本地 Agent' }))
     expect(screen.getByRole('dialog', { name: '选择运行输入' })).toBeInTheDocument()
+    expect(screen.getByText('本次运行将预留新 Script；节点与连接仅在合法结果提交时创建。')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '确认并运行' }))
-    await waitFor(() => expect(onStartRun).toHaveBeenCalledWith('n_agent', 'p_test'))
+    await waitFor(() => expect(onStartRun).toHaveBeenCalledWith('n_agent', 'p_test', {
+      inputEdgeIds: undefined, outputNodeId: undefined, createOutput: true,
+    }))
+  })
+
+  it('defaults to the only existing Script but lets the run create a parallel output', async () => {
+    const agent = node('n_agent', 'agent', 'n_prompt')
+    const script = node('n_script', 'script', agent.id, {
+      scriptVersions: [{ n: 2, artifactId: 'sha256:script-v2', runId: 'r_script' }],
+    })
+    const onStartRun = vi.fn().mockResolvedValue({})
+    const runInputs: RunInputOption[] = [{
+      edgeId: 'e_prompt_agent', sourceNodeId: 'n_prompt', sourceType: NodeType.NodeTypePrompt,
+      title: '任务', role: 'task', taskReady: true,
+    }]
+    render(<AgentNode {...nodeProps(agent, nodeData(agent, {
+      outputScript: script, outputScripts: [script], runInputs, onStartRun, projectId: 'p_test',
+    }))} />)
+
+    fireEvent.click(screen.getByRole('button', { name: '运行本地 Agent' }))
+    const output = screen.getByRole('combobox', { name: '本次运行 Script 输出目标' })
+    expect(output).toHaveValue(script.id)
+    fireEvent.change(output, { target: { value: '__create_output__' } })
+    fireEvent.click(screen.getByRole('button', { name: '确认并运行' }))
+    await waitFor(() => expect(onStartRun).toHaveBeenCalledWith('n_agent', 'p_test', {
+      inputEdgeIds: undefined, outputNodeId: undefined, createOutput: true,
+    }))
   })
 
   it('shows backend run rejection after input confirmation for a rootless Agent', async () => {
@@ -305,6 +329,22 @@ describe('M2-12A canvas nodes', () => {
     fireEvent.click(screen.getByRole('button', { name: '运行本地 Agent' }))
     fireEvent.click(screen.getByRole('button', { name: '确认并运行' }))
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('独立子图暂不可运行'))
+  })
+
+  it('shows a clear prompt-content error when a selected task is empty', async () => {
+    const agent = node('n_agent', 'agent')
+    const onStartRun = vi.fn().mockResolvedValue({
+      error: { code: 'PROMPT_TASK_EMPTY', message: 'PROMPT_TASK_EMPTY: Prompt n_prompt has no task' },
+    })
+    const runInputs: RunInputOption[] = [{
+      edgeId: 'e_prompt_agent', sourceNodeId: 'n_prompt', sourceType: NodeType.NodeTypePrompt,
+      title: '任务', role: 'task', taskReady: false,
+    }]
+    render(<AgentNode {...nodeProps(agent, nodeData(agent, { onStartRun, projectId: 'p_test', runInputs }))} />)
+
+    fireEvent.click(screen.getByRole('button', { name: '运行本地 Agent' }))
+    fireEvent.click(screen.getByRole('button', { name: '确认并运行' }))
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('请先填写提示词内容，再启动 Agent。'))
   })
 
   it('requires incompatible inputs to be deselected and preserves the chosen input order', async () => {
@@ -327,14 +367,34 @@ describe('M2-12A canvas nodes', () => {
     fireEvent.click(screen.getByRole('button', { name: '上移 旧稿' }))
     fireEvent.click(confirm)
 
-    await waitFor(() => expect(onStartRun).toHaveBeenCalledWith('n_agent', 'p_test', ['e_script', 'e_task']))
+    await waitFor(() => expect(onStartRun).toHaveBeenCalledWith('n_agent', 'p_test', {
+      inputEdgeIds: ['e_script', 'e_task'], outputNodeId: undefined, createOutput: true,
+    }))
   })
 
-  it('does not present an ambiguous Script output as a selected binding', () => {
+  it('requires explicit output selection when an Agent has multiple Script targets', async () => {
     const agent = node('n_agent', 'agent', 'n_prompt')
-    render(<AgentNode {...nodeProps(agent, nodeData(agent, { outputAmbiguous: true }))} />)
-    expect(screen.getByText('已连接多个或共享的 Script，暂不能确定输出目标')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '为 n_agent 指定空 Script 输出' })).not.toBeInTheDocument()
+    const first = node('n_script_a', 'script', agent.id)
+    const second = node('n_script_b', 'script', agent.id)
+    const onStartRun = vi.fn().mockResolvedValue({})
+    const runInputs: RunInputOption[] = [{
+      edgeId: 'e_prompt_agent', sourceNodeId: 'n_prompt', sourceType: NodeType.NodeTypePrompt,
+      title: '任务', role: 'task', taskReady: true,
+    }]
+    render(<AgentNode {...nodeProps(agent, nodeData(agent, {
+      outputScripts: [first, second], outputAmbiguous: true, runInputs, onStartRun, projectId: 'p_test',
+    }))} />)
+
+    expect(screen.getByText('存在多个或共享的 Script 输出；运行前必须确认本次目标')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '运行本地 Agent' }))
+    const output = screen.getByRole('combobox', { name: '本次运行 Script 输出目标' })
+    expect(output).toHaveValue('')
+    expect(screen.getByRole('button', { name: '确认并运行' })).toBeDisabled()
+    fireEvent.change(output, { target: { value: second.id } })
+    fireEvent.click(screen.getByRole('button', { name: '确认并运行' }))
+    await waitFor(() => expect(onStartRun).toHaveBeenCalledWith('n_agent', 'p_test', {
+      inputEdgeIds: undefined, outputNodeId: second.id, createOutput: false,
+    }))
   })
 
   it('surfaces a backend BUSY error on the Agent node', async () => {
@@ -363,9 +423,7 @@ describe('M2-12A canvas nodes', () => {
     )
 
     expect(screen.getByRole('button', { name: '运行本地 Agent' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: '为 n_locked_agent 指定空 Script 输出' })).toBeDisabled()
     expect(screen.getByRole('button', { name: '已有运行' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: '为 n_busy_agent 指定空 Script 输出' })).toBeDisabled()
     expect(onStartRun).not.toHaveBeenCalled()
   })
 
@@ -490,19 +548,63 @@ describe('M2-12A canvas nodes', () => {
     expect(onRefreshWorkspace).toHaveBeenCalledOnce()
   })
 
+  it('previews a rerun batch with its round and exposes confirm and cancel actions', () => {
+    const summary: PendingSummary = {
+      id: 'pending_topic_batch', nodeId: 'n_topic', runId: 'r_topic_2', chainId: '',
+      kind: OutputKind.OutputKindTopics, status: PendingStatus.PendingPending,
+    }
+    const detail = {
+      pending: {
+        ...summary,
+        chainPath: [], payload: '', createdAt: '',
+        executionSnapshot: { topicBatch: { baselineRound: 1 } },
+      },
+      rawPayload: btoa([...new TextEncoder().encode(JSON.stringify({ topics: [
+        { title: '新候选一', angle: '方向一', hook: '开场一' },
+        { title: '新候选二', angle: '方向二', hook: '开场二' },
+      ] }))].map((byte) => String.fromCharCode(byte)).join('')),
+    } as unknown as PendingDetail
+    const onApply = vi.fn()
+    const onDiscard = vi.fn()
+    render(<PendingArtifactCard
+      summary={summary}
+      detail={detail}
+      loading={false}
+      loadError=""
+      actionError=""
+      forceConfirmation={false}
+      actionBusy={false}
+      resolved={false}
+      syncError=""
+      onRetryDetail={vi.fn()}
+      onApply={onApply}
+      onDiscard={onDiscard}
+      onConfirmForce={vi.fn()}
+      onCancelForce={vi.fn()}
+      onRetryWorkspace={vi.fn()}
+    />)
+
+    expect(screen.getByLabelText('第 2 批候选预览')).toHaveTextContent('新候选一')
+    expect(screen.getByText('第 1 批；已应用候选保持不变')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '确认并追加第 2 批' }))
+    fireEvent.click(screen.getByRole('button', { name: '取消本次重跑' }))
+    expect(onApply).toHaveBeenCalledOnce()
+    expect(onDiscard).toHaveBeenCalledOnce()
+  })
+
   it('disables path operations while allowing content-locked topic topology to remain separate', () => {
     const topic = node('n_topic', 'topic', '', { locked: true })
     const candidate = node('n_candidate', 'candidate', topic.id, {
-      candidateSource: { topicNodeId: topic.id, artifactId: 'sha256:topics', index: 0 },
+      candidateSource: { topicNodeId: topic.id, round: 1, artifactId: 'sha256:topics', index: 0, runId: 'r_topics' },
     })
     render(
       <>
-        <TopicNode {...nodeProps(topic, nodeData(topic, { topicCandidateIndexes: [0], candidates: [{ index: 0, title: '候选甲' }] }))} />
-        <CandidateNode {...nodeProps(candidate, nodeData(candidate, { runningLocked: true, candidates: [], candidate: { index: 0, title: '候选甲' } }))} />
+        <TopicNode {...nodeProps(topic, nodeData(topic, { topicCandidates: [{ nodeId: candidate.id, round: 1, artifactId: 'sha256:topics', index: 0, runId: 'r_topics' }], candidates: [{ nodeId: candidate.id, round: 1, runId: 'r_topics', index: 0, title: '候选甲' }] }))} />
+        <CandidateNode {...nodeProps(candidate, nodeData(candidate, { runningLocked: true, candidates: [], candidate: { nodeId: candidate.id, round: 1, runId: 'r_topics', index: 0, title: '候选甲' } }))} />
       </>,
     )
 
-    expect(screen.getByRole('button', { name: '已锁定' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '按锁定参数重新生成' })).toBeEnabled()
     expect(screen.getByRole('button', { name: '从 候选甲 新增提示词' })).toBeDisabled()
     expect(screen.getByLabelText('候选甲 输出端口')).toHaveAttribute('data-connectable', 'false')
   })

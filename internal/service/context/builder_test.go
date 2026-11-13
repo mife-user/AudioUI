@@ -176,21 +176,21 @@ func snapshotFixture() (*Builder, *memoryArtifacts, entity.Project, entity.RunEx
 	project := entity.Project{
 		Version: valueobject.ProjectFileVersion, ID: "p_test", Name: "快照工程", Revision: 9,
 		Nodes: []entity.Node{
-			{ID: "n_topic", Type: valueobject.NodeTypeTopic, Title: "选题", Params: entity.NodeParams{Idea: "快照主题"}, Rounds: []entity.Round{{N: 1, Kind: valueobject.OutputKindTopics, ArtifactID: topicID}}},
-			{ID: "n_candidate", Type: valueobject.NodeTypeCandidate, Title: "候选乙", CandidateSource: &entity.CandidateSource{TopicNodeID: "n_topic", ArtifactID: topicID, Index: 1}},
-			{ID: "n_prompt_old", Type: valueobject.NodeTypePrompt, Title: "旧任务", Params: entity.NodeParams{Instruction: "旧任务约束", OutputKind: valueobject.OutputKindScript}},
-			{ID: "n_agent_old", Type: valueobject.NodeTypeAgent, Title: "旧 Agent"},
-			{ID: "n_script", Type: valueobject.NodeTypeScript, Title: "祖先脚本", ScriptVersions: []entity.ScriptVersion{{N: 1, ArtifactID: scriptID, RunID: "r_previous"}}},
-			{ID: "n_prompt", Type: valueobject.NodeTypePrompt, Title: "当前任务", Params: entity.NodeParams{Instruction: "完整的当前任务", OutputKind: valueobject.OutputKindScript, Constraints: &entity.NodeConstraints{Scenes: 4, Duration: 120}}},
-			{ID: "n_agent", Type: valueobject.NodeTypeAgent, Title: "当前 Agent"},
-			{ID: "n_output", Type: valueobject.NodeTypeScript, Title: "当前输出", ScriptVersions: []entity.ScriptVersion{{N: 1, ArtifactID: baselineID, RunID: "r_existing"}}},
+			{ID: "n_topic", Type: valueobject.NodeTypeTopic, Title: "选题", WorkspaceRootID: "n_topic", Params: entity.NodeParams{Idea: "快照主题"}, Rounds: []entity.Round{{N: 1, Kind: valueobject.OutputKindTopics, ArtifactID: topicID, RunID: "r_topic"}}},
+			{ID: "n_candidate", Type: valueobject.NodeTypeCandidate, Title: "候选乙", WorkspaceRootID: "n_topic", CandidateSource: &entity.CandidateSource{TopicNodeID: "n_topic", Round: 1, ArtifactID: topicID, Index: 1, RunID: "r_topic"}},
+			{ID: "n_prompt_old", Type: valueobject.NodeTypePrompt, Title: "旧任务", WorkspaceRootID: "n_topic", Params: entity.NodeParams{Instruction: "旧任务约束", OutputKind: valueobject.OutputKindScript}},
+			{ID: "n_agent_old", Type: valueobject.NodeTypeAgent, Title: "旧 Agent", WorkspaceRootID: "n_topic"},
+			{ID: "n_script", Type: valueobject.NodeTypeScript, Title: "祖先脚本", WorkspaceRootID: "n_topic", ScriptVersions: []entity.ScriptVersion{{N: 1, ArtifactID: scriptID, RunID: "r_previous"}}},
+			{ID: "n_prompt", Type: valueobject.NodeTypePrompt, Title: "当前任务", WorkspaceRootID: "n_topic", Params: entity.NodeParams{Instruction: "完整的当前任务", OutputKind: valueobject.OutputKindScript, Constraints: &entity.NodeConstraints{Scenes: 4, Duration: 120}}},
+			{ID: "n_agent", Type: valueobject.NodeTypeAgent, Title: "当前 Agent", WorkspaceRootID: "n_topic"},
+			{ID: "n_output", Type: valueobject.NodeTypeScript, Title: "当前输出", WorkspaceRootID: "n_topic", ScriptVersions: []entity.ScriptVersion{{N: 1, ArtifactID: baselineID, RunID: "r_existing"}}},
 		},
 		Edges: []entity.Edge{
 			{ID: "e_n_candidate", SourceNodeID: "n_topic", TargetNodeID: "n_candidate", Kind: entity.EdgeKindCandidateSource},
 			{ID: "e_n_prompt_old", SourceNodeID: "n_candidate", TargetNodeID: "n_prompt_old", Kind: entity.EdgeKindConnection},
 			{ID: "e_n_agent_old", SourceNodeID: "n_prompt_old", TargetNodeID: "n_agent_old", Kind: entity.EdgeKindConnection},
 			{ID: "e_n_script", SourceNodeID: "n_agent_old", TargetNodeID: "n_script", Kind: entity.EdgeKindConnection},
-			{ID: "e_n_prompt", SourceNodeID: "n_script", TargetNodeID: "n_prompt", Kind: entity.EdgeKindConnection},
+			{ID: "e_n_prompt", SourceNodeID: "n_script", TargetNodeID: "n_prompt", Kind: entity.EdgeKindConnection, ScriptVersion: 1},
 			{ID: "e_n_agent", SourceNodeID: "n_prompt", TargetNodeID: "n_agent", Kind: entity.EdgeKindConnection},
 			{ID: "e_n_output", SourceNodeID: "n_agent", TargetNodeID: "n_output", Kind: entity.EdgeKindConnection},
 		},
@@ -198,8 +198,15 @@ func snapshotFixture() (*Builder, *memoryArtifacts, entity.Project, entity.RunEx
 	graph, _ := entity.NewGraph(&project)
 	snapshot, _ := graph.SnapshotForRun("n_agent")
 	workspace := &memoryWorkspace{
-		scope: port.WorkspaceScope{ProjectID: "p_test", TreeID: "n_topic", NodeID: "n_agent", ChainPath: append([]string(nil), snapshot.ChainPath...)},
-		dirs:  map[string]port.WorkspaceList{".": {Entries: []port.WorkspaceEntry{{Name: "notes.md", Size: 5}}}},
+		scope: port.WorkspaceScope{
+			ProjectID: "p_test", TreeID: snapshot.TreeID, NodeID: "n_agent",
+			ChainPath: append([]string(nil), snapshot.ChainPath...), InputNodeIDs: snapshot.ScopeNodeIDs(),
+		},
+		dirs: map[string]port.WorkspaceList{".": {Entries: []port.WorkspaceEntry{{Name: "notes.md", Size: 5}}}},
+		sources: []port.WorkspaceSource{
+			{LogicalPath: "inputs/n_topic/n_candidate/", PhysicalPath: "C:/project/inputs/n_topic/n_candidate"},
+			{LogicalPath: "inputs/n_topic/n_script/", PhysicalPath: "C:/project/inputs/n_topic/n_script"},
+		},
 	}
 	return NewBuilder(&memoryProvider{store: store}), store, project, snapshot, workspace, scriptID, baselineID
 }
@@ -303,18 +310,18 @@ func TestSnapshotContextUsesFrozenCandidateTaskScriptAndOutputBinding(t *testing
 	if body.OutputContract == nil || body.OutputContract.Kind != valueobject.OutputKindScript || body.OutputContract.SchemaVersion != 1 || !strings.Contains(result.InitialPrompt, "script@1") || !strings.Contains(result.InitialPrompt, "创建待确认结果") || !strings.Contains(result.InitialPrompt, "追加新版本") {
 		t.Fatalf("output contract = %+v", body.OutputContract)
 	}
-	if len(body.Path) != len(snapshot.ChainPath)-1 || !strings.Contains(string(body.Path[1].Payload), "候选乙") || body.Path[1].CandidateNumber == nil || *body.Path[1].CandidateNumber != 2 || !strings.Contains(string(body.Path[4].Payload), "不可变祖先正文") {
-		t.Fatalf("snapshot path = %+v", body.Path)
-	}
-	if body.Path[4].ArtifactVersion != 1 || body.Path[4].Round != 0 {
-		t.Fatalf("script ancestor version metadata = %+v", body.Path[4].ancestorIdentity)
+	if len(body.Sources) != 2 || !strings.Contains(string(body.Sources[0].Payload), "候选乙") || body.Sources[0].CandidateNumber == nil || *body.Sources[0].CandidateNumber != 2 ||
+		!strings.Contains(string(body.Sources[1].Payload), "不可变祖先正文") || body.Sources[1].ArtifactVersion != 1 || body.Sources[1].Round != 0 {
+		t.Fatalf("snapshot sources = %+v", body.Sources)
 	}
 	for _, forbidden := range []string{"候选甲", "候选丙", "不应进入上下文", "旧任务约束"} {
 		if strings.Contains(result.InitialPrompt, forbidden) {
 			t.Errorf("snapshot context leaked %q", forbidden)
 		}
 	}
-	if body.Workspace.NativeWriteRoot != "steps/n_agent/" || !slices.Contains(body.Workspace.NativeReadRoots, "steps/n_prompt/") || !slices.Contains(body.Workspace.NativeReadRoots, workspace.RuntimeReadPath()) {
+	if body.Workspace.NativeWriteRoot != "steps/n_agent/" || len(body.Workspace.NativeReadSources) != 2 ||
+		body.Workspace.NativeReadSources[0].LogicalPath != "inputs/n_topic/n_candidate/" || body.Workspace.NativeReadSources[1].LogicalPath != "inputs/n_topic/n_script/" ||
+		!slices.Contains(body.Workspace.NativeReadRoots, workspace.RuntimeReadPath()) {
 		t.Fatalf("native file scope = %+v", body.Workspace)
 	}
 	degraded := false
@@ -329,7 +336,7 @@ func TestSnapshotContextUsesFrozenCandidateTaskScriptAndOutputBinding(t *testing
 			t.Fatal(buildErr)
 		}
 		degradedBody, _ := decodeBody(t, degradedResult)
-		if degradedBody.Path[1].Representation != "full" || degradedBody.Path[4].Representation != "full" {
+		if degradedBody.Sources[0].Representation != "full" || degradedBody.Sources[1].Representation != "full" {
 			if degradedBody.Task.Instruction != "完整的当前任务" || degradedBody.Task.Constraints == nil || degradedBody.Task.Constraints.Scenes != 4 {
 				t.Fatalf("budget degradation changed current task: %+v", degradedBody.Task)
 			}
@@ -360,8 +367,8 @@ func TestSnapshotContextUsesFrozenCandidateTaskScriptAndOutputBinding(t *testing
 		t.Fatal(err)
 	}
 	candidateBody, _ := decodeBody(t, candidateResult)
-	if !strings.Contains(string(candidateBody.Path[1].Payload), "候选甲") || strings.Contains(candidateResult.InitialPrompt, "候选乙") || candidateResult.Hashes.AncestorHash == result.Hashes.AncestorHash {
-		t.Fatalf("new candidate snapshot was not isolated: %+v", candidateBody.Path[1])
+	if !strings.Contains(string(candidateBody.Sources[0].Payload), "候选甲") || strings.Contains(candidateResult.InitialPrompt, "候选乙") || candidateResult.Hashes.AncestorHash == result.Hashes.AncestorHash {
+		t.Fatalf("new candidate snapshot was not isolated: %+v", candidateBody.Sources[0])
 	}
 
 	bindingProject := project.Clone()

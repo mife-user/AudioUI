@@ -1,5 +1,5 @@
-import { getRunSnapshot, interruptRun, respondRunPermission, respondRunQuestion, startRun, startRunWithInputs, subscribeRunEvents } from '../api/runs'
-import type { PermissionDecision, RunEvent, RunStartResult } from '../api/runs'
+import { getRunSnapshot, interruptRun, respondRunPermission, respondRunQuestion, startRun, subscribeRunEvents } from '../api/runs'
+import type { PermissionDecision, RunEvent, RunStartOptions, RunStartResult } from '../api/runs'
 import { getWorkspaceSnapshot, newProject, openProject, subscribeWorkspaceEvents } from '../api/workspace'
 import type { WorkspaceChangedEvent } from '../api/workspace'
 import type { GraphMutationReceipt } from '../../bindings/audio-ui/internal/domain/entity'
@@ -12,7 +12,6 @@ export type WorkspaceBridgeAPI = {
   getWorkspaceSnapshot: typeof getWorkspaceSnapshot
   getRunSnapshot: typeof getRunSnapshot
   startRun: typeof startRun
-  startRunWithInputs: typeof startRunWithInputs
   newProject: typeof newProject
   openProject: typeof openProject
   interruptRun: typeof interruptRun
@@ -26,7 +25,6 @@ const defaultAPI: WorkspaceBridgeAPI = {
   getWorkspaceSnapshot,
   getRunSnapshot,
   startRun,
-  startRunWithInputs,
   newProject,
   openProject,
   interruptRun,
@@ -124,16 +122,14 @@ export class WorkspaceBridge {
     throw new Error(`WORKSPACE_SYNC_STALE: 工程 ${receipt.projectId} 的 revision ${receipt.projectRevision} 尚未出现在工作台快照中。`)
   }
 
-  async startRun(nodeId: string, projectId: string, inputEdgeIds?: string[]): Promise<RunStartResult> {
+  async startRun(nodeId: string, projectId: string, options?: RunStartOptions): Promise<RunStartResult> {
     const generation = this.generation
     const currentProjectId = useWorkspaceStore.getState().snapshot?.project?.id ?? null
     if (!this.isCurrent(generation) || currentProjectId !== projectId) {
       return { error: { code: 'PROJECT_CHANGED', message: '工程已切换，未启动运行。' } }
     }
 
-    const result = inputEdgeIds === undefined
-      ? await this.api.startRun(nodeId, projectId)
-      : await this.api.startRunWithInputs(nodeId, projectId, inputEdgeIds)
+    const result = await this.api.startRun(nodeId, projectId, options)
     if (!this.isCurrent(generation)) {
       return { error: { code: 'PROJECT_CHANGED', message: '工程已切换，运行结果未并入当前工作台。' } }
     }

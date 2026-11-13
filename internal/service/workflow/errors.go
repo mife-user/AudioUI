@@ -35,6 +35,7 @@ var (
 	ErrPendingInvalid           = errors.New("PENDING_INVALID")
 	ErrTurnPendingExists        = errors.New("TURN_PENDING_EXISTS")
 	ErrPendingLimit             = errors.New("PENDING_LIMIT_REACHED")
+	ErrTopicBatchPending        = errors.New("TOPIC_BATCH_PENDING")
 	ErrPendingPayloadTooLarge   = errors.New("PENDING_PAYLOAD_TOO_LARGE")
 	ErrRequestIDConflict        = errors.New("REQUEST_ID_CONFLICT")
 	ErrParamsChanged            = errors.New("PARAMS_CHANGED")

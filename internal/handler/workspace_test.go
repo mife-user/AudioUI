@@ -105,12 +105,12 @@ func TestGetWorkspaceSnapshotReturnsSummariesDerivedChainsAndLocks(t *testing.T)
 	}
 	firstID, secondID := "n_prompt_a", "n_prompt_b"
 	candidateA, candidateB := "n_candidate_a", "n_candidate_b"
-	seededProject.Nodes[0].Rounds = []entity.Round{{N: 1, Kind: valueobject.OutputKindTopics, ArtifactID: "sha256:topics-a"}}
+	seededProject.Nodes[0].Rounds = []entity.Round{{N: 1, Kind: valueobject.OutputKindTopics, ArtifactID: "sha256:topics-a", RunID: "r_topics"}}
 	seededProject.Nodes = append(seededProject.Nodes,
 		entity.Node{
 			ID: candidateA, Type: valueobject.NodeTypeCandidate, Title: "候选甲",
 			Size:            entity.DefaultNodeSize(valueobject.NodeTypeCandidate),
-			CandidateSource: &entity.CandidateSource{TopicNodeID: rootID, ArtifactID: "sha256:topics-a", Index: 0}, Rounds: []entity.Round{},
+			CandidateSource: &entity.CandidateSource{TopicNodeID: rootID, Round: 1, ArtifactID: "sha256:topics-a", Index: 0, RunID: "r_topics"}, Rounds: []entity.Round{},
 		},
 		entity.Node{
 			ID: firstID, Type: valueobject.NodeTypePrompt, Title: "分支甲",
@@ -119,7 +119,7 @@ func TestGetWorkspaceSnapshotReturnsSummariesDerivedChainsAndLocks(t *testing.T)
 		entity.Node{
 			ID: candidateB, Type: valueobject.NodeTypeCandidate, Title: "候选乙",
 			Size:            entity.DefaultNodeSize(valueobject.NodeTypeCandidate),
-			CandidateSource: &entity.CandidateSource{TopicNodeID: rootID, ArtifactID: "sha256:topics-a", Index: 1}, Rounds: []entity.Round{},
+			CandidateSource: &entity.CandidateSource{TopicNodeID: rootID, Round: 1, ArtifactID: "sha256:topics-a", Index: 1, RunID: "r_topics"}, Rounds: []entity.Round{},
 		},
 		entity.Node{
 			ID: secondID, Type: valueobject.NodeTypePrompt, Title: "分支乙",

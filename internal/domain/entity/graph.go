@@ -14,7 +14,9 @@ var (
 	ErrGraphNodeNotFound     = errors.New("GRAPH_NODE_NOT_FOUND")
 	ErrNodeConnectionInvalid = errors.New("NODE_CONNECTION_INVALID")
 	ErrOutputBindingConflict = errors.New("OUTPUT_BINDING_CONFLICT")
+	ErrScriptVersionUnbound  = errors.New("SCRIPT_VERSION_UNBOUND")
 	ErrRunGraphUnsupported   = errors.New("RUN_GRAPH_UNSUPPORTED")
+	ErrPromptTaskEmpty       = errors.New("PROMPT_TASK_EMPTY")
 	ErrWorkspaceRootMismatch = errors.New("WORKSPACE_ROOT_MISMATCH")
 )
 
@@ -120,13 +122,51 @@ func (g *Graph) EdgeBetween(sourceID, targetID string) (Edge, bool) {
 }
 
 func (g *Graph) SnapshotForRun(nodeID string) (RunExecutionSnapshot, error) {
-	return g.SnapshotForRunWithInputs(nodeID, nil)
+	return g.SnapshotForRunWithOptions(nodeID, RunStartOptions{})
 }
 
 func (g *Graph) SnapshotForRunWithInputs(nodeID string, inputEdgeIDs []string) (RunExecutionSnapshot, error) {
+	return g.SnapshotForRunWithOptions(nodeID, RunStartOptions{InputEdgeIDs: inputEdgeIDs})
+}
+
+func (g *Graph) SnapshotForRunWithOptions(nodeID string, options RunStartOptions) (RunExecutionSnapshot, error) {
+	if g.project.Version >= valueobject.ProjectFileVersion {
+		target, ok := g.Node(nodeID)
+		if !ok {
+			return RunExecutionSnapshot{}, fmt.Errorf("%w: %s", ErrGraphNodeNotFound, nodeID)
+		}
+		switch target.Type {
+		case valueobject.NodeTypeTopic:
+			if len(options.InputEdgeIDs) != 0 || options.OutputNodeID != "" || options.CreateOutput {
+				return RunExecutionSnapshot{}, fmt.Errorf("%w: topic run does not accept Agent output options", ErrRunGraphUnsupported)
+			}
+			snapshot, err := g.snapshotDAGForRun(nodeID)
+			if err != nil {
+				return RunExecutionSnapshot{}, err
+			}
+			if options.TopicRerun {
+				if !target.Locked || len(target.Rounds) == 0 {
+					return RunExecutionSnapshot{}, fmt.Errorf("%w: Topic has no applied batch to rerun", ErrNodeConnectionInvalid)
+				}
+				latest := target.Rounds[len(target.Rounds)-1]
+				snapshot.TopicBatch = &RunTopicBatch{BaselineRound: latest.N}
+			}
+			if err := snapshot.Validate(); err != nil {
+				return RunExecutionSnapshot{}, err
+			}
+			return snapshot, nil
+		case valueobject.NodeTypeAgent:
+			return g.snapshotDAGInputsForRunWithOptions(nodeID, options)
+		default:
+			return RunExecutionSnapshot{}, fmt.Errorf("%w: %s", ErrNodeConnectionInvalid, target.Type)
+		}
+	}
 	if g.project.Version >= valueobject.DAGProjectVersion {
-		if inputEdgeIDs != nil {
-			return g.snapshotDAGInputsForRun(nodeID, inputEdgeIDs)
+		if options.OutputNodeID != "" || options.CreateOutput || options.TopicRerun {
+			return RunExecutionSnapshot{}, fmt.Errorf("%w: output selection requires project v5", ErrRunGraphUnsupported)
+		}
+		if options.InputEdgeIDs != nil {
+			return g.snapshotDAGInputsForRun(nodeID, options.InputEdgeIDs)
 		}
 		snapshot, legacyErr := g.snapshotDAGForRun(nodeID)
 		if legacyErr == nil {
@@ -137,8 +177,8 @@ func (g *Graph) SnapshotForRunWithInputs(nodeID string, inputEdgeIDs []string) (
 		}
 		return RunExecutionSnapshot{}, legacyErr
 	}
-	if inputEdgeIDs != nil {
-		return RunExecutionSnapshot{}, fmt.Errorf("%w: explicit input selection requires a DAG project", ErrRunGraphUnsupported)
+	if options.InputEdgeIDs != nil || options.OutputNodeID != "" || options.CreateOutput || options.TopicRerun {
+		return RunExecutionSnapshot{}, fmt.Errorf("%w: explicit run options require a DAG project", ErrRunGraphUnsupported)
 	}
 	target, ok := g.Node(nodeID)
 	if !ok {
@@ -218,12 +258,20 @@ func (g *Graph) SnapshotForRunWithInputs(nodeID string, inputEdgeIDs []string) (
 }
 
 func (g *Graph) snapshotDAGInputsForRun(nodeID string, inputEdgeIDs []string) (RunExecutionSnapshot, error) {
+	return g.snapshotDAGInputsForRunWithOptions(nodeID, RunStartOptions{InputEdgeIDs: inputEdgeIDs})
+}
+
+func (g *Graph) snapshotDAGInputsForRunWithOptions(nodeID string, options RunStartOptions) (RunExecutionSnapshot, error) {
+	inputEdgeIDs := options.InputEdgeIDs
 	target, ok := g.Node(nodeID)
 	if !ok {
 		return RunExecutionSnapshot{}, fmt.Errorf("%w: %s", ErrGraphNodeNotFound, nodeID)
 	}
 	if target.Type != valueobject.NodeTypeAgent {
 		return RunExecutionSnapshot{}, fmt.Errorf("%w: DAG input runs require an Agent target", ErrRunGraphUnsupported)
+	}
+	if options.TopicRerun {
+		return RunExecutionSnapshot{}, fmt.Errorf("%w: Topic rerun option requires a Topic target", ErrRunGraphUnsupported)
 	}
 	if inputEdgeIDs == nil {
 		inputEdgeIDs = make([]string, 0, len(g.incoming[nodeID]))
@@ -254,7 +302,7 @@ func (g *Graph) snapshotDAGInputsForRun(nodeID string, inputEdgeIDs []string) (R
 		}
 		if role == "task" {
 			if strings.TrimSpace(source.Params.Instruction) == "" {
-				return RunExecutionSnapshot{}, fmt.Errorf("%w: Prompt %s has no task", ErrRunGraphUnsupported, source.ID)
+				return RunExecutionSnapshot{}, fmt.Errorf("%w: Prompt %s has no task", ErrPromptTaskEmpty, source.ID)
 			}
 			tasks++
 		}
@@ -340,37 +388,119 @@ func (g *Graph) snapshotDAGInputsForRun(nodeID string, inputEdgeIDs []string) (R
 			inputEdges = append(inputEdges, edge)
 		}
 	}
+	if g.project.Version >= valueobject.ProjectFileVersion {
+		for _, edge := range inputEdges {
+			source, _ := g.Node(edge.SourceNodeID)
+			if source.Type != valueobject.NodeTypeScript {
+				continue
+			}
+			if edge.ScriptVersion <= 0 {
+				return RunExecutionSnapshot{}, fmt.Errorf("%w: Script %s 的输入连接尚未绑定版本", ErrScriptVersionUnbound, source.ID)
+			}
+			if edge.ScriptVersion > len(source.ScriptVersions) {
+				return RunExecutionSnapshot{}, fmt.Errorf("%w: Script %s 不存在 v%d", ErrRunGraphUnsupported, source.ID, edge.ScriptVersion)
+			}
+		}
+	}
 
 	kind := valueobject.OutputKindScript
 	outputBinding := RunOutputBinding{}
 	var output *Node
-	for _, childID := range g.children[nodeID] {
-		child, _ := g.Node(childID)
-		if child.Type != valueobject.NodeTypeScript {
-			continue
+	var outputNode *Node
+	var outputEdge *Edge
+	if g.project.Version >= valueobject.ProjectFileVersion {
+		var scriptChildren []*Node
+		for _, childID := range g.children[nodeID] {
+			child, _ := g.Node(childID)
+			if child.Type == valueobject.NodeTypeScript {
+				scriptChildren = append(scriptChildren, child)
+			}
+		}
+		if options.CreateOutput && options.OutputNodeID != "" {
+			return RunExecutionSnapshot{}, fmt.Errorf("%w: output selection is ambiguous", ErrOutputBindingConflict)
+		}
+		mode := ""
+		switch {
+		case options.CreateOutput:
+			mode = RunOutputModeCreate
+		case options.OutputNodeID != "":
+			mode = RunOutputModeExisting
+		case len(scriptChildren) == 0:
+			mode = RunOutputModeCreate
+		case len(scriptChildren) == 1:
+			mode = RunOutputModeExisting
+		default:
+			return RunExecutionSnapshot{}, fmt.Errorf("%w: 多个 Script 输出必须选择运行目标", ErrOutputBindingConflict)
+		}
+		if mode == RunOutputModeCreate {
+			outputID, err := valueobject.NewID(valueobject.NodeIDPrefix)
+			if err != nil {
+				return RunExecutionSnapshot{}, err
+			}
+			edgeID, err := valueobject.NewID(valueobject.EdgeIDPrefix)
+			if err != nil {
+				return RunExecutionSnapshot{}, err
+			}
+			outputBinding = RunOutputBinding{Bound: true, Mode: mode, NodeID: outputID, ParentNodeID: target.ID}
+			outputEdge = &Edge{ID: edgeID, SourceNodeID: target.ID, TargetNodeID: outputID, Kind: EdgeKindConnection}
+		} else {
+			for _, child := range scriptChildren {
+				if options.OutputNodeID == "" || child.ID == options.OutputNodeID {
+					output = child
+					break
+				}
+			}
+			if output == nil || len(g.incoming[output.ID]) != 1 || output.WorkspaceRootID != target.WorkspaceRootID {
+				return RunExecutionSnapshot{}, fmt.Errorf("%w: Script 输出不存在、存在其他输入或工作区不匹配", ErrRunGraphUnsupported)
+			}
+			edge, ok := g.EdgeBetween(target.ID, output.ID)
+			if !ok {
+				return RunExecutionSnapshot{}, fmt.Errorf("%w: Script 输出连接不存在", ErrGraphInvalid)
+			}
+			outputBinding = RunOutputBinding{Bound: true, Mode: mode, NodeID: output.ID, ParentNodeID: target.ID}
+			if len(output.ScriptVersions) > 0 {
+				latest := output.ScriptVersions[len(output.ScriptVersions)-1]
+				outputBinding.BaselineVersion = latest.N
+				outputBinding.BaselineArtifactID = latest.ArtifactID
+			}
+			frozen := output.Clone()
+			outputNode = &frozen
+			outputEdge = &edge
+		}
+	} else {
+		for _, childID := range g.children[nodeID] {
+			child, _ := g.Node(childID)
+			if child.Type != valueobject.NodeTypeScript {
+				continue
+			}
+			if output != nil {
+				return RunExecutionSnapshot{}, fmt.Errorf("%w: 存在多个 Script 输出，暂不能选择运行目标", ErrOutputBindingConflict)
+			}
+			output = child
 		}
 		if output != nil {
-			return RunExecutionSnapshot{}, fmt.Errorf("%w: 存在多个 Script 输出，暂不能选择运行目标", ErrOutputBindingConflict)
-		}
-		output = child
-	}
-	if output != nil {
-		if len(g.incoming[output.ID]) != 1 || output.WorkspaceRootID != target.WorkspaceRootID {
-			return RunExecutionSnapshot{}, fmt.Errorf("%w: Script 输出有其他输入或工作区不匹配", ErrRunGraphUnsupported)
-		}
-		outputBinding = RunOutputBinding{Bound: true, NodeID: output.ID, ParentNodeID: target.ID}
-		if len(output.ScriptVersions) > 0 {
-			latest := output.ScriptVersions[len(output.ScriptVersions)-1]
-			outputBinding.BaselineVersion = latest.N
-			outputBinding.BaselineArtifactID = latest.ArtifactID
+			if len(g.incoming[output.ID]) != 1 || output.WorkspaceRootID != target.WorkspaceRootID {
+				return RunExecutionSnapshot{}, fmt.Errorf("%w: Script 输出有其他输入或工作区不匹配", ErrRunGraphUnsupported)
+			}
+			outputBinding = RunOutputBinding{Bound: true, NodeID: output.ID, ParentNodeID: target.ID}
+			if len(output.ScriptVersions) > 0 {
+				latest := output.ScriptVersions[len(output.ScriptVersions)-1]
+				outputBinding.BaselineVersion = latest.N
+				outputBinding.BaselineArtifactID = latest.ArtifactID
+			}
 		}
 	}
 
+	snapshotVersion := 3
+	if g.project.Version >= valueobject.ProjectFileVersion {
+		snapshotVersion = 4
+	}
 	snapshot := RunExecutionSnapshot{
-		Version: 3, ProjectVersion: g.project.Version, ProjectID: g.project.ID,
+		Version: snapshotVersion, ProjectVersion: g.project.Version, ProjectID: g.project.ID,
 		ProjectRevision: g.project.Revision, TreeID: target.WorkspaceRootID, NodeID: target.ID,
 		InputNodes: inputNodes, InputRoots: inputRoots, InputEdges: inputEdges, Inputs: inputs,
 		Artifacts: []RunArtifactReference{}, OutputBinding: outputBinding,
+		OutputNode: outputNode, OutputEdge: outputEdge,
 		OutputContract: RunOutputContract{Kind: kind, SchemaVersion: 1},
 	}
 	for _, node := range inputNodes[:len(inputNodes)-1] {
@@ -382,11 +512,24 @@ func (g *Graph) snapshotDAGInputsForRun(nodeID string, inputEdgeIDs []string) (R
 				Kind: valueobject.OutputKindTopics, CandidateIndex: &index,
 			})
 		case node.Type == valueobject.NodeTypeScript && len(node.ScriptVersions) > 0:
-			latest := node.ScriptVersions[len(node.ScriptVersions)-1]
-			snapshot.Artifacts = append(snapshot.Artifacts, RunArtifactReference{
-				NodeID: node.ID, ArtifactID: latest.ArtifactID,
-				Kind: valueobject.OutputKindScript, Version: latest.N,
-			})
+			if snapshot.Version == 4 {
+				for _, edge := range inputEdges {
+					if edge.SourceNodeID != node.ID {
+						continue
+					}
+					version := node.ScriptVersions[edge.ScriptVersion-1]
+					snapshot.Artifacts = append(snapshot.Artifacts, RunArtifactReference{
+						NodeID: node.ID, EdgeID: edge.ID, ArtifactID: version.ArtifactID,
+						Kind: valueobject.OutputKindScript, Version: version.N,
+					})
+				}
+			} else {
+				latest := node.ScriptVersions[len(node.ScriptVersions)-1]
+				snapshot.Artifacts = append(snapshot.Artifacts, RunArtifactReference{
+					NodeID: node.ID, ArtifactID: latest.ArtifactID,
+					Kind: valueobject.OutputKindScript, Version: latest.N,
+				})
+			}
 		}
 	}
 	if err := snapshot.Validate(); err != nil {
@@ -690,21 +833,38 @@ func (g *Graph) validateDAG() error {
 		}
 		if node.Type == valueobject.NodeTypeCandidate {
 			source := node.CandidateSource
-			if source == nil || source.ArtifactID == "" || source.Index < 0 {
+			if source == nil || source.TopicNodeID == "" || source.ArtifactID == "" || source.Index < 0 {
 				return fmt.Errorf("%w: candidate %s has invalid source", ErrGraphInvalid, node.ID)
 			}
 			topic, ok := g.Node(source.TopicNodeID)
 			if !ok || topic.Type != valueobject.NodeTypeTopic {
 				return fmt.Errorf("%w: candidate %s has invalid source topic", ErrGraphInvalid, node.ID)
 			}
-			latest := Round{}
-			for _, round := range topic.Rounds {
-				if round.N > latest.N {
-					latest = round
+			if g.project.Version >= valueobject.ProjectFileVersion {
+				if source.Round <= 0 || source.RunID == "" {
+					return fmt.Errorf("%w: candidate %s has incomplete batch source", ErrGraphInvalid, node.ID)
 				}
-			}
-			if latest.Kind != valueobject.OutputKindTopics || latest.ArtifactID != source.ArtifactID {
-				return fmt.Errorf("%w: candidate %s artifact is not the topic result", ErrGraphInvalid, node.ID)
+				matched := false
+				for _, round := range topic.Rounds {
+					if round.N == source.Round && round.Kind == valueobject.OutputKindTopics &&
+						round.ArtifactID == source.ArtifactID && round.RunID == source.RunID {
+						matched = true
+						break
+					}
+				}
+				if !matched {
+					return fmt.Errorf("%w: candidate %s source does not match a topic batch", ErrGraphInvalid, node.ID)
+				}
+			} else {
+				latest := Round{}
+				for _, round := range topic.Rounds {
+					if round.N > latest.N {
+						latest = round
+					}
+				}
+				if latest.Kind != valueobject.OutputKindTopics || latest.ArtifactID != source.ArtifactID {
+					return fmt.Errorf("%w: candidate %s artifact is not the topic result", ErrGraphInvalid, node.ID)
+				}
 			}
 		} else if node.CandidateSource != nil {
 			return fmt.Errorf("%w: non-candidate node %s has a candidate source", ErrGraphInvalid, node.ID)
@@ -740,6 +900,17 @@ func (g *Graph) validateDAG() error {
 			return fmt.Errorf("%w: duplicate edge %s → %s", ErrGraphInvalid, source.ID, target.ID)
 		}
 		seenPairs[pair] = true
+		if g.project.Version >= valueobject.ProjectFileVersion {
+			if source.Type == valueobject.NodeTypeScript {
+				if edge.Kind != EdgeKindConnection || edge.ScriptVersion < 0 || edge.ScriptVersion > len(source.ScriptVersions) {
+					return fmt.Errorf("%w: edge %s has an invalid Script version", ErrGraphInvalid, edge.ID)
+				}
+			} else if edge.ScriptVersion != 0 {
+				return fmt.Errorf("%w: non-Script edge %s has a Script version", ErrGraphInvalid, edge.ID)
+			}
+		} else if edge.ScriptVersion != 0 {
+			return fmt.Errorf("%w: legacy edge %s has a Script version", ErrGraphInvalid, edge.ID)
+		}
 		switch edge.Kind {
 		case EdgeKindConnection:
 		case EdgeKindCandidateSource:

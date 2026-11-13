@@ -19,6 +19,10 @@ export function PendingNodeEntry({ node, pendingIds }: { node: Node; pendingIds:
     ? controller.selectedPending
     : undefined
   const pendingItems = controller?.pendingItems.filter((item) => pendingIds.includes(item.id)) ?? []
+  const activeDetail = activePending && controller?.selectedPendingDetail?.pending.id === activePending.id
+    ? controller.selectedPendingDetail
+    : undefined
+  const isTopicBatchPending = Boolean(activeDetail?.pending.executionSnapshot?.topicBatch)
 
   const close = useCallback(() => {
     const pendingId = activePending?.id
@@ -87,7 +91,9 @@ export function PendingNodeEntry({ node, pendingIds }: { node: Node; pendingIds:
             tabIndex={-1}
           >
             <header className="node-pending-dialog-head">
-              <strong>{activePending.kind === OutputKind.OutputKindTopics ? '选题结果待处理' : '运行结果待确认'}</strong>
+              <strong>{activePending.kind === OutputKind.OutputKindTopics
+                ? isTopicBatchPending ? '选题重跑批次待确认' : '选题结果待处理'
+                : '运行结果待确认'}</strong>
               <button type="button" className="agent-icon-btn" aria-label="关闭结果预览" onClick={close}>×</button>
             </header>
             <PendingArtifactCard

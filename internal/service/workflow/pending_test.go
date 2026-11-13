@@ -182,7 +182,7 @@ func TestBeginRunWithInputsLocksOnlySelectedRootlessSubgraph(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if snapshot.Version != 3 || snapshot.TreeID != "" || len(snapshot.ChainPath) != 0 {
+	if snapshot.Version != 4 || snapshot.TreeID != "" || len(snapshot.ChainPath) != 0 {
 		t.Fatalf("rootless run snapshot = %+v", snapshot)
 	}
 	locked := make(map[string]bool)

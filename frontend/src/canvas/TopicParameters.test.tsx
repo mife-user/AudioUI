@@ -1,10 +1,11 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
-import type { Node, NodeParams, RunStartResult } from '../../bindings/audio-ui/internal/domain/entity'
+import { OutputKind } from '../../bindings/audio-ui/internal/domain/valueobject'
+import type { Node, NodeParams, RunStartOptions, RunStartResult } from '../../bindings/audio-ui/internal/domain/entity'
 import { TopicParameters } from './TopicParameters'
 
 type SaveTopicParams = (nodeId: string, title: string, params: NodeParams, projectId: string) => Promise<boolean | void>
-type StartTopicRun = (nodeId: string, projectId: string) => Promise<RunStartResult>
+type StartTopicRun = (nodeId: string, projectId: string, options?: RunStartOptions) => Promise<RunStartResult>
 
 function makeNode(overrides: Partial<Node> = {}): Node {
   return {
@@ -35,6 +36,8 @@ function renderTopic(options: {
   node?: Node
   disabled?: boolean
   globalRunBusy?: boolean
+  allowLockedRerun?: boolean
+  rerunPending?: boolean
   onSave?: SaveTopicParams
   onRun?: StartTopicRun
 } = {}) {
@@ -46,6 +49,8 @@ function renderTopic(options: {
       projectId="p_test"
       disabled={options.disabled ?? false}
       globalRunBusy={options.globalRunBusy ?? false}
+      allowLockedRerun={options.allowLockedRerun}
+      rerunPending={options.rerunPending}
       onSave={onSave}
       onRun={onRun}
     />,
@@ -112,7 +117,7 @@ describe('TopicParameters', () => {
     expect(onRun).not.toHaveBeenCalled()
 
     save.resolve(true)
-    await waitFor(() => expect(onRun).toHaveBeenCalledWith('n_topic', 'p_test'))
+    await waitFor(() => expect(onRun).toHaveBeenCalledWith('n_topic', 'p_test', undefined))
   })
 
   it('serializes consecutive edits so a delayed save cannot replace the latest draft', async () => {
@@ -197,6 +202,26 @@ describe('TopicParameters', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '生成候选' }))
     expect(await screen.findByRole('alert')).toHaveTextContent(message)
+  })
+
+  it('allows a locked Topic rerun with unchanged parameters and an explicit batch option', async () => {
+    const onRun = vi.fn<StartTopicRun>().mockResolvedValue({} satisfies RunStartResult)
+    const lockedTopic = makeNode({
+      locked: true,
+      rounds: [{ n: 1, kind: OutputKind.OutputKindTopics, artifactId: 'sha256:topics', pendingId: 'pending_topics', runId: 'r_topics' }],
+    })
+    renderTopic({ node: lockedTopic, disabled: true, allowLockedRerun: true, onRun })
+
+    expect(screen.getByRole('textbox', { name: '想法' })).toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: '按锁定参数重新生成' }))
+    await waitFor(() => expect(onRun).toHaveBeenCalledWith('n_topic', 'p_test', { topicRerun: true }))
+  })
+
+  it('blocks a Topic rerun while its previous batch is pending', () => {
+    const lockedTopic = makeNode({ locked: true })
+    renderTopic({ node: lockedTopic, disabled: true, allowLockedRerun: true, rerunPending: true })
+
+    expect(screen.getByRole('button', { name: '批次待处理' })).toBeDisabled()
   })
 
   it('disables parameter edits and execution when the caller reports a lock or global run', () => {

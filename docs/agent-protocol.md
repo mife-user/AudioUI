@@ -5,11 +5,13 @@
 >
 > **M2-00～10 实际范围**：运行级一次性会话、App 构建上下文、只读图工具、结构化 `reply`、待应用产物；多链单在途。该范围是旧节点模型的历史基线。M2-11～13 的选定本地脚本目标见下文。
 
-## 多上游图的协议演进（U15 已通过用户验收）
+## 多上游图与版本的协议演进（U15 已验收；U16 设计已确认、实施中）
 
-用户已确认目标图允许多个上游且无环，独立 Prompt → Agent 的有效任务可无 Topic 运行；运行时按任务/工具契约检查实际输入，不能静默丢弃或删除不兼容连接。U15 保留旧有效单路径 v2 快照；无 Topic 或 DAG 汇合使用 v3 快照，以有序输入边与必要祖先集合表示运行范围，不伪造 `chainPath`。直接输入默认全选，运行前可取消可选输入并重排；角色按节点类型确定，多个 Prompt 分段呈现，不自动裁决冲突。各输入工作区按 Topic 根和节点目录命名空间隔离，只读；目标工作区为唯一写入位置；无 Topic 运行使用工程专属 workspace。U15 使用发送时 Script 最新版本；逐边固定版本、多个输出和 Topic 新候选批次仍属 U16。细节见 [ADR-030](decisions.md#adr-030-多上游无环图与版本引用草案)。
+用户已确认目标图允许多个上游且无环，独立 Prompt → Agent 的有效任务可无 Topic 运行；运行时按任务/工具契约检查实际输入，不能静默丢弃或删除不兼容连接。U15 保留旧有效单路径 v2 快照；无 Topic 或 DAG 汇合使用 v3 快照，以有序输入边与必要祖先集合表示运行范围，不伪造 `chainPath`。直接输入默认全选，运行前可取消可选输入并重排；角色按节点类型确定，多个 Prompt 分段呈现，不自动裁决冲突。各输入工作区按 Topic 根和节点目录命名空间隔离，只读；目标工作区为唯一写入位置；无 Topic 运行使用工程专属 workspace。
 
-v3 `ExecutionSnapshot` 冻结工程 revision、所选普通边、祖先节点/边、候选来源、Script artifact/version、任务顺序、输出目标与工作区身份。run-scoped MCP 只授权该冻结子图和列明的 artifact；本地 Read/Glob/Grep 仅授权被选输入祖先 steps 与 exe 同级只读 `runtime/`，写入只限运行目标工作区。U15 不改变已验收的 `reply` Schema、事务幂等和权限确认语义；原单路径需要回归。视频工具/产物也尚未接入。
+U16 设计已确认：工程 v5 的每条 Script 来源边显式固定版本；预览不修改绑定，未绑定边不得自动选择最新版本。Agent 启动前冻结唯一输出目标；多个现有输出时必须明确选择，新建并行 Script 先在快照中预留 ID、仅于合法 reply 事务提交时创建。Topic 首批仍自动提交；重跑使用已锁定参数，合法结果进入待确认，应用后以独立批次生成 Candidate。相同 Topic 存在未决重跑 pending 时拒绝再次运行；Candidate 的来源冻结 round、artifact 与 run ID。细节见 [ADR-030](decisions.md#adr-030-多上游无环图与版本引用草案)。
+
+v3 `ExecutionSnapshot` 保留 U15 行为；v4 快照在冻结工程 revision、所选普通边、祖先节点/边、任务顺序与工作区身份的基础上，逐边记录 Script 版本/artifact，并固定唯一输出目标。run-scoped MCP 只授权该冻结子图和列明的 artifact；本地 Read/Glob/Grep 仅授权被选输入祖先 steps 与 exe 同级只读 `runtime/`，写入只限运行目标工作区。U16 不改变已验收的 `reply` Schema、事务幂等和权限确认语义；原单路径及 U15 行为需要回归。视频工具/产物也尚未接入。
 
 **U14 过渡方案（已通过用户验收）**：暂不扩展运行协议；仅在所有路径输入及绑定输出均满足旧单路径契约时构建既有冻结快照。无 Topic、多输入、无效类型组合或输出歧义在启动前明确拒绝，不丢弃输入、不启动上游；文件与 MCP 授权不扩大。新图下的结果事务及恢复校验真实边、候选来源和冻结输出绑定。多输入快照与工作区协议已由 U15 实现并通过验收；逐边版本属于 U16；详见 [ADR-030](decisions.md#u14-实施与运行过渡方案已通过用户验收)。
 
@@ -31,7 +33,7 @@ v3 `ExecutionSnapshot` 冻结工程 revision、所选普通边、祖先节点/�
 | `chainPath` | topic root 到 Agent 的发送时节点路径 |
 | candidate source | 每个 candidate 对应的 `artifactId` 与 0 基 `candidateIndex`，不得以实时图替换 |
 | prompt task | 路径内 prompt 的完整任务与约束；目标参数不得被预算截断 |
-| output binding | 指定的唯一 script 节点 ID 与发送时版本；没有指定时显式记录未绑定 |
+| output binding | 唯一 Script 目标的节点 ID、模式（既有节点或预留新节点）及发送时基准版本；新目标 ID 在合法结果提交前不创建 |
 | output contract | `kind=script`、Schema version 1；topic 运行则为 `kind=topics` |
 | artifact authorization | 当前路径允许读取的不可变产物版本；运行时读取不能回退到改挂后的实时版本 |
 
@@ -43,10 +45,12 @@ M2-11～13 仅使用 `topics` 和 `script` 两种现有输出 Schema，均经唯
 
 | 运行目标 / 输出状态 | 处理语义 |
 |---|---|
-| `topic` + 合法 `topics` | 原子保存不可变 topics artifact 并生成所有 candidate 节点；完成后按规则锁定 topic，不要求逐候选人工应用 |
-| `agent` + 无指定输出 | 合法 `script` reply 原子建一个直接 script 子节点、关联 artifact 与运行来源；无人工建节点确认 |
-| `agent` + 指定空 script 节点 | 合法 `script` reply 自动写入该节点首个版本 |
-| `agent` + 已有 script 版本 | 合法 `script` reply 进入绑定输出节点和当前版本的待确认记录；确认时重验版本并追加，取消保持原版本不变 |
+| `topic` 首批 + 合法 `topics` | 原子保存不可变 topics artifact 并生成所有 candidate 节点；完成后锁定 topic，不要求逐候选人工应用 |
+| `topic` 重跑 + 合法 `topics` | 创建带冻结轮次/参数来源的待确认批次；确认时原子追加 Topic round 与独立 Candidate，丢弃不改旧批次；存在未决批次时不能再次重跑 |
+| `agent` + 运行前选择新建输出 | 合法 `script` reply 原子创建快照预留的直接 Script 子节点、首个版本与运行来源；失败或无效结果不留下空节点 |
+| `agent` + 运行前选择既有空 Script | 合法 `script` reply 自动写入该节点首个版本 |
+| `agent` + 运行前选择已有版本的 Script | 合法 `script` reply 进入绑定输出节点和基准版本的待确认记录；确认时重验版本并追加，取消保持原版本不变 |
+| `agent` + 多个可选 Script 输出 | 启动前必须明确选择既有目标或新建并行目标；选择结果写入运行快照 |
 | 非法 Schema/kind、越权或过期运行、目标/契约不匹配 | 不改图、输出版本或 artifact 关联；返回稳定错误并保留有界诊断证据 |
 
 新增/追加输出不得自动触发下游运行。所有节点、关系、artifact、运行来源与幂等身份由应用命令层可恢复地提交。重复同身份同内容返回既有结果；同一运行不同内容/身份冲突明确拒绝。确认结果必须验证绑定输出及基准版本，不能以旧 `force` 绕过。

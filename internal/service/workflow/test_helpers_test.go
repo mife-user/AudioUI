@@ -118,7 +118,7 @@ func parentOf(project entity.Project, childID string) string {
 func baseProject() entity.Project {
 	artifactID := "sha256:" + strings.Repeat("0", 64)
 	project := entity.Project{
-		Version:      valueobject.ProjectFileVersion,
+		Version:      valueobject.DAGProjectVersion,
 		ID:           "p_test",
 		Name:         "测试工程",
 		Revision:     1,

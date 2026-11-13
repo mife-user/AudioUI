@@ -62,7 +62,6 @@ function makeAPI(initialResult: WorkspaceSnapshotResult = workspaceResult(null, 
   const getWorkspaceSnapshot = vi.fn().mockResolvedValue(initialResult)
   const getRunSnapshot = vi.fn().mockImplementation(async (runId: string) => runSnapshot(initialResult.snapshot.project?.id ?? '', runId, 0))
   const startRun = vi.fn().mockResolvedValue({})
-  const startRunWithInputs = vi.fn().mockResolvedValue({})
   const newProject = vi.fn().mockResolvedValue(undefined)
   const openProject = vi.fn().mockResolvedValue(undefined)
   const interruptRun = vi.fn().mockResolvedValue(undefined)
@@ -80,7 +79,6 @@ function makeAPI(initialResult: WorkspaceSnapshotResult = workspaceResult(null, 
     getWorkspaceSnapshot,
     getRunSnapshot,
     startRun,
-    startRunWithInputs,
     newProject,
     openProject,
     interruptRun,
@@ -91,7 +89,7 @@ function makeAPI(initialResult: WorkspaceSnapshotResult = workspaceResult(null, 
   } as unknown as WorkspaceBridgeAPI
   return {
     api, workspaceListeners, runListeners,
-    getWorkspaceSnapshot, getRunSnapshot, startRun, startRunWithInputs, newProject, openProject, interruptRun, respondRunPermission, respondRunQuestion,
+    getWorkspaceSnapshot, getRunSnapshot, startRun, newProject, openProject, interruptRun, respondRunPermission, respondRunQuestion,
     subscribeWorkspaceEvents, subscribeRunEvents,
   }
 }
@@ -232,7 +230,7 @@ describe('WorkspaceBridge', () => {
     await vi.waitFor(() => expect(useRunStore.getState().runs.r_started?.snapshot?.run.id).toBe('r_started'))
     expect(result.run?.id).toBe('r_started')
     expect(setup.startRun).toHaveBeenCalledOnce()
-    expect(setup.startRun).toHaveBeenCalledWith('n_topic', 'p_one')
+    expect(setup.startRun).toHaveBeenCalledWith('n_topic', 'p_one', undefined)
     expect(useRunStore.getState().selectedRunId).toBe('r_started')
 
     const stale = await app.startRun('n_topic', 'p_old')
@@ -240,18 +238,17 @@ describe('WorkspaceBridge', () => {
     expect(setup.startRun).toHaveBeenCalledOnce()
   })
 
-  it('routes an explicit input order through the selection-aware start API', async () => {
+  it('routes frozen input and output options through the run API', async () => {
     const setup = makeAPI(workspaceResult('p_one', 1))
     const app = bridge(setup.api)
     app.start()
     await vi.waitFor(() => expect(useWorkspaceStore.getState().status).toBe('ready'))
 
-    const inputEdgeIds = ['e_script', 'e_prompt']
-    const result = await app.startRun('n_agent', 'p_one', inputEdgeIds)
+    const options = { inputEdgeIds: ['e_script', 'e_prompt'], outputNodeId: 'n_script' }
+    const result = await app.startRun('n_agent', 'p_one', options)
 
     expect(result.error).toBeUndefined()
-    expect(setup.startRunWithInputs).toHaveBeenCalledWith('n_agent', 'p_one', inputEdgeIds)
-    expect(setup.startRun).not.toHaveBeenCalled()
+    expect(setup.startRun).toHaveBeenCalledWith('n_agent', 'p_one', options)
   })
 
   it('preserves a run event and snapshot that arrive before the start response', async () => {

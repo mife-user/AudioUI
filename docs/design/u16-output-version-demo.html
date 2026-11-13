@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AudioUI · U16 结果版本与候选批次</title>
+  <style>
+    :root{color-scheme:dark;--bg:#0b1013;--panel:#121c20;--panel-2:#17252a;--line:#2a3b41;--text:#e2ebed;--muted:#9aadb3;--accent:#66cddd;--accent-soft:#15333a;--warn:#e4bd7e;--warn-soft:#352d20;--ok:#82d6a6;--danger:#dc9292;--radius:9px}
+    *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.55 "Segoe UI","Microsoft YaHei",sans-serif}button,select{font:inherit}button{cursor:pointer;color:inherit}button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+    header{display:flex;align-items:center;gap:12px;min-height:56px;padding:10px 24px;background:#10191d;border-bottom:1px solid var(--line)}.brand{font-weight:750;letter-spacing:.16em;color:var(--accent)}.top-note{margin-left:auto;color:var(--warn);font-size:12px}
+    main{max-width:1200px;margin:0 auto;padding:26px 24px 40px}.eyebrow{color:var(--accent);font-size:11px;font-weight:700;letter-spacing:.14em}.intro{margin-bottom:20px}.intro h1{margin:5px 0;font-size:24px}.intro p{margin:0;color:var(--muted)}
+    nav{display:flex;flex-wrap:wrap;gap:8px;margin:20px 0 14px}nav button,.action,.secondary{padding:8px 12px;border:1px solid var(--line);border-radius:7px;background:var(--panel-2)}nav button[aria-pressed="true"]{border-color:var(--accent);background:var(--accent-soft);color:var(--accent)}button:hover:not(:disabled){filter:brightness(1.15)}button:disabled{cursor:not-allowed;opacity:.5}
+    section.panel{padding:20px;border:1px solid var(--line);border-radius:var(--radius);background:var(--panel);box-shadow:0 10px 28px #0003}section.panel[hidden]{display:none}.panel h2{margin:0 0 4px;font-size:18px}.lede{margin:0 0 16px;color:var(--muted);font-size:13px}.grid{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(270px,.8fr);gap:14px}.box{min-width:0;padding:15px;border:1px solid var(--line);border-radius:8px;background:#0e171a}.box h3{margin:0 0 10px;font-size:14px}.row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.row+.row{margin-top:10px}.node{padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--panel-2)}.node strong,.node small{display:block}.node small,.hint{color:var(--muted);font-size:12px}.chip{display:inline-flex;align-items:center;padding:3px 8px;border-radius:999px;background:var(--accent-soft);color:var(--accent);font-size:11px}.chip.warn{background:var(--warn-soft);color:var(--warn)}.chip.ok{background:#1c3027;color:var(--ok)}.mono{font-family:Consolas,monospace;font-size:12px}.flow{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:12px;margin:12px 0}.arrow{color:var(--accent);font-size:20px}.field{display:grid;gap:5px;margin:9px 0}.field label{color:var(--muted);font-size:12px}.field select,.field input,.field textarea{width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:6px;background:var(--panel-2);color:var(--text)}.field textarea{min-height:100px;resize:vertical}.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.primary{border-color:#327582;background:#17414a;color:#e4fbff}.notice{min-height:28px;margin:12px 0 0;color:var(--muted);font-size:12px;white-space:pre-line}.notice[role="alert"]{color:var(--danger)}.notice[data-kind="ok"]{color:var(--ok)}.notice[data-kind="warn"]{color:var(--warn)}
+    .version-list,.batch-list{display:grid;gap:7px}.version-item,.candidate-item{display:flex;align-items:center;gap:9px;padding:9px 10px;border-radius:6px;background:var(--panel-2)}.version-item span:first-child,.candidate-item span:first-child{flex:1;min-width:0}.version-item button{padding:4px 8px;border:1px solid var(--line);border-radius:5px;background:transparent}.version-item button[aria-pressed="true"]{border-color:var(--accent);color:var(--accent)}.split{height:1px;margin:15px 0;background:var(--line)}.preview{padding:12px;border-left:3px solid var(--accent);background:#0b1417}.preview strong{display:block}.preview p{margin:5px 0 0;color:var(--muted);font-size:12px}.pending{padding:12px;border:1px solid #655637;border-radius:7px;background:var(--warn-soft)}.pending[hidden]{display:none}.pending strong{display:block}.pending p{margin:5px 0;color:var(--muted);font-size:12px}.batch{padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--panel-2)}.batch h3{display:flex;align-items:center;gap:8px;margin:0 0 8px}.batch h3 small{margin-left:auto;color:var(--muted);font-weight:400}.candidate-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:7px}.candidate-item{font-size:12px}.candidate-item em{color:var(--muted);font-style:normal}.rule-list{margin:12px 0 0;padding-left:19px;color:var(--muted);font-size:12px}.rule-list li+li{margin-top:4px}.footer-note{margin:18px 0 0;padding:12px 14px;border-radius:7px;background:#10191d;color:var(--muted);font-size:12px}.footer-note strong{color:var(--warn)}
+    @media(max-width:760px){header{padding:10px 16px;flex-wrap:wrap}.top-note{width:100%;margin:0}main{padding:20px 14px 32px}.grid{grid-template-columns:1fr}.flow{grid-template-columns:1fr}.arrow{transform:rotate(90deg);justify-self:center}.panel{padding:15px!important}}
+  </style>
+</head>
+<body>
+  <header><span class="brand">AUDIOUI</span><span>工作台交互 · U16</span><span class="top-note">设计草案 · 本地模拟数据 · 不连接工程、Agent 或网络</span></header>
+  <main>
+    <div class="intro"><div class="eyebrow">RESULT VERSION / TOPIC BATCH</div><h1>版本查看与实际输入分开，重跑结果保留来源</h1><p>用下面的交互检查 U16 的候选状态与待确认边界。此文件只用于评审，不代表产品功能已经实现。</p></div>
+    <nav aria-label="U16 场景"><button type="button" data-tab="bindings" aria-pressed="true">逐边输入版本</button><button type="button" data-tab="outputs" aria-pressed="false">运行输出目标</button><button type="button" data-tab="topics" aria-pressed="false">Topic 新批次</button><button type="button" data-tab="prompt" aria-pressed="false">Prompt 内容校验</button></nav>
+
+    <section class="panel" data-panel="bindings" aria-labelledby="binding-title">
+      <h2 id="binding-title">Script 历史版本与下游边绑定</h2><p class="lede">切换正文预览不会改变连接使用的版本；每条 Script 输入边单独固定版本，新版本不会自动改写已有边。</p>
+      <div class="grid">
+        <div class="box"><h3>脚本节点：节奏解说</h3><div class="version-list" id="versions"></div><div class="actions"><button class="secondary" id="add-version" type="button">模拟生成 v3</button></div><div class="split"></div><div class="preview" aria-live="polite"><strong id="preview-title">预览 v1 · 开场先听鼓点</strong><p id="preview-copy">这里只切换卡片预览，不更改任何下游输入绑定。</p></div><p class="notice" id="version-note" role="status"></p></div>
+        <div class="box"><h3>下游连接（各自固定）</h3>
+          <div class="field"><label for="prompt-a-version">脚本 → Prompt A</label><select id="prompt-a-version" aria-label="Prompt A 使用的脚本版本"><option value="1">固定 v1</option><option value="2">固定 v2</option><option value="3" disabled>v3 尚未生成</option></select></div>
+          <div class="field"><label for="prompt-b-version">脚本 → Prompt B</label><select id="prompt-b-version" aria-label="Prompt B 使用的脚本版本"><option value="1">固定 v1</option><option value="2" selected>固定 v2</option><option value="3" disabled>v3 尚未生成</option></select></div>
+          <div class="field"><label for="prompt-c-version">脚本 → Prompt C（连接时 Script 为空）</label><select id="prompt-c-version" aria-label="Prompt C 使用的脚本版本"><option value="">未绑定版本</option><option value="1" disabled>v1</option><option value="2" disabled>v2</option><option value="3" disabled>v3</option></select></div>
+          <p class="hint">未绑定的输入保持未就绪；即使之后生成 v1，也要明确选择后才能运行。取消选择不会删除连线。</p>
+          <p class="notice" id="binding-note" role="status">Prompt A 使用 v1，Prompt B 使用 v2；预览版本为 v1。</p>
+        </div>
+      </div>
+      <ul class="rule-list"><li>“预览 v1”只改变 Script 卡片内容。</li><li>“改用 v3”只更新用户明确选择的那条连接。</li><li>尚无版本的连接不会在新版本生成后静默绑定。</li></ul>
+    </section>
+
+    <section class="panel" data-panel="outputs" aria-labelledby="output-title" hidden>
+      <h2 id="output-title">运行前冻结输出目标</h2><p class="lede">输出目标选择与输入版本选择分开。已存在版本时默认预览并确认追加；并行结果必须在运行开始前明确选择新节点。</p>
+      <div class="grid">
+        <div class="box"><h3>Agent：脚本生成</h3><div class="field"><label for="output-target">本次运行输出到</label><select id="output-target"><option value="append">脚本 A · 当前 v2（完成后确认追加）</option><option value="empty">空脚本 B · 写入首版</option><option value="parallel">新建并行 Script · 原节点与下游不变</option></select></div><div class="actions"><button class="action primary" id="simulate-output" type="button">模拟运行并返回脚本</button></div><p class="notice" id="output-note" role="status">目标会冻结在本次运行快照中；此按钮不调用 Agent。</p></div>
+        <div class="box"><h3>结果状态</h3>
+          <div class="pending" id="output-pending" hidden><strong>新脚本待确认 · 基准 v2</strong><p>可预览后确认追加 v3，或丢弃。旧版本、既有下游连接与运行来源不变。</p><div class="actions"><button class="action primary" id="confirm-output" type="button">确认追加 v3</button><button class="secondary" id="discard-output" type="button">丢弃结果</button></div></div>
+          <div class="node" id="output-result"><strong>脚本 A · v2</strong><small>原有输出及已绑定下游</small></div>
+          <p class="notice" id="output-result-note" role="status">尚未模拟新结果。</p>
+        </div>
+      </div>
+      <ul class="rule-list"><li>没有直接输出时沿用自动新建；只有一个输出时默认选中它。</li><li>存在多个输出时必须选择一个；也可明确选择新建并行结果。</li><li>新建输出的节点身份随运行冻结；运行失败或无效结果不留下空节点。</li></ul>
+    </section>
+
+    <section class="panel" data-panel="topics" aria-labelledby="topic-title" hidden>
+      <h2 id="topic-title">Topic 重跑与候选批次</h2><p class="lede">首批候选仍按现有规则自动生成；后续重跑只产生待预览结果，确认后追加独立批次，不覆盖或移动旧候选。</p>
+      <div class="grid">
+        <div class="box"><h3>选题：声音与节奏</h3><div class="node"><strong>参数已锁定</strong><small>想法、方向与候选数保持当前值；此草案允许重复运行，不开放修改已锁定参数。</small></div><div class="actions"><button class="action primary" id="rerun-topic" type="button">按当前参数重生成候选</button></div><div class="pending" id="topic-pending" hidden><strong>候选批次 2 · 待确认</strong><p>本次运行返回 2 个候选。确认后新增两个 Candidate；丢弃不会修改批次 1。</p><div class="candidate-list"><div class="candidate-item"><span>新候选 A</span><em>来源：批次 2</em></div><div class="candidate-item"><span>新候选 B</span><em>来源：批次 2</em></div></div><div class="actions"><button class="action primary" id="confirm-topic" type="button">确认并创建批次 2</button><button class="secondary" id="discard-topic" type="button">丢弃预览</button><button class="secondary" id="fail-topic" type="button">模拟运行失败</button></div></div><p class="notice" id="topic-note" role="status">当前仅有已应用批次 1；其 Candidate 与分支保持不变。</p></div>
+        <div class="box"><h3>已应用候选批次</h3><div id="batches" class="batch-list"><article class="batch"><h3>批次 1 <small>运行 r_topic_01 · 3 个候选</small></h3><div class="candidate-list"><div class="candidate-item"><span>节奏与情绪</span><em>Candidate 01</em></div><div class="candidate-item"><span>编曲的层次</span><em>Candidate 02</em></div><div class="candidate-item"><span>声音里的故事</span><em>Candidate 03</em></div></div></article></div></div>
+      </div>
+      <ul class="rule-list"><li>候选来源由 Topic、运行批次、artifact 与索引共同确定；同内容的新运行仍是新批次。</li><li>旧批次的 Candidate 和下游连接保持有效，新增批次不使旧分支 stale。</li><li>同一 Topic 有未决批次时暂不开放下一次重跑，避免两个预览竞争同一个批次基准。</li></ul>
+    </section>
+
+    <section class="panel" data-panel="prompt" aria-labelledby="prompt-panel-title" hidden>
+      <h2 id="prompt-panel-title">Prompt 内容才是运行任务，名称只用于画布</h2><p class="lede">节点名称可以留空；任务正文为空时 Agent 启动会明确提示填写内容，而不是返回通用图结构错误。</p>
+      <div class="grid">
+        <div class="box"><h3>Prompt 节点</h3>
+          <div class="field"><label for="prompt-name">节点名称（可选）</label><input id="prompt-name" type="text" placeholder="留空也可以" value=""></div>
+          <div class="field"><label for="prompt-content">提示词内容</label><textarea id="prompt-content" rows="5" placeholder="输入 Agent 要完成的任务"></textarea></div>
+          <div class="node"><strong id="prompt-display-name">提示词</strong><small>画布显示名称；不作为运行任务</small></div>
+        </div>
+        <div class="box"><h3>Agent 启动校验</h3><div class="node"><strong>Prompt → Agent</strong><small>确认时校验实际保存的提示词内容</small></div>
+          <div class="actions"><button class="action primary" id="simulate-prompt-run" type="button">模拟启动 Agent</button></div>
+          <p class="notice" id="prompt-note" role="status">按钮只模拟内容校验，不调用 Agent。</p>
+        </div>
+      </div>
+      <ul class="rule-list"><li>名称留空也能保存内容，画布继续显示默认节点名称。</li><li>任务正文为空时，Agent 启动被拒绝并显示「请先填写提示词内容，再启动 Agent。」</li><li>此原型只验证展示与提示，不连接工程、Agent 或网络。</li></ul>
+    </section>
+
+    <p class="footer-note"><strong>待评审的关键规则：</strong>此草案建议 Topic 参数首批应用后继续锁定，重跑使用同一组参数；未决 Topic 批次期间禁止再次重跑。输出目标在运行开始前选择并冻结；已存在版本的目标只能追加，想并行生成需预先选择新 Script。请以原型交互状态评审这些边界。这里没有真实工程数据、网络请求或 Agent 调用。</p>
+  </main>
+  <script>
+    (() => {
+      const tabs = [...document.querySelectorAll('[data-tab]')]
+      const panels = [...document.querySelectorAll('[data-panel]')]
+      tabs.forEach((tab) => tab.addEventListener('click', () => {
+        tabs.forEach((item) => item.setAttribute('aria-pressed', String(item === tab)))
+        panels.forEach((panel) => { panel.hidden = panel.dataset.panel !== tab.dataset.tab })
+      }))
+
+      let versions = [1, 2]
+      let previewVersion = 1
+      const bindings = new Map([['prompt-a-version', '1'], ['prompt-b-version', '2'], ['prompt-c-version', '']])
+      const versionsHost = document.getElementById('versions')
+      const versionNote = document.getElementById('version-note')
+      const bindingNote = document.getElementById('binding-note')
+      const versionTitles = {1: '开场先听鼓点', 2: '从节奏变化读情绪', 3: '用音色递进讲层次'}
+
+      function renderVersions() {
+        versionsHost.replaceChildren()
+        versions.forEach((version) => {
+          const row = document.createElement('div')
+          row.className = 'version-item'
+          const label = document.createElement('span')
+          label.textContent = `v${version} · ${versionTitles[version]}`
+          const preview = document.createElement('button')
+          preview.type = 'button'
+          preview.textContent = '预览'
+          preview.setAttribute('aria-pressed', String(previewVersion === version))
+          preview.addEventListener('click', () => {
+            previewVersion = version
+            document.getElementById('preview-title').textContent = `预览 v${version} · ${versionTitles[version]}`
+            document.getElementById('preview-copy').textContent = '这里只切换卡片预览，不更改任何下游输入绑定。'
+            versionNote.textContent = `当前预览 v${version}；连接仍按各自固定版本取值。`
+            renderVersions()
+          })
+          row.append(label, preview)
+          versionsHost.append(row)
+        })
+        document.querySelectorAll('#prompt-a-version,#prompt-b-version,#prompt-c-version').forEach((select) => {
+          const selected = bindings.get(select.id) ?? ''
+          const empty = select.id === 'prompt-c-version'
+          select.replaceChildren()
+          if (empty) {
+            const unbound = new Option('未绑定版本', '')
+            select.append(unbound)
+          }
+          versions.forEach((version) => select.append(new Option(`固定 v${version}`, String(version))))
+          select.value = selected
+        })
+      }
+      function renderBindings() {
+        bindingNote.textContent = [...bindings.entries()].map(([id, version]) => `${id.replace('-version','')} ${version ? `固定 v${version}` : '未绑定'}`).join('；') + `。预览 v${previewVersion} 不影响绑定。`
+      }
+      ;['prompt-a-version', 'prompt-b-version', 'prompt-c-version'].forEach((id) => {
+        document.getElementById(id).addEventListener('change', (event) => {
+          bindings.set(id, event.currentTarget.value)
+          renderBindings()
+          versionNote.textContent = `${id.replace('-version','')} 已明确设置为 ${event.currentTarget.value ? `v${event.currentTarget.value}` : '未绑定'}。`
+        })
+      })
+      document.getElementById('add-version').addEventListener('click', () => {
+        if (versions.includes(3)) return
+        versions.push(3)
+        renderVersions()
+        renderBindings()
+        versionNote.textContent = '新增 v3；既有连接未自动改绑。Prompt C 仍未绑定，需明确选择版本。'
+      })
+      renderVersions()
+      renderBindings()
+
+      const promptName = document.getElementById('prompt-name')
+      const promptContent = document.getElementById('prompt-content')
+      const promptDisplayName = document.getElementById('prompt-display-name')
+      const promptNote = document.getElementById('prompt-note')
+      promptName.addEventListener('input', () => {
+        promptDisplayName.textContent = promptName.value.trim() || '提示词'
+      })
+      document.getElementById('simulate-prompt-run').addEventListener('click', () => {
+        if (!promptContent.value.trim()) {
+          promptNote.setAttribute('role', 'alert')
+          promptNote.dataset.kind = 'warn'
+          promptNote.textContent = '请先填写提示词内容，再启动 Agent。'
+          return
+        }
+        promptNote.setAttribute('role', 'status')
+        promptNote.dataset.kind = 'ok'
+        promptNote.textContent = '内容校验通过；此原型没有调用 Agent。'
+      })
+
+      const outputTarget = document.getElementById('output-target')
+      const outputPending = document.getElementById('output-pending')
+      const outputNote = document.getElementById('output-note')
+      const outputResult = document.getElementById('output-result')
+      const outputResultNote = document.getElementById('output-result-note')
+      let pendingOutput = false
+      document.getElementById('simulate-output').addEventListener('click', () => {
+        const target = outputTarget.value
+        outputPending = document.getElementById('output-pending')
+        if (target === 'append') {
+          pendingOutput = true
+          outputPending.hidden = false
+          outputNote.textContent = '已收到合法结果；目标仍是本次运行冻结的脚本 A。'
+          outputResultNote.textContent = '待确认结果基于脚本 A v2；预览后可追加或丢弃。'
+          outputResultNote.dataset.kind = 'warn'
+        } else if (target === 'empty') {
+          outputPending.hidden = true
+          outputResult.querySelector('strong').textContent = '脚本 B · v1'
+          outputResult.querySelector('small').textContent = '原子写入首版 · 来源为本次运行'
+          outputNote.textContent = '空输出自动接收首版；不额外创建并行节点。'
+          outputResultNote.textContent = '首版已写入，旧脚本 A 及其连接不变。'
+          outputResultNote.dataset.kind = 'ok'
+        } else {
+          outputPending.hidden = true
+          const node = document.createElement('div')
+          node.className = 'node'
+          node.innerHTML = '<strong>并行脚本 C · v1</strong><small>本次运行的冻结目标 · 原有 Script 与下游不变</small>'
+          outputResult.replaceChildren(node)
+          outputNote.textContent = '已按冻结的新节点目标创建并行结果；没有留下运行前空节点。'
+          outputResultNote.textContent = '新节点与首版在同一结果事务中提交。'
+          outputResultNote.dataset.kind = 'ok'
+        }
+      })
+      document.getElementById('confirm-output').addEventListener('click', () => {
+        if (!pendingOutput) return
+        pendingOutput = false
+        outputPending.hidden = true
+        outputResult.querySelector('strong').textContent = '脚本 A · v3'
+        outputResult.querySelector('small').textContent = 'v1、v2 保留；下游仍按原固定版本'
+        outputResultNote.textContent = '已追加 v3；既有下游绑定没有自动变化。'
+        outputResultNote.dataset.kind = 'ok'
+      })
+      document.getElementById('discard-output').addEventListener('click', () => {
+        pendingOutput = false
+        outputPending.hidden = true
+        outputResultNote.textContent = '已丢弃；脚本 A 仍保持 v2，artifact 与下游不变。'
+        outputResultNote.dataset.kind = 'warn'
+      })
+
+      const topicPending = document.getElementById('topic-pending')
+      const topicNote = document.getElementById('topic-note')
+      const batches = document.getElementById('batches')
+      let topicPendingOpen = false
+      let batchCount = 1
+      document.getElementById('rerun-topic').addEventListener('click', () => {
+        if (topicPendingOpen) return
+        topicPendingOpen = true
+        topicPending.hidden = false
+        topicNote.textContent = '批次 2 已就绪待预览；已应用批次 1 与其分支未改变。'
+        topicNote.dataset.kind = 'warn'
+      })
+      document.getElementById('confirm-topic').addEventListener('click', () => {
+        if (!topicPendingOpen) return
+        topicPendingOpen = false
+        batchCount += 1
+        topicPending.hidden = true
+        const batch = document.createElement('article')
+        batch.className = 'batch'
+        batch.innerHTML = `<h3>批次 ${batchCount} <small>运行 r_topic_0${batchCount} · 2 个候选</small></h3><div class="candidate-list"><div class="candidate-item"><span>新候选 A</span><em>Candidate 01</em></div><div class="candidate-item"><span>新候选 B</span><em>Candidate 02</em></div></div>`
+        batches.append(batch)
+        topicNote.textContent = `批次 ${batchCount} 已新增；所有旧候选与分支仍保留。`
+        topicNote.dataset.kind = 'ok'
+      })
+      document.getElementById('discard-topic').addEventListener('click', () => {
+        topicPendingOpen = false
+        topicPending.hidden = true
+        topicNote.textContent = '已丢弃预览；批次 1 与其下游连接未变化。'
+        topicNote.dataset.kind = 'warn'
+      })
+      document.getElementById('fail-topic').addEventListener('click', () => {
+        topicPendingOpen = false
+        topicPending.hidden = true
+        topicNote.textContent = '模拟运行失败；没有创建 Candidate，也没有修改批次 1。'
+        topicNote.dataset.kind = 'warn'
+      })
+    })()
+  </script>
+</body>
+</html>

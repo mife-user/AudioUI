@@ -95,6 +95,10 @@ export function PendingArtifactCard({
   const binding = detail?.pending.id === summary.id ? detail.pending.outputBinding : undefined
   const resultNodeId = (detail?.pending.id === summary.id ? detail.pending.resultNodeId : undefined)
     || binding?.nodeId || ''
+  const topicBatchBaseline = detail?.pending.id === summary.id && detail.pending.kind === OutputKind.OutputKindTopics
+    ? detail.pending.executionSnapshot?.topicBatch?.baselineRound
+    : undefined
+  const topicBatchNumber = topicBatchBaseline && topicBatchBaseline > 0 ? topicBatchBaseline + 1 : undefined
   const baselineVersion = binding?.baselineVersion ?? 0
   const baseline = outputNode?.scriptVersions?.find((version) => version.n === baselineVersion)
   const isBoundScriptResult = pending.kind === OutputKind.OutputKindScript && Boolean(binding?.bound)
@@ -110,7 +114,7 @@ export function PendingArtifactCard({
       <header className="console-pending-card-head">
         <div>
           <span className="workspace-kicker">
-            {pending.kind === OutputKind.OutputKindTopics ? '选题候选' : isBoundScriptResult ? '脚本版本追加' : pending.kind}
+            {pending.kind === OutputKind.OutputKindTopics ? topicBatchNumber ? '选题批次追加' : '选题候选' : isBoundScriptResult ? '脚本版本追加' : pending.kind}
           </span>
           <strong>{displayNode}</strong>
         </div>
@@ -135,6 +139,13 @@ export function PendingArtifactCard({
         </dl>
       ) : null}
 
+      {topicBatchNumber ? (
+        <dl className="console-pending-output-binding" aria-label="选题批次来源">
+          <div><dt>待确认批次</dt><dd>第 {topicBatchNumber} 批 · {topics.length || '…'} 个候选</dd></div>
+          <div><dt>基准批次</dt><dd>第 {topicBatchBaseline} 批；已应用候选保持不变</dd></div>
+          <div><dt>本次运行</dt><dd>{pending.runId}</dd></div>
+        </dl>
+      ) : null}
       {loading ? <p className="console-pending-message" role="status">正在读取待应用正文…</p> : null}
       {loadError ? (
         <div className="console-pending-error" role="alert">
@@ -148,7 +159,7 @@ export function PendingArtifactCard({
         <>
           {pending.kind === OutputKind.OutputKindTopics && pending.status === PendingStatus.PendingPending ? (
             topics.length ? (
-              <ul className="console-pending-topics">
+              <ul className="console-pending-topics" aria-label={topicBatchNumber ? `第 ${topicBatchNumber} 批候选预览` : '候选预览'}>
                 {topics.map((topic, index) => (
                   <li key={`${index}-${topic.title}`}>
                     <strong>{index + 1}. {topic.title}</strong>
@@ -202,12 +213,12 @@ export function PendingArtifactCard({
             <div className="console-pending-actions">
               {canApplyTopics || canConfirmScript ? (
                 <button type="button" className="agent-mini-btn allow" disabled={actionBusy || resolved} onClick={onApply}>
-                  {actionBusy ? '提交中…' : canConfirmScript ? '确认追加' : '应用'}
+                  {actionBusy ? '提交中…' : canConfirmScript ? '确认追加' : topicBatchNumber ? `确认并追加第 ${topicBatchNumber} 批` : '应用'}
                 </button>
               ) : null}
               {canDiscard ? (
                 <button type="button" className="agent-mini-btn deny" disabled={actionBusy || resolved} onClick={onDiscard}>
-                  {actionBusy ? '提交中…' : pending.kind === OutputKind.OutputKindScript ? '丢弃结果' : '丢弃'}
+                  {actionBusy ? '提交中…' : topicBatchNumber ? '取消本次重跑' : pending.kind === OutputKind.OutputKindScript ? '丢弃结果' : '丢弃'}
                 </button>
               ) : null}
             </div>

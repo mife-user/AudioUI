@@ -138,7 +138,7 @@ func TestSnapshotRunViewSeparatesSameNamedFilesAcrossWorkspaceRoots(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if snapshot.Version != 3 || len(snapshot.InputRoots) != 2 {
+	if snapshot.Version != 4 || len(snapshot.InputRoots) != 2 {
 		t.Fatalf("multi-root snapshot = %+v", snapshot)
 	}
 	for _, source := range []struct{ rootID, nodeID, text string }{

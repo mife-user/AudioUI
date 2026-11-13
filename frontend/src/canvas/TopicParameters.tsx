@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { Node, NodeParams, RunStartError, RunStartResult } from '../../bindings/audio-ui/internal/domain/entity'
+import type { Node, NodeParams, RunStartError, RunStartOptions, RunStartResult } from '../../bindings/audio-ui/internal/domain/entity'
 import { formatRunStartError } from './runStartError'
 
 const PARAM_SAVE_DEBOUNCE_MS = 320
@@ -24,8 +24,10 @@ type Props = {
   disabled: boolean
   runBlocked?: boolean
   globalRunBusy: boolean
+  allowLockedRerun?: boolean
+  rerunPending?: boolean
   onSave: (nodeId: string, title: string, params: NodeParams, projectId: string) => Promise<boolean | void>
-  onRun: (nodeId: string, projectId: string) => Promise<RunStartResult>
+  onRun: (nodeId: string, projectId: string, options?: RunStartOptions) => Promise<RunStartResult>
   onRegisterFlush?: (nodeId: string, projectId: string, flush: () => Promise<boolean>) => () => void
 }
 
@@ -76,7 +78,7 @@ function localStartFailure(error: unknown): RunStartError {
   return { code: 'RUN_START_FAILED', message: errorMessage(error) }
 }
 
-export function TopicParameters({ node, projectId, disabled, runBlocked = false, globalRunBusy, onSave, onRun, onRegisterFlush }: Props) {
+export function TopicParameters({ node, projectId, disabled, runBlocked = false, globalRunBusy, allowLockedRerun = false, rerunPending = false, onSave, onRun, onRegisterFlush }: Props) {
   const initialDraft = draftFromNode(node)
   const [draft, setDraft] = useState<TopicDraft>(initialDraft)
   const [saveState, setSaveState] = useState<SaveState>(() => needsInitialSave(node) ? 'dirty' : 'saved')
@@ -212,7 +214,8 @@ export function TopicParameters({ node, projectId, disabled, runBlocked = false,
   }
 
   async function startRun() {
-    if (startInFlight.current || disabled || runBlocked || globalRunBusy || errors || saveState === 'error') return
+    const lockedRerun = node.locked && allowLockedRerun
+    if (startInFlight.current || (disabled && !lockedRerun) || runBlocked || globalRunBusy || rerunPending || errors || saveState === 'error') return
     startInFlight.current = true
     setStarting(true)
     setRunFailure(null)
@@ -233,7 +236,7 @@ export function TopicParameters({ node, projectId, disabled, runBlocked = false,
         setRunFailure({ code: 'BUSY', message: '已有运行正在进行，当前无法启动另一个运行。' })
         return
       }
-      const result = await runCallback.current(ownerNodeId, ownerProjectId)
+      const result = await runCallback.current(ownerNodeId, ownerProjectId, lockedRerun ? { topicRerun: true } : undefined)
       if (currentProjectId.current !== ownerProjectId || currentNodeId.current !== ownerNodeId) return
       if (result.error) setRunFailure(result.error)
     } catch (failure) {
@@ -295,7 +298,8 @@ export function TopicParameters({ node, projectId, disabled, runBlocked = false,
 
   useEffect(() => () => clearSaveTimer(), [])
 
-  const runDisabled = disabled || runBlocked || globalRunBusy || starting || errors || saveState === 'error' || syncPending
+  const lockedRerun = node.locked && allowLockedRerun
+  const runDisabled = (disabled && !lockedRerun) || runBlocked || globalRunBusy || rerunPending || starting || errors || saveState === 'error' || syncPending
   const saveStatusText = syncPending
     ? '已提交，等待快照同步…'
     : saveState === 'saving'
@@ -386,7 +390,7 @@ export function TopicParameters({ node, projectId, disabled, runBlocked = false,
         aria-describedby={runFailure ? runErrorId : undefined}
         onClick={() => void startRun()}
       >
-        {starting ? '正在启动…' : globalRunBusy ? '已有运行' : node.locked ? '已锁定' : '生成候选'}
+        {starting ? '正在启动…' : globalRunBusy ? '已有运行' : rerunPending ? '批次待处理' : lockedRerun ? '按锁定参数重新生成' : '生成候选'}
       </button>
     </div>
   )
