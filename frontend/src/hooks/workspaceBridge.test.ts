@@ -62,6 +62,7 @@ function makeAPI(initialResult: WorkspaceSnapshotResult = workspaceResult(null, 
   const getWorkspaceSnapshot = vi.fn().mockResolvedValue(initialResult)
   const getRunSnapshot = vi.fn().mockImplementation(async (runId: string) => runSnapshot(initialResult.snapshot.project?.id ?? '', runId, 0))
   const startRun = vi.fn().mockResolvedValue({})
+  const startRunWithInputs = vi.fn().mockResolvedValue({})
   const newProject = vi.fn().mockResolvedValue(undefined)
   const openProject = vi.fn().mockResolvedValue(undefined)
   const interruptRun = vi.fn().mockResolvedValue(undefined)
@@ -79,6 +80,7 @@ function makeAPI(initialResult: WorkspaceSnapshotResult = workspaceResult(null, 
     getWorkspaceSnapshot,
     getRunSnapshot,
     startRun,
+    startRunWithInputs,
     newProject,
     openProject,
     interruptRun,
@@ -89,7 +91,7 @@ function makeAPI(initialResult: WorkspaceSnapshotResult = workspaceResult(null, 
   } as unknown as WorkspaceBridgeAPI
   return {
     api, workspaceListeners, runListeners,
-    getWorkspaceSnapshot, getRunSnapshot, startRun, newProject, openProject, interruptRun, respondRunPermission, respondRunQuestion,
+    getWorkspaceSnapshot, getRunSnapshot, startRun, startRunWithInputs, newProject, openProject, interruptRun, respondRunPermission, respondRunQuestion,
     subscribeWorkspaceEvents, subscribeRunEvents,
   }
 }
@@ -236,6 +238,20 @@ describe('WorkspaceBridge', () => {
     const stale = await app.startRun('n_topic', 'p_old')
     expect(stale.error?.code).toBe('PROJECT_CHANGED')
     expect(setup.startRun).toHaveBeenCalledOnce()
+  })
+
+  it('routes an explicit input order through the selection-aware start API', async () => {
+    const setup = makeAPI(workspaceResult('p_one', 1))
+    const app = bridge(setup.api)
+    app.start()
+    await vi.waitFor(() => expect(useWorkspaceStore.getState().status).toBe('ready'))
+
+    const inputEdgeIds = ['e_script', 'e_prompt']
+    const result = await app.startRun('n_agent', 'p_one', inputEdgeIds)
+
+    expect(result.error).toBeUndefined()
+    expect(setup.startRunWithInputs).toHaveBeenCalledWith('n_agent', 'p_one', inputEdgeIds)
+    expect(setup.startRun).not.toHaveBeenCalled()
   })
 
   it('preserves a run event and snapshot that arrive before the start response', async () => {

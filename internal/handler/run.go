@@ -22,6 +22,14 @@ func NewRunService(manager *runservice.Manager) *RunService {
 }
 
 func (h *RunService) Start(nodeID, projectID string) entity.RunStartResult {
+	return h.start(nodeID, projectID, nil)
+}
+
+func (h *RunService) StartWithInputs(nodeID, projectID string, inputEdgeIDs []string) entity.RunStartResult {
+	return h.start(nodeID, projectID, inputEdgeIDs)
+}
+
+func (h *RunService) start(nodeID, projectID string, inputEdgeIDs []string) entity.RunStartResult {
 	nodeID = strings.TrimSpace(nodeID)
 	projectID = strings.TrimSpace(projectID)
 	if nodeID == "" {
@@ -35,7 +43,7 @@ func (h *RunService) Start(nodeID, projectID string) entity.RunStartResult {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	record, err := h.manager.Start(ctx, nodeID, projectID)
+	record, err := h.manager.StartWithInputs(ctx, nodeID, inputEdgeIDs, projectID)
 	result := entity.RunStartResult{}
 	if record.ID != "" {
 		result.Run = &record

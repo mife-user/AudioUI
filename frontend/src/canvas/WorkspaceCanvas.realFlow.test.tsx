@@ -596,6 +596,7 @@ describe('WorkspaceCanvas with real React Flow', () => {
 
     fireEvent.change(task, { target: { value: '保存失败时禁止发送。' } })
     fireEvent.click(runButton)
+    fireEvent.click(screen.getByRole('button', { name: '确认并运行' }))
     await waitFor(() => expect(api.updateNodeParams).toHaveBeenCalledOnce())
     await waitFor(() => expect(container.querySelector('.topic-save-error')).toHaveTextContent('disk full'))
 
@@ -623,6 +624,7 @@ describe('WorkspaceCanvas with real React Flow', () => {
 
     fireEvent.change(task, { target: { value: '快照同步失败时禁止发送。' } })
     fireEvent.click(runButton)
+    fireEvent.click(screen.getByRole('button', { name: '确认并运行' }))
 
     await waitFor(() => expect(api.updateNodeParams).toHaveBeenCalledOnce())
     await waitFor(() => expect(onGraphMutation).toHaveBeenCalledOnce())
@@ -658,6 +660,7 @@ describe('WorkspaceCanvas with real React Flow', () => {
     fireEvent.change(downstreamTitle, { target: { value: '' } })
     fireEvent.change(upstreamTask, { target: { value: '最新的上游任务。' } })
     fireEvent.click(runButton)
+    fireEvent.click(screen.getByRole('button', { name: '确认并运行' }))
 
     await waitFor(() => expect(onStartRun).toHaveBeenCalledWith('n_agent', 'p_real_flow'))
     expect(api.updateNodeParams).toHaveBeenCalledOnce()

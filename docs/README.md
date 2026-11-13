@@ -29,7 +29,7 @@
 
 - M2 本地脚本流程：[交互演示](design/m2-11-13-local-flow-demo.html)（模拟数据，不连接 Agent）。
 - 画布整体优化：[交互原型](design/canvas-workbench-redesign-demo.html)（待评审方案，不代表产品已实现）。
-- U10～U16 画布与重跑结果讨论：[单文件交互原型](design/u10-u16-canvas-optimization-demo.html)（模拟数据；多上游、无 Topic 运行原则及版本目标已确认，运行细节待评审）。
+- U10～U16 画布与重跑结果讨论：[单文件交互原型](design/u10-u16-canvas-optimization-demo.html)（模拟数据；U15 已通过用户界面验收；U16 版本与 Topic 批次方向尚未实现）。
 - U14 连线与运行过渡：[单文件交互演示](design/u14-dag-transition-demo.html)（已于 2026-11-12 通过用户验收；不连接工程或 Agent）。
 - U11 Agent 收起小窗拖动：[单文件交互演示](design/u11-agent-rail-demo.html)（模拟数据，不连接 Agent、不访问工程或网络；不代表产品实现或验收证据）。
 - 既有阶段自检与验收记录按编号存放在 [`dev/evidence/`](dev/evidence/m2.md)；M2-13 汇总见 [M2 集成证据](dev/evidence/m2.md)。

@@ -56,6 +56,10 @@ export async function startRun(nodeId: string, projectId: string): Promise<RunSt
   return await RunService.Start(nodeId, projectId)
 }
 
+export async function startRunWithInputs(nodeId: string, projectId: string, inputEdgeIds: string[]): Promise<RunStartResult> {
+  return await RunService.StartWithInputs(nodeId, projectId, inputEdgeIds)
+}
+
 export async function getRunSnapshot(runId: string): Promise<RunSnapshot> {
   return await RunService.GetRunSnapshot(runId)
 }

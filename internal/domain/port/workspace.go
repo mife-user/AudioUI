@@ -3,6 +3,8 @@ package port
 import (
 	"context"
 	"time"
+
+	"audio-ui/internal/domain/entity"
 )
 
 // WorkspaceMove represents a completed subtree step move that can be undone
@@ -75,13 +77,12 @@ type WorkspaceReader interface {
 	Stat(ctx context.Context, path string) (WorkspaceStat, error)
 }
 
-// WorkspaceScope identifies the project and path behind a run-scoped overlay.
-// ChainPath is a copy ordered from the topic root to the target node.
 type WorkspaceScope struct {
-	ProjectID string
-	TreeID    string
-	NodeID    string
-	ChainPath []string
+	ProjectID    string
+	TreeID       string
+	NodeID       string
+	ChainPath    []string
+	InputNodeIDs []string
 }
 
 // RunWorkspaceReader lets consumers verify that a manifest belongs to the
@@ -91,15 +92,21 @@ type RunWorkspaceReader interface {
 	Scope() WorkspaceScope
 }
 
+type WorkspaceSource struct {
+	LogicalPath  string
+	PhysicalPath string
+}
+
 // RunWorkspace combines the path-scoped MCP overlay with the physical cwd and
 // the stricter resolver used by native Agent tools.
 type RunWorkspace interface {
 	RunWorkspaceReader
 	CWD() string
 	RuntimeReadPath() string
+	InputSources() []WorkspaceSource
 	Resolver() ScopedPathResolver
 }
 
 type RunWorkspaceProvider interface {
-	OpenRun(ctx context.Context, projectID, treeID, nodeID string, chainPath []string) (RunWorkspace, error)
+	OpenRun(ctx context.Context, projectID string, snapshot entity.RunExecutionSnapshot) (RunWorkspace, error)
 }

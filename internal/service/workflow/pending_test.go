@@ -36,6 +36,13 @@ func (h *fixedContextHasher) InputHashes(ctx context.Context, _ entity.Project, 
 	return h.hashes, h.err
 }
 
+func (h *fixedContextHasher) InputHashesForSnapshot(ctx context.Context, _ entity.Project, _ entity.RunExecutionSnapshot) (valueobject.ContextHashes, error) {
+	if err := ctx.Err(); err != nil {
+		return valueobject.ContextHashes{}, err
+	}
+	return h.hashes, h.err
+}
+
 type pendingHarness struct {
 	service   *Service
 	session   *fakeSession
@@ -158,6 +165,51 @@ func TestWorkspaceViewContainsDerivedChainsPendingAndProjectRunLocks(t *testing.
 	}
 	if got := (*h.changes)[len(*h.changes)-1]; got.projectID != h.session.project.ID || got.reason != ChangeReasonRunLock {
 		t.Fatalf("run lock event = %+v", got)
+	}
+}
+
+func TestBeginRunWithInputsLocksOnlySelectedRootlessSubgraph(t *testing.T) {
+	project := rootlessBoundScriptProject()
+	project.Nodes = append(project.Nodes, entity.Node{
+		ID: "n_other_task", Type: valueobject.NodeTypePrompt, Title: "未选任务",
+		Params: entity.NodeParams{Instruction: "不参与本次运行"}, Rounds: []entity.Round{},
+	})
+	project.Edges = append(project.Edges, entity.Edge{
+		ID: "e_other_agent", SourceNodeID: "n_other_task", TargetNodeID: "n_agent", Kind: entity.EdgeKindConnection,
+	})
+	h := newPendingHarness(t, project)
+	_, snapshot, err := h.service.BeginRunWithInputs(context.Background(), "r_rootless_lock", "n_agent", []string{"e_prompt_agent"}, project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.Version != 3 || snapshot.TreeID != "" || len(snapshot.ChainPath) != 0 {
+		t.Fatalf("rootless run snapshot = %+v", snapshot)
+	}
+	locked := make(map[string]bool)
+	for _, id := range h.service.LockedNodeIDs() {
+		locked[id] = true
+	}
+	for _, id := range []string{"n_source", "n_prompt", "n_agent", "n_output"} {
+		if !locked[id] {
+			t.Errorf("selected node %s is not locked: %v", id, locked)
+		}
+	}
+	if locked["n_other_task"] {
+		t.Fatal("deselected Prompt was locked")
+	}
+	view, err := h.service.WorkspaceView(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(view.RunLocks) != 1 || view.RunLocks[0].TreeID != "" || len(view.RunLocks[0].ChainPath) != 0 ||
+		len(view.RunLocks[0].InputNodeIDs) != len(snapshot.InputNodes) {
+		t.Fatalf("workspace lock identity = %+v", view.RunLocks)
+	}
+	if err := h.service.ReleaseRunLock(context.Background(), "r_rootless_lock"); err != nil {
+		t.Fatal(err)
+	}
+	if len(h.service.LockedNodeIDs()) != 0 {
+		t.Fatalf("released lock remains: %v", h.service.LockedNodeIDs())
 	}
 }
 

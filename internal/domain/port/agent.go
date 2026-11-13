@@ -24,6 +24,7 @@ type RunScope struct {
 	NodeID            string
 	ChainID           string
 	ChainPath         []string
+	InputNodeIDs      []string
 	ContextHash       string
 	AncestorHash      string
 	ParamsHash        string
@@ -33,6 +34,7 @@ type RunScope struct {
 func (s RunScope) Clone() RunScope {
 	clone := s
 	clone.ChainPath = append([]string(nil), s.ChainPath...)
+	clone.InputNodeIDs = append([]string(nil), s.InputNodeIDs...)
 	clone.ExecutionSnapshot = s.ExecutionSnapshot.Clone()
 	return clone
 }
@@ -65,6 +67,7 @@ type RunNode struct {
 
 type RunGraph struct {
 	Nodes         []RunGraphNode           `json:"nodes"`
+	Edges         []entity.Edge            `json:"edges"`
 	OutputBinding *entity.RunOutputBinding `json:"outputBinding,omitempty"`
 }
 

@@ -17,6 +17,7 @@ type runLock struct {
 	TreeID          string
 	NodeID          string
 	Path            []string
+	InputNodes      []string
 	Members         map[string]struct{}
 }
 
@@ -77,6 +78,10 @@ func (s *Service) AcquireRunLock(ctx context.Context, runID, treeID, nodeID stri
 // while holding the same workflow mutex used by graph commands. The caller
 // builds context from the returned immutable snapshot.
 func (s *Service) BeginRun(ctx context.Context, runID, nodeID string, expectedProjectID ...string) (entity.Project, entity.RunExecutionSnapshot, error) {
+	return s.BeginRunWithInputs(ctx, runID, nodeID, nil, expectedProjectID...)
+}
+
+func (s *Service) BeginRunWithInputs(ctx context.Context, runID, nodeID string, inputEdgeIDs []string, expectedProjectID ...string) (entity.Project, entity.RunExecutionSnapshot, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := ctx.Err(); err != nil {
@@ -99,16 +104,16 @@ func (s *Service) BeginRun(ctx context.Context, runID, nodeID string, expectedPr
 	if err := validateRunEntry(node); err != nil {
 		return entity.Project{}, entity.RunExecutionSnapshot{}, err
 	}
-	snapshot, err := graph.SnapshotForRun(nodeID)
+	snapshot, err := graph.SnapshotForRunWithInputs(nodeID, inputEdgeIDs)
 	if err != nil {
 		return entity.Project{}, entity.RunExecutionSnapshot{}, err
 	}
-	root := snapshot.TreeID
-	chainPath := snapshot.ChainPath
-	if err := validateRunPath(graph, root, nodeID, chainPath); err != nil {
-		return entity.Project{}, entity.RunExecutionSnapshot{}, err
+	if snapshot.Version != 3 {
+		if err := validateRunPath(graph, snapshot.TreeID, nodeID, snapshot.ChainPath); err != nil {
+			return entity.Project{}, entity.RunExecutionSnapshot{}, err
+		}
 	}
-	members := append([]string(nil), chainPath...)
+	members := snapshot.ScopeNodeIDs()
 	if snapshot.OutputBinding.Bound {
 		members = append(members, snapshot.OutputBinding.NodeID)
 	}
@@ -117,7 +122,7 @@ func (s *Service) BeginRun(ctx context.Context, runID, nodeID string, expectedPr
 			return entity.Project{}, entity.RunExecutionSnapshot{}, fmt.Errorf("%w: %s", ErrRunningChainLocked, id)
 		}
 	}
-	s.recordRunLock(runID, project.ID, project.Revision, root, nodeID, chainPath, snapshot.OutputBinding.NodeID)
+	s.recordRunLockForSnapshot(runID, project.ID, project.Revision, snapshot)
 	s.changedWithReason(project.ID, project.Revision, ChangeReasonRunLock)
 	return project.Clone(), snapshot.Clone(), nil
 }
@@ -148,20 +153,42 @@ func validateRunPath(graph *entity.Graph, treeID, nodeID string, chainPath []str
 }
 
 func (s *Service) recordRunLock(runID, projectID string, projectRevision int64, treeID, nodeID string, chainPath []string, outputNodeID string) {
-	members := make(map[string]struct{}, len(chainPath)+1)
-	for _, id := range chainPath {
+	inputNodes := append([]string(nil), chainPath...)
+	members := make(map[string]struct{}, len(inputNodes)+1)
+	for _, id := range inputNodes {
 		members[id] = struct{}{}
 	}
 	if outputNodeID != "" {
 		members[outputNodeID] = struct{}{}
 	}
+	s.recordRunLockState(runLock{
+		RunID: runID, ProjectID: projectID, ProjectRevision: projectRevision,
+		TreeID: treeID, NodeID: nodeID, Path: append([]string(nil), chainPath...),
+		InputNodes: inputNodes, Members: members,
+	})
+}
+
+func (s *Service) recordRunLockForSnapshot(runID, projectID string, projectRevision int64, snapshot entity.RunExecutionSnapshot) {
+	inputNodes := snapshot.ScopeNodeIDs()
+	members := make(map[string]struct{}, len(inputNodes)+1)
+	for _, id := range inputNodes {
+		members[id] = struct{}{}
+	}
+	if snapshot.OutputBinding.Bound {
+		members[snapshot.OutputBinding.NodeID] = struct{}{}
+	}
+	s.recordRunLockState(runLock{
+		RunID: runID, ProjectID: projectID, ProjectRevision: projectRevision,
+		TreeID: snapshot.TreeID, NodeID: snapshot.NodeID,
+		Path: append([]string(nil), snapshot.ChainPath...), InputNodes: inputNodes, Members: members,
+	})
+}
+
+func (s *Service) recordRunLockState(lock runLock) {
 	if s.locks == nil {
 		s.locks = make(map[string]runLock)
 	}
-	s.locks[runID] = runLock{
-		RunID: runID, ProjectID: projectID, ProjectRevision: projectRevision,
-		TreeID: treeID, NodeID: nodeID, Path: append([]string(nil), chainPath...), Members: members,
-	}
+	s.locks[lock.RunID] = lock
 }
 
 func (s *Service) ReleaseRunLock(ctx context.Context, runID string) error {

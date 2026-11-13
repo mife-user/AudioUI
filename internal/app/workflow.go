@@ -45,3 +45,7 @@ type workflowContextHasher struct {
 func (h workflowContextHasher) InputHashes(ctx context.Context, project entity.Project, nodeID string) (valueobject.ContextHashes, error) {
 	return h.builder.InputHashes(ctx, contextservice.Input{Project: project, NodeID: nodeID})
 }
+
+func (h workflowContextHasher) InputHashesForSnapshot(ctx context.Context, project entity.Project, snapshot entity.RunExecutionSnapshot) (valueobject.ContextHashes, error) {
+	return h.builder.InputHashesForSnapshot(ctx, project, snapshot)
+}

@@ -350,7 +350,7 @@ func TestProjectStoreSaveReplacesAtomically(t *testing.T) {
 	}
 	for _, entry := range entries {
 		if entry.Name() != "project.json" && entry.Name() != "pending.json" && entry.Name() != "runs.json" &&
-			entry.Name() != "pending" && entry.Name() != "artifacts" && entry.Name() != "runs" && entry.Name() != "trees" {
+			entry.Name() != "pending" && entry.Name() != "artifacts" && entry.Name() != "runs" && entry.Name() != "trees" && entry.Name() != "workspace" {
 			t.Fatalf("unexpected entry %q", entry.Name())
 		}
 	}

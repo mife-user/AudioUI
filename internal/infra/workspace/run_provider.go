@@ -3,6 +3,7 @@ package workspace
 import (
 	"context"
 
+	"audio-ui/internal/domain/entity"
 	"audio-ui/internal/domain/port"
 	"audio-ui/internal/domain/valueobject"
 )
@@ -15,9 +16,12 @@ func NewRunProvider(layout valueobject.Layout) *RunProvider {
 	return &RunProvider{layout: layout}
 }
 
-func (p *RunProvider) OpenRun(ctx context.Context, projectID, treeID, nodeID string, chainPath []string) (port.RunWorkspace, error) {
+func (p *RunProvider) OpenRun(ctx context.Context, projectID string, snapshot entity.RunExecutionSnapshot) (port.RunWorkspace, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	return NewRunView(p.layout, projectID, treeID, nodeID, chainPath)
+	if snapshot.Version == 3 {
+		return NewSnapshotRunView(p.layout, projectID, snapshot)
+	}
+	return NewRunView(p.layout, projectID, snapshot.TreeID, snapshot.NodeID, snapshot.ChainPath)
 }

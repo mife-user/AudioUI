@@ -128,6 +128,47 @@ func scopedMCPOptions(root string) Options {
 	}
 }
 
+func TestRunMCPOptionsExposeRootlessDAGScope(t *testing.T) {
+	project := entity.Project{
+		Version: valueobject.ProjectFileVersion, ID: "p_rootless", Name: "无 Topic",
+		Nodes: []entity.Node{
+			{ID: "n_prompt", Type: valueobject.NodeTypePrompt, Title: "任务", Params: entity.NodeParams{Instruction: "写一段脚本"}},
+			{ID: "n_agent", Type: valueobject.NodeTypeAgent, Title: "Agent"},
+		},
+		Edges: []entity.Edge{{ID: "e_prompt_agent", SourceNodeID: "n_prompt", TargetNodeID: "n_agent", Kind: entity.EdgeKindConnection}},
+	}
+	graph, err := entity.NewGraph(&project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := graph.SnapshotForRun("n_agent")
+	if err != nil || snapshot.Version != 3 {
+		t.Fatalf("rootless DAG snapshot = %+v err=%v", snapshot, err)
+	}
+	options := scopedMCPOptions(t.TempDir())
+	scope := port.RunScope{
+		RunID: "r_rootless", ProjectID: project.ID, NodeID: snapshot.NodeID, ChainID: "c_" + snapshot.NodeID,
+		InputNodeIDs: snapshot.ScopeNodeIDs(), ContextHash: "context", AncestorHash: "ancestor", ParamsHash: "params",
+		ExecutionSnapshot: snapshot,
+	}
+	options.RunScope = &scope
+	if err := validateRunToolOptions(options); err != nil {
+		t.Fatalf("rootless DAG MCP scope rejected: %v", err)
+	}
+	server := &Server{options: options}
+	_, output, err := server.getRunChain(context.Background(), nil, GetChainInput{})
+	if err != nil || output.TreeID != "" || len(output.ChainPath) != 0 || !slices.Equal(output.InputNodeIDs, snapshot.ScopeNodeIDs()) {
+		t.Fatalf("rootless DAG chain output = %+v err=%v", output, err)
+	}
+
+	invalid := scope.Clone()
+	invalid.InputNodeIDs = nil
+	options.RunScope = &invalid
+	if err := validateRunToolOptions(options); err == nil {
+		t.Fatal("MCP scope accepted DAG snapshot without its authorized input nodes")
+	}
+}
+
 func TestSnapshotReplyRejectsKindOutsideOutputContract(t *testing.T) {
 	options := scopedMCPOptions(t.TempDir())
 	project := entity.Project{Version: valueobject.ProjectFileVersion, ID: "p_scoped", Nodes: []entity.Node{

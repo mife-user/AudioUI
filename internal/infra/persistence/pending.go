@@ -346,8 +346,13 @@ func validatePending(pending entity.Pending) error {
 		return fmt.Errorf("%w: status %q", ErrInvalidPending, pending.Status)
 	}
 	if pending.OutputBinding != nil {
-		if pending.OutputSchemaVersion != 1 || pending.ChainID != "c_"+pending.NodeID || len(pending.ChainPath) == 0 || pending.ChainPath[0] == "" || pending.ChainPath[len(pending.ChainPath)-1] != pending.NodeID {
+		if pending.OutputSchemaVersion != 1 || pending.ChainID != "c_"+pending.NodeID || len(pending.ChainPath) == 0 && (pending.ExecutionSnapshot == nil || pending.ExecutionSnapshot.Version != 3) || (pending.ExecutionSnapshot == nil || pending.ExecutionSnapshot.Version != 3) && pending.ChainPath[0] == "" || (pending.ExecutionSnapshot == nil || pending.ExecutionSnapshot.Version != 3) && pending.ChainPath[len(pending.ChainPath)-1] != pending.NodeID {
 			return fmt.Errorf("%w: invalid output contract identity", ErrInvalidPending)
+		}
+		if snapshot := pending.ExecutionSnapshot; snapshot != nil && (snapshot.Validate() != nil || snapshot.NodeID != pending.NodeID ||
+			snapshot.OutputBinding != *pending.OutputBinding || snapshot.OutputContract.Kind != pending.Kind ||
+			snapshot.OutputContract.SchemaVersion != pending.OutputSchemaVersion || !slices.Equal(snapshot.ChainPath, pending.ChainPath)) {
+			return fmt.Errorf("%w: invalid execution snapshot", ErrInvalidPending)
 		}
 		binding := pending.OutputBinding
 		if binding.Bound {

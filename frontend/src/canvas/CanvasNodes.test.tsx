@@ -1,11 +1,11 @@
 import { vi, describe, expect, it } from 'vitest'
-import type { ReactElement } from 'react'
+import { useMemo, type ReactElement } from 'react'
 import type { HandleProps, NodeProps, NodeResizerProps } from '@xyflow/react'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type { Node, PendingDetail, PendingSummary, ScriptVersionDetail } from '../../bindings/audio-ui/internal/domain/entity'
 import { NodeType, OutputKind, PendingStatus } from '../../bindings/audio-ui/internal/domain/valueobject'
 import { PendingControllerProvider, usePendingController } from '../hooks/usePendingController'
-import type { CanvasFlowNode } from './flowModel'
+import type { CanvasFlowNode, RunInputOption } from './flowModel'
 import { AgentNode } from './AgentNode'
 import { CandidateNode } from './CandidateNode'
 import { PromptNode } from './PromptNode'
@@ -32,6 +32,7 @@ vi.mock('@xyflow/react', async () => {
       'data-line-border-color': props.lineStyle?.borderColor,
     }),
     Position: { Left: 'left', Right: 'right', Top: 'top', Bottom: 'bottom' },
+    MarkerType: { ArrowClosed: 'arrowclosed' },
     useReactFlow: () => ({ getInternalNode: vi.fn() }),
     useStoreApi: () => ({ subscribe: () => () => undefined }),
     useUpdateNodeInternals: () => vi.fn(),
@@ -96,10 +97,12 @@ type PendingScriptHarnessProps = {
 }
 
 function PendingScriptHarness(props: PendingScriptHarnessProps) {
+  const nodes = useMemo(() => [props.script], [props.script])
+  const pending = useMemo(() => [props.pending], [props.pending])
   const controller = usePendingController({
     projectId: 'p_demo',
-    nodes: [props.script],
-    pending: [props.pending],
+    nodes,
+    pending,
     onGetPending: props.onGetPending,
     onApplyPending: props.onApplyPending,
     onDiscardPending: props.onDiscardPending,
@@ -270,27 +273,61 @@ describe('M2-12A canvas nodes', () => {
     expect(onAddChild).toHaveBeenCalledWith('n_prompt', 'agent')
   })
 
-  it('starts local execution only from an Agent node and offers an empty Script binding', async () => {
+  it('starts local execution after confirming the default direct inputs', async () => {
     const agent = node('n_agent', 'agent', 'n_prompt')
     const onAddChild = vi.fn()
     const onStartRun = vi.fn().mockResolvedValue({})
-    render(<AgentNode {...nodeProps(agent, nodeData(agent, { onAddChild, onStartRun, projectId: 'p_test' }))} />)
+    const runInputs: RunInputOption[] = [{
+      edgeId: 'e_prompt_agent', sourceNodeId: 'n_prompt', sourceType: NodeType.NodeTypePrompt,
+      title: '任务', role: 'task', taskReady: true,
+    }]
+    render(<AgentNode {...nodeProps(agent, nodeData(agent, { onAddChild, onStartRun, projectId: 'p_test', runInputs }))} />)
 
     expect(screen.getByText('未指定输出 · 合法结果自动创建 Script')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '为 n_agent 指定空 Script 输出' }))
     expect(onAddChild).toHaveBeenCalledWith('n_agent', 'script')
     fireEvent.click(screen.getByRole('button', { name: '运行本地 Agent' }))
+    expect(screen.getByRole('dialog', { name: '选择运行输入' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '确认并运行' }))
     await waitFor(() => expect(onStartRun).toHaveBeenCalledWith('n_agent', 'p_test'))
   })
 
-  it('exposes a rootless Agent output and displays its backend run rejection', async () => {
+  it('shows backend run rejection after input confirmation for a rootless Agent', async () => {
     const agent = node('n_agent_draft', 'agent')
     const onStartRun = vi.fn().mockResolvedValue({ error: { code: 'RUN_GRAPH_UNSUPPORTED', message: '独立子图暂不可运行' } })
-    render(<AgentNode {...nodeProps(agent, nodeData(agent, { onStartRun, projectId: 'p_test' }))} />)
+    const runInputs: RunInputOption[] = [{
+      edgeId: 'e_prompt_agent', sourceNodeId: 'n_prompt', sourceType: NodeType.NodeTypePrompt,
+      title: '草稿任务', role: 'task', taskReady: true,
+    }]
+    render(<AgentNode {...nodeProps(agent, nodeData(agent, { onStartRun, projectId: 'p_test', runInputs }))} />)
 
     expect(screen.getByLabelText('n_agent_draft 输出端口')).toHaveAttribute('data-handle', 'agent-output')
     fireEvent.click(screen.getByRole('button', { name: '运行本地 Agent' }))
+    fireEvent.click(screen.getByRole('button', { name: '确认并运行' }))
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('独立子图暂不可运行'))
+  })
+
+  it('requires incompatible inputs to be deselected and preserves the chosen input order', async () => {
+    const agent = node('n_agent', 'agent')
+    const onStartRun = vi.fn().mockResolvedValue({})
+    const runInputs: RunInputOption[] = [
+      { edgeId: 'e_task', sourceNodeId: 'n_prompt', sourceType: NodeType.NodeTypePrompt, title: '任务', role: 'task', taskReady: true },
+      { edgeId: 'e_candidate', sourceNodeId: 'n_candidate', sourceType: NodeType.NodeTypeCandidate, title: '候选', role: 'candidate', taskReady: false },
+      { edgeId: 'e_script', sourceNodeId: 'n_script', sourceType: NodeType.NodeTypeScript, title: '旧稿', role: 'artifact', taskReady: false },
+      { edgeId: 'e_incompatible', sourceNodeId: 'n_other', sourceType: NodeType.NodeTypeAgent, title: '不兼容边', role: 'unsupported', taskReady: false },
+    ]
+    render(<AgentNode {...nodeProps(agent, nodeData(agent, { onStartRun, projectId: 'p_test', runInputs }))} />)
+
+    fireEvent.click(screen.getByRole('button', { name: '运行本地 Agent' }))
+    const confirm = screen.getByRole('button', { name: '确认并运行' })
+    expect(confirm).toBeDisabled()
+    fireEvent.click(screen.getByRole('checkbox', { name: '包含 不兼容边，不兼容输入' }))
+    expect(confirm).toBeEnabled()
+    fireEvent.click(screen.getByRole('checkbox', { name: '包含 候选，上下文 · Candidate' }))
+    fireEvent.click(screen.getByRole('button', { name: '上移 旧稿' }))
+    fireEvent.click(confirm)
+
+    await waitFor(() => expect(onStartRun).toHaveBeenCalledWith('n_agent', 'p_test', ['e_script', 'e_task']))
   })
 
   it('does not present an ambiguous Script output as a selected binding', () => {
@@ -303,9 +340,14 @@ describe('M2-12A canvas nodes', () => {
   it('surfaces a backend BUSY error on the Agent node', async () => {
     const agent = node('n_agent', 'agent', 'n_prompt')
     const onStartRun = vi.fn().mockResolvedValue({ error: { code: 'BUSY', message: 'run already active' } })
-    render(<AgentNode {...nodeProps(agent, nodeData(agent, { onStartRun, projectId: 'p_test' }))} />)
+    const runInputs: RunInputOption[] = [{
+      edgeId: 'e_prompt_agent', sourceNodeId: 'n_prompt', sourceType: NodeType.NodeTypePrompt,
+      title: '任务', role: 'task', taskReady: true,
+    }]
+    render(<AgentNode {...nodeProps(agent, nodeData(agent, { onStartRun, projectId: 'p_test', runInputs }))} />)
 
     fireEvent.click(screen.getByRole('button', { name: '运行本地 Agent' }))
+    fireEvent.click(screen.getByRole('button', { name: '确认并运行' }))
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('已有运行正在进行'))
   })
 

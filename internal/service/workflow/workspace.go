@@ -67,7 +67,7 @@ func (s *Service) WorkspaceView(ctx context.Context) (WorkspaceView, error) {
 		}
 		runLocks = append(runLocks, entity.WorkspaceRunLock{
 			RunID: lock.RunID, TreeID: lock.TreeID, NodeID: lock.NodeID,
-			ChainPath: append([]string(nil), lock.Path...),
+			ChainPath: append([]string(nil), lock.Path...), InputNodeIDs: append([]string(nil), lock.InputNodes...),
 		})
 	}
 	sort.Slice(runLocks, func(i, j int) bool { return runLocks[i].RunID < runLocks[j].RunID })

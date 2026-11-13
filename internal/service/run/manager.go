@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"slices"
 	"sort"
 	"strings"
@@ -38,6 +39,7 @@ type ProjectService interface {
 
 type WorkflowService interface {
 	BeginRun(ctx context.Context, runID, nodeID string, expectedProjectID ...string) (entity.Project, entity.RunExecutionSnapshot, error)
+	BeginRunWithInputs(ctx context.Context, runID, nodeID string, inputEdgeIDs []string, expectedProjectID ...string) (entity.Project, entity.RunExecutionSnapshot, error)
 	ReleaseRunLock(ctx context.Context, runID string) error
 }
 
@@ -142,6 +144,10 @@ func New(options Options) *Manager {
 }
 
 func (m *Manager) Start(ctx context.Context, nodeID string, expectedProjectID ...string) (entity.RunRecord, error) {
+	return m.StartWithInputs(ctx, nodeID, nil, expectedProjectID...)
+}
+
+func (m *Manager) StartWithInputs(ctx context.Context, nodeID string, inputEdgeIDs []string, expectedProjectID ...string) (entity.RunRecord, error) {
 	if err := ctx.Err(); err != nil {
 		return entity.RunRecord{}, err
 	}
@@ -187,18 +193,18 @@ func (m *Manager) Start(ctx context.Context, nodeID string, expectedProjectID ..
 		_ = m.gate.Release(runID)
 	}()
 
-	project, executionSnapshot, err := m.opts.Workflow.BeginRun(ctx, runID, nodeID, expectedProjectID...)
+	project, executionSnapshot, err := m.opts.Workflow.BeginRunWithInputs(ctx, runID, nodeID, inputEdgeIDs, expectedProjectID...)
 	if err != nil {
 		return entity.RunRecord{}, err
 	}
 	lockAcquired = true
 	executionSnapshot = executionSnapshot.Clone()
 	chainPath := executionSnapshot.ChainPath
-	if len(chainPath) < 1 {
+	if executionSnapshot.Version != 3 && len(chainPath) < 1 {
 		return entity.RunRecord{}, errors.New("NOT_IN_CHAIN: empty run path")
 	}
-	treeID := chainPath[0]
-	workspace, err := m.opts.Workspaces.OpenRun(ctx, project.ID, treeID, nodeID, chainPath)
+	treeID := executionSnapshot.TreeID
+	workspace, err := m.opts.Workspaces.OpenRun(ctx, project.ID, executionSnapshot)
 	if err != nil {
 		return entity.RunRecord{}, err
 	}
@@ -214,7 +220,9 @@ func (m *Manager) Start(ctx context.Context, nodeID string, expectedProjectID ..
 	if err != nil {
 		return entity.RunRecord{}, err
 	}
-	if runContext.TreeID != treeID || runContext.NodeID != nodeID || !slices.Equal(runContext.ChainPath, chainPath) || runContext.Hashes.ContextHash == "" || runContext.Hashes.AncestorHash == "" || runContext.Hashes.ParamsHash == "" {
+	if runContext.TreeID != treeID || runContext.NodeID != nodeID || !slices.Equal(runContext.ChainPath, chainPath) ||
+		executionSnapshot.Version == 3 && !slices.Equal(runContext.InputNodeIDs, executionSnapshot.ScopeNodeIDs()) ||
+		runContext.Hashes.ContextHash == "" || runContext.Hashes.AncestorHash == "" || runContext.Hashes.ParamsHash == "" {
 		return entity.RunRecord{}, errors.New("RUN_CONTEXT_SCOPE_INVALID")
 	}
 	store, err := m.opts.RunStores.ForProject(ctx, project.ID)
@@ -226,7 +234,8 @@ func (m *Manager) Start(ctx context.Context, nodeID string, expectedProjectID ..
 	scope := port.RunScope{
 		RunID: runID, ProjectID: project.ID, TreeID: treeID, NodeID: nodeID,
 		ChainID: "c_" + nodeID, ChainPath: append([]string(nil), chainPath...),
-		ContextHash: runContext.Hashes.ContextHash, AncestorHash: runContext.Hashes.AncestorHash,
+		InputNodeIDs: append([]string(nil), executionSnapshot.ScopeNodeIDs()...),
+		ContextHash:  runContext.Hashes.ContextHash, AncestorHash: runContext.Hashes.AncestorHash,
 		ParamsHash: runContext.Hashes.ParamsHash, ExecutionSnapshot: executionSnapshot.Clone(),
 	}
 	record := entity.RunRecord{
@@ -644,6 +653,9 @@ func (m *Manager) RecordRunPending(ctx context.Context, scope port.RunScope, pen
 	state := m.getActive(scope.RunID)
 	if state == nil || !sameScope(state.scope, scope) || pending.RunID != scope.RunID || pending.NodeID != scope.NodeID {
 		return port.ErrTurnNotActive
+	}
+	if scope.ExecutionSnapshot.Version == 3 && (pending.ExecutionSnapshot == nil || !reflect.DeepEqual(*pending.ExecutionSnapshot, scope.ExecutionSnapshot)) {
+		return ErrRunPendingConflict
 	}
 	// The reply callback already holds a lease if finish has begun closing the run.
 	if !state.acquireLease() {
@@ -1153,6 +1165,7 @@ func (m *Manager) sameScope(state *runState, scope port.RunScope) bool {
 func sameScope(a, b port.RunScope) bool {
 	return a.RunID == b.RunID && a.ProjectID == b.ProjectID && a.TreeID == b.TreeID &&
 		a.NodeID == b.NodeID && a.ChainID == b.ChainID && slices.Equal(a.ChainPath, b.ChainPath) &&
+		slices.Equal(a.InputNodeIDs, b.InputNodeIDs) && reflect.DeepEqual(a.ExecutionSnapshot, b.ExecutionSnapshot) &&
 		a.ContextHash == b.ContextHash && a.AncestorHash == b.AncestorHash && a.ParamsHash == b.ParamsHash
 }
 

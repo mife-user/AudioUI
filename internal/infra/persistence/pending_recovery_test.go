@@ -141,6 +141,74 @@ func TestProjectLoadCompletesCommittedPendingTransaction(t *testing.T) {
 	}
 }
 
+func TestCommittedRootlessDAGScriptReplyRecovery(t *testing.T) {
+	ctx := context.Background()
+	layout := testLayout(t.TempDir())
+	projects := NewProjectStore(layout)
+	project := entity.Project{
+		Version: valueobject.ProjectFileVersion, ID: "p_test", Name: "无 Topic 恢复", Revision: 1,
+		Nodes: []entity.Node{
+			{ID: "n_source", Type: valueobject.NodeTypeScript, Title: "输入", Size: entity.DefaultNodeSize(valueobject.NodeTypeScript), ScriptVersions: []entity.ScriptVersion{{N: 1, ArtifactID: "sha256:source", RunID: "r_source"}}, Rounds: []entity.Round{}},
+			{ID: "n_prompt", Type: valueobject.NodeTypePrompt, Title: "任务", Size: entity.DefaultNodeSize(valueobject.NodeTypePrompt), Params: entity.NodeParams{Instruction: "续写"}, Rounds: []entity.Round{}},
+			{ID: "n_agent", Type: valueobject.NodeTypeAgent, Title: "Agent", Size: entity.DefaultNodeSize(valueobject.NodeTypeAgent), Rounds: []entity.Round{}},
+			{ID: "n_output", Type: valueobject.NodeTypeScript, Title: "输出", Size: entity.DefaultNodeSize(valueobject.NodeTypeScript), ScriptVersions: []entity.ScriptVersion{{N: 1, ArtifactID: "sha256:output-v1", RunID: "r_old"}}, Rounds: []entity.Round{}},
+		},
+		Edges: []entity.Edge{
+			{ID: "e_source_prompt", SourceNodeID: "n_source", TargetNodeID: "n_prompt", Kind: entity.EdgeKindConnection},
+			{ID: "e_prompt_agent", SourceNodeID: "n_prompt", TargetNodeID: "n_agent", Kind: entity.EdgeKindConnection},
+			{ID: "e_agent_output", SourceNodeID: "n_agent", TargetNodeID: "n_output", Kind: entity.EdgeKindConnection},
+		},
+	}
+	graph, err := entity.NewGraph(&project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := graph.SnapshotForRunWithInputs("n_agent", []string{"e_prompt_agent"})
+	if err != nil || snapshot.Version != 3 || snapshot.OutputBinding.NodeID != "n_output" {
+		t.Fatalf("rootless DAG snapshot = %+v err=%v", snapshot, err)
+	}
+	if err := projects.Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	projectPaths, err := paths.ResolveProject(layout, project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pendingStore := NewPendingStore(projectPaths.Dir)
+	artifactPayload := []byte(`{"scenes":[{"duration":0,"narration":"旁白"}],"title":"续写"}`)
+	pending := entity.Pending{
+		ID: "pa_dag", RunID: "r_dag", ChainID: "c_n_agent", ChainPath: []string{}, NodeID: "n_agent",
+		Kind: valueobject.OutputKindScript, Status: valueobject.PendingApplied, ArtifactID: "sha256:" + hashPayload(artifactPayload),
+		OutputBinding: &snapshot.OutputBinding, OutputSchemaVersion: snapshot.OutputContract.SchemaVersion,
+		ExecutionSnapshot: &snapshot, ResultNodeID: "n_output", CreatedAt: "2026-11-13T00:00:00Z",
+	}
+	meta := entity.ArtifactMeta{
+		Kind: valueobject.OutputKindScript, NodeID: pending.ResultNodeID, CreatedAt: pending.CreatedAt,
+		SourceRunID: pending.RunID, SourcePendingID: pending.ID,
+	}
+	if err := pendingStore.SaveTransaction(ctx, entity.PendingTransaction{
+		Version: valueobject.PendingTransactionFileVersion, BaseRevision: 1, TargetRevision: 2,
+		Pending: pending, Payload: artifactPayload, ArtifactPayload: artifactPayload, ArtifactMeta: &meta,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	project.Revision = 2
+	project.Nodes[3].ScriptVersions = append(project.Nodes[3].ScriptVersions, entity.ScriptVersion{
+		N: 2, ArtifactID: pending.ArtifactID, RunID: pending.RunID,
+	})
+	if err := projects.Save(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := projects.Load(ctx, project.ID); err != nil {
+		t.Fatalf("rootless DAG transaction recovery: %v", err)
+	}
+	stored, err := pendingStore.Load(ctx, pending.ID)
+	if err != nil || stored.Status != valueobject.PendingApplied || stored.ExecutionSnapshot == nil || stored.ExecutionSnapshot.Version != 3 {
+		t.Fatalf("recovered DAG pending = %+v err=%v", stored, err)
+	}
+}
+
 func TestCommittedTopicReplyRecoveryValidatesCandidateGraphAssociation(t *testing.T) {
 	ctx := context.Background()
 	for _, validGraph := range []bool{true, false} {

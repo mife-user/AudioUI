@@ -4,12 +4,69 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"testing"
 
 	"audio-ui/internal/domain/entity"
 	"audio-ui/internal/domain/port"
 	"audio-ui/internal/domain/valueobject"
 )
+
+func rootlessBoundScriptProject() entity.Project {
+	return entity.Project{
+		Version: valueobject.ProjectFileVersion, ID: "p_test", Name: "无 Topic 运行", Revision: 1, ActiveNodeID: "n_agent",
+		Nodes: []entity.Node{
+			{ID: "n_source", Type: valueobject.NodeTypeScript, Title: "输入脚本", ScriptVersions: []entity.ScriptVersion{{N: 1, ArtifactID: "sha256:source", RunID: "r_source"}}, Rounds: []entity.Round{}},
+			{ID: "n_prompt", Type: valueobject.NodeTypePrompt, Title: "任务", Params: entity.NodeParams{Instruction: "根据输入脚本续写"}, Rounds: []entity.Round{}},
+			{ID: "n_agent", Type: valueobject.NodeTypeAgent, Title: "Agent", Rounds: []entity.Round{}},
+			{ID: "n_output", Type: valueobject.NodeTypeScript, Title: "输出", ScriptVersions: []entity.ScriptVersion{{N: 1, ArtifactID: "sha256:output-v1", RunID: "r_old"}}, Rounds: []entity.Round{}},
+		},
+		Edges: []entity.Edge{
+			{ID: "e_source_prompt", SourceNodeID: "n_source", TargetNodeID: "n_prompt", Kind: entity.EdgeKindConnection},
+			{ID: "e_prompt_agent", SourceNodeID: "n_prompt", TargetNodeID: "n_agent", Kind: entity.EdgeKindConnection},
+			{ID: "e_agent_output", SourceNodeID: "n_agent", TargetNodeID: "n_output", Kind: entity.EdgeKindConnection},
+		},
+	}
+}
+
+func TestRootlessDAGReplyPersistsSnapshotAndConfirmsFrozenOutput(t *testing.T) {
+	h := newPendingHarness(t, rootlessBoundScriptProject())
+	scope := beginReplyScopeWithInputs(t, h, "r_rootless_dag", "n_agent", []string{"e_prompt_agent"})
+	if scope.TreeID != "" || len(scope.ChainPath) != 0 || scope.ExecutionSnapshot.Version != 3 ||
+		!slices.Equal(scope.InputNodeIDs, scope.ExecutionSnapshot.ScopeNodeIDs()) {
+		t.Fatalf("rootless run scope = %+v", scope)
+	}
+
+	first, err := h.service.SubmitRunReply(context.Background(), scope, valueobject.OutputKindScript, validScriptPayload(), "req_rootless")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Status != valueobject.PendingPending || first.ExecutionSnapshot == nil || first.ExecutionSnapshot.Version != 3 ||
+		len(first.ChainPath) != 0 || first.OutputBinding == nil || !first.OutputBinding.Bound {
+		t.Fatalf("DAG reply pending = %+v", first)
+	}
+	stored, err := h.service.GetPending(context.Background(), first.ID, h.session.project.ID)
+	if err != nil || stored.Pending.ExecutionSnapshot == nil || stored.Pending.ExecutionSnapshot.Version != 3 {
+		t.Fatalf("persisted DAG snapshot = %+v err=%v", stored.Pending.ExecutionSnapshot, err)
+	}
+	revision := h.session.project.Revision
+	retry, err := h.service.SubmitRunReply(context.Background(), scope, valueobject.OutputKindScript, validScriptPayload(), "req_rootless")
+	if err != nil || retry.ID != first.ID || h.session.project.Revision != revision {
+		t.Fatalf("idempotent DAG reply = %+v err=%v revision=%d", retry, err, h.session.project.Revision)
+	}
+	if err := h.service.ReleaseRunLock(context.Background(), scope.RunID); err != nil {
+		t.Fatal(err)
+	}
+
+	applied, err := h.service.ApplyPending(context.Background(), first.ID, false, h.session.project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := pendingReplyNode(t, applied, "n_output")
+	if len(output.ScriptVersions) != 2 || output.ScriptVersions[1].N != 2 || output.ScriptVersions[1].RunID != scope.RunID {
+		t.Fatalf("confirmed DAG output versions = %+v", output.ScriptVersions)
+	}
+}
 
 func TestSubmitTopicsReplyPlacesCandidatesAroundResizedNodes(t *testing.T) {
 	topicSize := entity.NodeSize{Width: 500, Height: 250}

@@ -97,6 +97,7 @@ export interface Pending {
     "artifactId"?: string;
     "outputBinding"?: RunOutputBinding | null;
     "outputSchemaVersion"?: number;
+    "executionSnapshot"?: RunExecutionSnapshot | null;
     "resultNodeId"?: string;
     "createdNodeIds"?: string[] | null;
     "createdAt": string;
@@ -181,14 +182,25 @@ export interface RunExecutionSnapshot {
     "projectVersion": number;
     "projectId": string;
     "projectRevision": number;
-    "treeId": string;
+    "treeId"?: string;
     "nodeId": string;
     "chainPath": string[] | null;
-    "pathNodes": Node[] | null;
+    "pathNodes"?: Node[] | null;
     "pathEdges"?: Edge[] | null;
+    "inputNodes"?: Node[] | null;
+    "inputRoots"?: Node[] | null;
+    "inputEdges"?: Edge[] | null;
+    "inputs"?: RunInput[] | null;
     "artifacts": RunArtifactReference[] | null;
     "outputBinding": RunOutputBinding;
     "outputContract": RunOutputContract;
+}
+
+export interface RunInput {
+    "edgeId": string;
+    "sourceNodeId": string;
+    "role": string;
+    "order": number;
 }
 
 export interface RunOutputBinding {

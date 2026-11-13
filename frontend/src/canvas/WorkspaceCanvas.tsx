@@ -14,7 +14,7 @@ import {
   type NodeMouseHandler,
 } from '@xyflow/react'
 import type { GraphMutationReceipt, Node, NodeParams, RunStartResult, WorkspaceSnapshot } from '../../bindings/audio-ui/internal/domain/entity'
-import { startRun as startRunAPI } from '../api/runs'
+import { startRun as startRunAPI, startRunWithInputs as startRunWithInputsAPI } from '../api/runs'
 import { graphAPI, type GraphAPI, type TopicCandidateFixture } from './graphApi'
 import { allocateNodePosition, NODE_LAYOUT_GAP } from './nodePosition'
 import { COLLAPSED_NODE_HEIGHT, buildFlowEdges, buildFlowModel, inputHandleId, nodeMap, outputHandleId, type CanvasFlowNode, type ChildNodeType } from './flowModel'
@@ -59,7 +59,7 @@ type Props = {
   onRegisterNodeLocator?: (locator: NodeLocator) => () => void
   api?: GraphAPI
   candidateFixtures?: Record<string, TopicCandidateFixture[]>
-  onStartRun?: (nodeId: string, projectId: string) => Promise<RunStartResult>
+  onStartRun?: (nodeId: string, projectId: string, inputEdgeIds?: string[]) => Promise<RunStartResult>
 }
 
 type PendingSync = {
@@ -150,6 +150,8 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFl
   candidateStateRef.current = candidateState
   const currentProjectId = useRef(projectId)
   currentProjectId.current = projectId
+  const snapshotRef = useRef(snapshot)
+  snapshotRef.current = snapshot
   const onNodeHandlesMeasured = useCallback((nodeId: string, layoutKey: string, ownerProjectId: string) => {
     if (!ownerProjectId || currentProjectId.current !== ownerProjectId) return
     setMeasuredHandleState((current) => {
@@ -220,6 +222,7 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFl
   const [connectSubmitting, setConnectSubmitting] = useState(false)
   const [paramsSaveCount, setParamsSaveCount] = useState(0)
   const [runSubmittingNodeId, setRunSubmittingNodeId] = useState('')
+  const [runSubmittingInputNodeIDs, setRunSubmittingInputNodeIDs] = useState<string[]>([])
   const [pendingSync, setPendingSync] = useState<PendingSync | null>(null)
   const pendingSyncRef = useRef<PendingSync | null>(null)
   const lastSyncedRevision = useRef({ projectId, revision: snapshot.project?.revision ?? 0 })
@@ -622,7 +625,7 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFl
     }
   }, [api, syncMutation])
 
-  const startNodeRun = useCallback(async (nodeId: string, ownerProjectId: string): Promise<RunStartResult> => {
+  const startNodeRun = useCallback(async (nodeId: string, ownerProjectId: string, inputEdgeIDs?: string[]): Promise<RunStartResult> => {
     if (currentProjectId.current !== ownerProjectId) {
       return { error: { code: 'PROJECT_CHANGED', message: '工程已切换，未启动运行。' } }
     }
@@ -637,11 +640,20 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFl
     const requestId = ++runRequestSequence.current
     setRunSubmittingNodeId(nodeId)
     try {
-      const runPath = snapshot.nodePaths?.[nodeId] ?? []
-      for (const pathNodeId of runPath) {
-        const pathNode = graphNodes.find((node) => node.id === pathNodeId)
-        if (pathNode?.type !== 'prompt') continue
-        const registered = promptFlushers.current.get(pathNodeId)
+      const current = snapshotRef.current
+      const incomingEdges = (current.edges ?? []).filter((edge) => edge.targetNodeId === nodeId && edge.kind === 'connection')
+      const selectedEdges = new Set(inputEdgeIDs ?? incomingEdges.map((edge) => edge.id))
+      const nodeById = new Map((current.nodes ?? []).map((node) => [node.id, node]))
+      const selectedPromptIDs = new Set<string>()
+      const selectedInputNodeIDs = new Set<string>()
+      for (const edge of incomingEdges) {
+        if (!selectedEdges.has(edge.id)) continue
+        selectedInputNodeIDs.add(edge.sourceNodeId)
+        if (nodeById.get(edge.sourceNodeId)?.type === 'prompt') selectedPromptIDs.add(edge.sourceNodeId)
+      }
+      setRunSubmittingInputNodeIDs([...selectedInputNodeIDs])
+      for (const promptNodeID of selectedPromptIDs) {
+        const registered = promptFlushers.current.get(promptNodeID)
         if (!registered || registered.projectId !== ownerProjectId) continue
         if (!await registered.flush()) {
           return { error: { code: 'WORKSPACE_SYNC_STALE', message: '提示词已提交，等待工程快照同步后再启动。' } }
@@ -653,21 +665,30 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFl
       if (pendingSyncRef.current?.receipt.projectId === ownerProjectId || runStartBlockedRef.current) {
         return { error: { code: 'WORKSPACE_SYNC_STALE', message: '请先完成当前工程操作与快照同步。' } }
       }
-      return await (onStartRun ?? startRunAPI)(nodeId, ownerProjectId)
+      if (onStartRun) {
+        return inputEdgeIDs === undefined
+          ? await onStartRun(nodeId, ownerProjectId)
+          : await onStartRun(nodeId, ownerProjectId, inputEdgeIDs)
+      }
+      return inputEdgeIDs === undefined
+        ? await startRunAPI(nodeId, ownerProjectId)
+        : await startRunWithInputsAPI(nodeId, ownerProjectId, inputEdgeIDs)
     } catch (failure) {
       return { error: { code: 'RUN_START_FAILED', message: errorMessage(failure) } }
     } finally {
       if (runRequestSequence.current === requestId) {
         runStartInFlight.current = false
         setRunSubmittingNodeId('')
+        setRunSubmittingInputNodeIDs([])
       }
     }
-  }, [graphNodes, onStartRun, projectId, snapshot.nodePaths])
+  }, [onStartRun, projectId])
 
   const model = useMemo(
     () => buildFlowModel(snapshot, addChild, candidateMap, mutationBlocked, {
       paramsEditingDisabled,
       runSubmittingNodeId,
+      runSubmittingInputNodeIDs,
       candidateErrors,
       candidateLoading,
       onUpdateTopicParams: saveNodeParams,
@@ -681,7 +702,7 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFl
       onSetNodeCollapsed: applyNodeCollapsed,
       onLocateNode: locateNode,
     }),
-    [snapshot, addChild, candidateMap, candidateErrors, candidateLoading, mutationBlocked, paramsEditingDisabled, runSubmittingNodeId, saveNodeParams, startNodeRun, api.getScriptVersion, registerPromptFlush, registerTopicFlush, onNodeHandlesMeasured, applyNodeLayout, applyNodeCollapsed, locateNode],
+    [snapshot, addChild, candidateMap, candidateErrors, candidateLoading, mutationBlocked, paramsEditingDisabled, runSubmittingNodeId, runSubmittingInputNodeIDs, saveNodeParams, startNodeRun, api.getScriptVersion, registerPromptFlush, registerTopicFlush, onNodeHandlesMeasured, applyNodeLayout, applyNodeCollapsed, locateNode],
   )
 
   useEffect(() => {

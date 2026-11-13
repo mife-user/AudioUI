@@ -64,14 +64,18 @@ func (p *memoryProvider) ForProject(ctx context.Context, projectID string) (port
 }
 
 type memoryWorkspace struct {
-	scope port.WorkspaceScope
-	dirs  map[string]port.WorkspaceList
-	reads int
+	scope   port.WorkspaceScope
+	dirs    map[string]port.WorkspaceList
+	sources []port.WorkspaceSource
+	reads   int
 }
 
-func (w *memoryWorkspace) Scope() port.WorkspaceScope        { return w.scope }
-func (w *memoryWorkspace) CWD() string                       { return "" }
-func (w *memoryWorkspace) RuntimeReadPath() string           { return "../../runtime" }
+func (w *memoryWorkspace) Scope() port.WorkspaceScope { return w.scope }
+func (w *memoryWorkspace) CWD() string                { return "" }
+func (w *memoryWorkspace) RuntimeReadPath() string    { return "../../runtime" }
+func (w *memoryWorkspace) InputSources() []port.WorkspaceSource {
+	return append([]port.WorkspaceSource(nil), w.sources...)
+}
 func (w *memoryWorkspace) Resolver() port.ScopedPathResolver { return nil }
 func (w *memoryWorkspace) ListDir(ctx context.Context, path string, maxEntries int) (port.WorkspaceList, error) {
 	if err := ctx.Err(); err != nil {
@@ -198,6 +202,77 @@ func snapshotFixture() (*Builder, *memoryArtifacts, entity.Project, entity.RunEx
 		dirs:  map[string]port.WorkspaceList{".": {Entries: []port.WorkspaceEntry{{Name: "notes.md", Size: 5}}}},
 	}
 	return NewBuilder(&memoryProvider{store: store}), store, project, snapshot, workspace, scriptID, baselineID
+}
+
+func TestDAGContextUsesOrderedTasksAndIsolatedWorkspaceSources(t *testing.T) {
+	project := entity.Project{
+		Version: valueobject.ProjectFileVersion, ID: "p_test", Name: "DAG context", Revision: 1,
+		Nodes: []entity.Node{
+			{ID: "n_task_a", Type: valueobject.NodeTypePrompt, Title: "任务 A", Params: entity.NodeParams{Instruction: "先研究"}},
+			{ID: "n_task_b", Type: valueobject.NodeTypePrompt, Title: "任务 B", Params: entity.NodeParams{Instruction: "再撰写"}},
+			{ID: "n_agent", Type: valueobject.NodeTypeAgent, Title: "Agent"},
+		},
+		Edges: []entity.Edge{
+			{ID: "e_task_a", SourceNodeID: "n_task_a", TargetNodeID: "n_agent", Kind: entity.EdgeKindConnection},
+			{ID: "e_task_b", SourceNodeID: "n_task_b", TargetNodeID: "n_agent", Kind: entity.EdgeKindConnection},
+		},
+	}
+	graph, err := entity.NewGraph(&project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := graph.SnapshotForRunWithInputs("n_agent", []string{"e_task_b", "e_task_a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sources := []port.WorkspaceSource{
+		{LogicalPath: "inputs/project/n_task_b/", PhysicalPath: "C:/project/workspace/steps/n_task_b"},
+		{LogicalPath: "inputs/project/n_task_a/", PhysicalPath: "C:/project/workspace/steps/n_task_a"},
+	}
+	workspace := &memoryWorkspace{
+		scope: port.WorkspaceScope{
+			ProjectID: project.ID, NodeID: snapshot.NodeID, InputNodeIDs: snapshot.ScopeNodeIDs(),
+		},
+		dirs:    map[string]port.WorkspaceList{".": {Path: ".", Entries: []port.WorkspaceEntry{}}},
+		sources: sources,
+	}
+	builder := NewBuilder(nil)
+	result, err := builder.Build(context.Background(), Input{
+		Project: project, NodeID: snapshot.NodeID, Snapshot: snapshot, Workspace: workspace, Budget: 5000,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var envelope promptEnvelope
+	if err := json.Unmarshal([]byte(result.InitialPrompt), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	var body contextBody
+	if err := json.Unmarshal(envelope.Context, &body); err != nil {
+		t.Fatal(err)
+	}
+	if result.ContextVersion != 2 || result.ChainPath != nil || !slices.Equal(result.InputNodeIDs, snapshot.ScopeNodeIDs()) ||
+		body.Workspace.CWD != "workspace/steps/n_agent/" || len(body.Tasks) != 2 ||
+		body.Tasks[0].NodeID != "n_task_b" || body.Tasks[1].NodeID != "n_task_a" ||
+		!slices.Equal(body.Workspace.NativeReadSources, sources) || len(body.Contract) == 0 || !strings.Contains(body.Contract[0], "已选输入") {
+		t.Fatalf("DAG context result=%+v body=%+v", result, body)
+	}
+
+	reordered, err := graph.SnapshotForRunWithInputs("n_agent", []string{"e_task_a", "e_task_b"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstHashes, err := builder.InputHashesForSnapshot(context.Background(), project, snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondHashes, err := builder.InputHashesForSnapshot(context.Background(), project, reordered)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if firstHashes.AncestorHash == secondHashes.AncestorHash || firstHashes.ParamsHash == secondHashes.ParamsHash {
+		t.Fatalf("input order did not affect hashes: first=%+v second=%+v", firstHashes, secondHashes)
+	}
 }
 
 func TestSnapshotContextUsesFrozenCandidateTaskScriptAndOutputBinding(t *testing.T) {

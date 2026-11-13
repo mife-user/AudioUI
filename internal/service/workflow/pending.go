@@ -126,6 +126,7 @@ func (s *Service) SubmitRunReply(ctx context.Context, scope port.RunScope, kind 
 			return err
 		}
 		binding := snapshot.OutputBinding
+		snapshotCopy := snapshot.Clone()
 		pending := entity.Pending{
 			ID: pendingID, RunID: scope.RunID, RequestID: requestID,
 			ChainID: scope.ChainID, ChainPath: append([]string(nil), scope.ChainPath...),
@@ -133,7 +134,8 @@ func (s *Service) SubmitRunReply(ctx context.Context, scope port.RunScope, kind 
 			AncestorHash: scope.AncestorHash, ParamsHash: scope.ParamsHash,
 			Payload: pendingPayloadPath(pendingID), Summary: pendingSummary(kind, payload),
 			OutputBinding: &binding, OutputSchemaVersion: snapshot.OutputContract.SchemaVersion,
-			CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+			ExecutionSnapshot: &snapshotCopy,
+			CreatedAt:         time.Now().UTC().Format(time.RFC3339Nano),
 		}
 		if binding.Bound {
 			pending.ResultNodeID = binding.NodeID
@@ -295,22 +297,37 @@ func (s *Service) SubmitRunReply(ctx context.Context, scope port.RunScope, kind 
 }
 
 func validateRunReplyScope(scope port.RunScope, kind valueobject.OutputKind) error {
-	if scope.RunID == "" || scope.ProjectID == "" || scope.TreeID == "" || scope.NodeID == "" ||
-		scope.ChainID != "c_"+scope.NodeID || len(scope.ChainPath) == 0 || scope.ChainPath[0] != scope.TreeID ||
-		scope.ChainPath[len(scope.ChainPath)-1] != scope.NodeID || scope.ContextHash == "" ||
-		scope.AncestorHash == "" || scope.ParamsHash == "" {
+	if scope.RunID == "" || scope.ProjectID == "" || scope.NodeID == "" || scope.ChainID != "c_"+scope.NodeID ||
+		scope.ContextHash == "" || scope.AncestorHash == "" || scope.ParamsHash == "" {
 		return port.ErrTurnNotActive
 	}
 	snapshot := scope.ExecutionSnapshot
 	if snapshot.Validate() != nil || snapshot.ProjectVersion != valueobject.ProjectFileVersion ||
-		snapshot.ProjectID != scope.ProjectID || snapshot.TreeID != scope.TreeID || snapshot.NodeID != scope.NodeID ||
-		!slices.Equal(snapshot.ChainPath, scope.ChainPath) {
+		snapshot.ProjectID != scope.ProjectID || snapshot.TreeID != scope.TreeID || snapshot.NodeID != scope.NodeID {
 		return port.ErrChainScopeDenied
+	}
+	var target entity.Node
+	if snapshot.Version == 3 {
+		if len(scope.ChainPath) != 0 || !slices.Equal(snapshot.ScopeNodeIDs(), scope.InputNodeIDs) {
+			return port.ErrChainScopeDenied
+		}
+		target = snapshot.InputNodes[len(snapshot.InputNodes)-1]
+	} else {
+		if scope.TreeID == "" || len(scope.ChainPath) == 0 || scope.ChainPath[0] != scope.TreeID ||
+			scope.ChainPath[len(scope.ChainPath)-1] != scope.NodeID || !slices.Equal(snapshot.ChainPath, scope.ChainPath) {
+			return port.ErrChainScopeDenied
+		}
+		target = snapshot.PathNodes[len(snapshot.PathNodes)-1]
 	}
 	if snapshot.OutputContract.SchemaVersion != 1 || snapshot.OutputContract.Kind != kind {
 		return ErrOutputKindMismatch
 	}
-	target := snapshot.PathNodes[len(snapshot.PathNodes)-1]
+	if snapshot.Version == 3 {
+		if target.Type != valueobject.NodeTypeAgent || kind != valueobject.OutputKindScript {
+			return ErrOutputKindMismatch
+		}
+		return nil
+	}
 	switch target.Type {
 	case valueobject.NodeTypeTopic:
 		if kind != valueobject.OutputKindTopics || snapshot.OutputBinding.Bound {
@@ -329,11 +346,13 @@ func validateRunReplyScope(scope port.RunScope, kind valueobject.OutputKind) err
 func (s *Service) ensureRunReplyLock(scope port.RunScope) error {
 	lock, ok := s.locks[scope.RunID]
 	if !ok || lock.RunID != scope.RunID || lock.ProjectID != scope.ProjectID ||
-		lock.TreeID != scope.TreeID || lock.NodeID != scope.NodeID || !slices.Equal(lock.Path, scope.ChainPath) {
+		lock.TreeID != scope.TreeID || lock.NodeID != scope.NodeID ||
+		!slices.Equal(lock.Path, scope.ChainPath) || !slices.Equal(lock.InputNodes, scope.ExecutionSnapshot.ScopeNodeIDs()) {
 		return port.ErrTurnNotActive
 	}
-	expected := make(map[string]struct{}, len(scope.ChainPath)+1)
-	for _, id := range scope.ChainPath {
+	inputNodeIDs := scope.ExecutionSnapshot.ScopeNodeIDs()
+	expected := make(map[string]struct{}, len(inputNodeIDs)+1)
+	for _, id := range inputNodeIDs {
 		expected[id] = struct{}{}
 	}
 	if scope.ExecutionSnapshot.OutputBinding.Bound {
@@ -355,15 +374,40 @@ func (s *Service) ensureRunReplyLock(scope port.RunScope) error {
 
 func sameRunReply(pending entity.Pending, scope port.RunScope, kind valueobject.OutputKind, requestID string, payload []byte) bool {
 	binding := scope.ExecutionSnapshot.OutputBinding
+	snapshotMatches := pending.ExecutionSnapshot != nil && reflect.DeepEqual(*pending.ExecutionSnapshot, scope.ExecutionSnapshot)
 	return pending.RunID == scope.RunID && pending.RequestID == requestID &&
 		pending.ChainID == scope.ChainID && slices.Equal(pending.ChainPath, scope.ChainPath) &&
-		pending.NodeID == scope.NodeID && pending.Kind == kind &&
+		pending.NodeID == scope.NodeID && pending.Kind == kind && snapshotMatches &&
 		pending.ContextHash == scope.ContextHash && pending.AncestorHash == scope.AncestorHash &&
 		pending.ParamsHash == scope.ParamsHash && pending.OutputSchemaVersion == scope.ExecutionSnapshot.OutputContract.SchemaVersion &&
 		pending.OutputBinding != nil && *pending.OutputBinding == binding && len(payload) > 0
 }
 
 func validateRunSnapshotGraph(graph *entity.Graph, snapshot entity.RunExecutionSnapshot) error {
+	if snapshot.Validate() != nil {
+		return port.ErrChainScopeDenied
+	}
+	if snapshot.Version == 3 {
+		for _, frozen := range snapshot.InputNodes {
+			live, ok := graph.Node(frozen.ID)
+			if !ok || !sameRunSnapshotNode(live, frozen) {
+				return port.ErrChainScopeDenied
+			}
+		}
+		for _, root := range snapshot.InputRoots {
+			live, ok := graph.Node(root.ID)
+			if !ok || live.Type != valueobject.NodeTypeTopic || live.WorkspaceRootID != root.WorkspaceRootID {
+				return port.ErrChainScopeDenied
+			}
+		}
+		for _, frozen := range snapshot.InputEdges {
+			live, ok := graph.Edge(frozen.ID)
+			if !ok || live != frozen {
+				return port.ErrChainScopeDenied
+			}
+		}
+		return nil
+	}
 	path, err := graph.PathToRoot(snapshot.NodeID)
 	if err != nil || !slices.Equal(path, snapshot.ChainPath) {
 		return port.ErrChainScopeDenied
@@ -378,16 +422,20 @@ func validateRunSnapshotGraph(graph *entity.Graph, snapshot entity.RunExecutionS
 	}
 	for _, frozen := range snapshot.PathNodes {
 		live, ok := graph.Node(frozen.ID)
-		if !ok || live.Type != frozen.Type || live.Title != frozen.Title || live.Parent != frozen.Parent ||
-			live.WorkspaceRootID != frozen.WorkspaceRootID || live.Locked != frozen.Locked || live.Stale != frozen.Stale ||
-			!reflect.DeepEqual(live.ParentCandidate, frozen.ParentCandidate) ||
-			!reflect.DeepEqual(live.CandidateSource, frozen.CandidateSource) ||
-			!reflect.DeepEqual(live.Params, frozen.Params) || !slices.Equal(live.Rounds, frozen.Rounds) ||
-			!slices.Equal(live.ScriptVersions, frozen.ScriptVersions) {
+		if !ok || !sameRunSnapshotNode(live, frozen) {
 			return port.ErrChainScopeDenied
 		}
 	}
 	return nil
+}
+
+func sameRunSnapshotNode(live *entity.Node, frozen entity.Node) bool {
+	return live.Type == frozen.Type && live.Title == frozen.Title && live.Parent == frozen.Parent &&
+		live.WorkspaceRootID == frozen.WorkspaceRootID && live.Locked == frozen.Locked && live.Stale == frozen.Stale &&
+		reflect.DeepEqual(live.ParentCandidate, frozen.ParentCandidate) &&
+		reflect.DeepEqual(live.CandidateSource, frozen.CandidateSource) &&
+		reflect.DeepEqual(live.Params, frozen.Params) && slices.Equal(live.Rounds, frozen.Rounds) &&
+		slices.Equal(live.ScriptVersions, frozen.ScriptVersions)
 }
 
 func validateSnapshotOutputBinding(graph *entity.Graph, target *entity.Node, snapshot entity.RunExecutionSnapshot) (*entity.Node, error) {
@@ -435,8 +483,13 @@ func validateSnapshotOutputBinding(graph *entity.Graph, target *entity.Node, sna
 func activePendingCount(items []entity.Pending, treeID string) int {
 	count := 0
 	for _, item := range items {
-		if len(item.ChainPath) > 0 && item.ChainPath[0] == treeID &&
-			(item.Status == valueobject.PendingPending || item.Status == valueobject.PendingInvalid) {
+		itemTreeID := ""
+		if item.ExecutionSnapshot != nil {
+			itemTreeID = item.ExecutionSnapshot.TreeID
+		} else if len(item.ChainPath) > 0 {
+			itemTreeID = item.ChainPath[0]
+		}
+		if itemTreeID == treeID && (item.Status == valueobject.PendingPending || item.Status == valueobject.PendingInvalid) {
 			count++
 		}
 	}
@@ -786,7 +839,32 @@ func (s *Service) validatePendingInputHashes(ctx context.Context, project entity
 	if s.opts.ContextHasher == nil {
 		return ErrContextHasherUnavailable
 	}
-	hashes, err := s.opts.ContextHasher.InputHashes(ctx, project, pending.NodeID)
+	var hashes valueobject.ContextHashes
+	var err error
+	if pending.ExecutionSnapshot != nil && pending.ExecutionSnapshot.Version == 3 {
+		if force {
+			return nil
+		}
+		hasher, ok := s.opts.ContextHasher.(port.RunSnapshotContextHasher)
+		if !ok {
+			return ErrContextHasherUnavailable
+		}
+		graph, graphErr := entity.NewGraph(&project)
+		if graphErr != nil {
+			return graphErr
+		}
+		inputEdgeIDs := make([]string, len(pending.ExecutionSnapshot.Inputs))
+		for i, input := range pending.ExecutionSnapshot.Inputs {
+			inputEdgeIDs[i] = input.EdgeID
+		}
+		current, snapshotErr := graph.SnapshotForRunWithInputs(pending.NodeID, inputEdgeIDs)
+		if snapshotErr != nil {
+			return ErrContextChanged
+		}
+		hashes, err = hasher.InputHashesForSnapshot(ctx, project, current)
+	} else {
+		hashes, err = s.opts.ContextHasher.InputHashes(ctx, project, pending.NodeID)
+	}
 	if err != nil {
 		return err
 	}

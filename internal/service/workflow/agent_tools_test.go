@@ -100,6 +100,52 @@ func TestRunGraphAndNodeExposeOnlyPath(t *testing.T) {
 	}
 }
 
+func TestDAGRunToolsExposeOnlySelectedFrozenInputs(t *testing.T) {
+	project := rootlessBoundScriptProject()
+	project.Nodes = append(project.Nodes, entity.Node{
+		ID: "n_other_task", Type: valueobject.NodeTypePrompt, Title: "未选任务",
+		Params: entity.NodeParams{Instruction: "不参与本次运行"}, Rounds: []entity.Round{},
+	})
+	project.Edges = append(project.Edges, entity.Edge{
+		ID: "e_other_agent", SourceNodeID: "n_other_task", TargetNodeID: "n_agent", Kind: entity.EdgeKindConnection,
+	})
+	h := newPendingHarness(t, project)
+	artifact := putRunArtifact(t, h, valueobject.OutputKindScript, "n_source", validScriptPayload())
+	for i := range h.session.project.Nodes {
+		if h.session.project.Nodes[i].ID == "n_source" {
+			h.session.project.Nodes[i].ScriptVersions[0].ArtifactID = artifact.ID
+		}
+	}
+	scope := beginReplyScopeWithInputs(t, h, "r_dag_tools", "n_agent", []string{"e_prompt_agent"})
+	graph, err := h.service.ReadRunGraph(context.Background(), scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(graph.Nodes) != len(scope.InputNodeIDs) || len(graph.Edges) != len(scope.ExecutionSnapshot.InputEdges) {
+		t.Fatalf("DAG graph scope = %+v", graph)
+	}
+	for _, node := range graph.Nodes {
+		if node.ID == "n_other_task" || node.ID == "n_output" {
+			t.Fatalf("DAG graph leaked an unselected node: %+v", node)
+		}
+	}
+	if _, err := h.service.ReadRunNode(context.Background(), scope, "n_other_task"); !errors.Is(err, port.ErrChainScopeDenied) {
+		t.Fatalf("unselected node access error = %v", err)
+	}
+	input, err := h.service.ReadRunNode(context.Background(), scope, "n_source")
+	if err != nil || input.LatestScriptVersion == nil || input.LatestScriptVersion.ArtifactID != artifact.ID {
+		t.Fatalf("selected Script node = %+v err=%v", input, err)
+	}
+	canonical, err := valueobject.CanonicalJSON(validScriptPayload())
+	if err != nil {
+		t.Fatal(err)
+	}
+	read, err := h.service.ReadRunArtifact(context.Background(), scope, artifact.ID)
+	if err != nil || read.Kind != valueobject.OutputKindScript || !bytes.Equal(read.Data, canonical) {
+		t.Fatalf("selected Script artifact = %+v err=%v", read, err)
+	}
+}
+
 func TestSnapshotRunToolsIgnoreLiveGraphAndUseFrozenArtifactAuthorization(t *testing.T) {
 	h := newPendingHarness(t, baseProject())
 	appendNodeWithEdge(&h.session.project, entity.Node{
@@ -389,15 +435,20 @@ func TestSubmitRunReplySerializesConcurrentResults(t *testing.T) {
 }
 
 func beginReplyScope(t *testing.T, h *pendingHarness, runID, nodeID string) port.RunScope {
+	return beginReplyScopeWithInputs(t, h, runID, nodeID, nil)
+}
+
+func beginReplyScopeWithInputs(t *testing.T, h *pendingHarness, runID, nodeID string, inputEdgeIDs []string) port.RunScope {
 	t.Helper()
-	_, snapshot, err := h.service.BeginRun(context.Background(), runID, nodeID, h.session.project.ID)
+	_, snapshot, err := h.service.BeginRunWithInputs(context.Background(), runID, nodeID, inputEdgeIDs, h.session.project.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return port.RunScope{
 		RunID: runID, ProjectID: snapshot.ProjectID, TreeID: snapshot.TreeID, NodeID: snapshot.NodeID,
 		ChainID: "c_" + snapshot.NodeID, ChainPath: append([]string(nil), snapshot.ChainPath...),
-		ContextHash: h.hasher.hashes.ContextHash, AncestorHash: h.hasher.hashes.AncestorHash,
+		InputNodeIDs: snapshot.ScopeNodeIDs(),
+		ContextHash:  h.hasher.hashes.ContextHash, AncestorHash: h.hasher.hashes.AncestorHash,
 		ParamsHash: h.hasher.hashes.ParamsHash, ExecutionSnapshot: snapshot,
 	}
 }

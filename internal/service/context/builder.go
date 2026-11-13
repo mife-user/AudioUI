@@ -59,6 +59,7 @@ type Result struct {
 	TreeID         string
 	NodeID         string
 	ChainPath      []string
+	InputNodeIDs   []string
 	OutputKind     valueobject.OutputKind
 	ContextVersion int
 	InitialPrompt  string
@@ -84,12 +85,25 @@ type targetSection struct {
 }
 
 type workspaceSection struct {
-	CWD             string          `json:"cwd"`
-	Overlay         []string        `json:"overlay"`
-	Files           []WorkspaceFile `json:"files"`
-	Truncated       bool            `json:"truncated"`
-	NativeReadRoots []string        `json:"nativeReadRoots,omitempty"`
-	NativeWriteRoot string          `json:"nativeWriteRoot,omitempty"`
+	CWD               string                 `json:"cwd"`
+	Overlay           []string               `json:"overlay"`
+	Files             []WorkspaceFile        `json:"files"`
+	Truncated         bool                   `json:"truncated"`
+	NativeReadRoots   []string               `json:"nativeReadRoots,omitempty"`
+	NativeReadSources []port.WorkspaceSource `json:"nativeReadSources,omitempty"`
+	NativeWriteRoot   string                 `json:"nativeWriteRoot,omitempty"`
+}
+
+type taskInputSection struct {
+	NodeID string            `json:"nodeId"`
+	Title  string            `json:"title"`
+	Order  int               `json:"order"`
+	Task   entity.NodeParams `json:"task"`
+}
+
+type workspaceRootIdentity struct {
+	NodeID string `json:"nodeId"`
+	RootID string `json:"rootId,omitempty"`
 }
 
 type ancestorIdentity struct {
@@ -117,7 +131,11 @@ type contextBody struct {
 	Target         targetSection             `json:"target"`
 	TaskNodeID     string                    `json:"taskNodeId,omitempty"`
 	Task           entity.NodeParams         `json:"task"`
-	Path           []ancestorSection         `json:"path"`
+	Path           []ancestorSection         `json:"path,omitempty"`
+	Inputs         []entity.RunInput         `json:"inputs,omitempty"`
+	InputEdges     []entity.Edge             `json:"inputEdges,omitempty"`
+	Tasks          []taskInputSection        `json:"tasks,omitempty"`
+	Sources        []ancestorSection         `json:"sources,omitempty"`
 	Workspace      workspaceSection          `json:"workspace"`
 	Contract       []string                  `json:"contract"`
 	OutputBinding  *entity.RunOutputBinding  `json:"outputBinding,omitempty"`
@@ -139,6 +157,7 @@ type promptEnvelope struct {
 type resolvedAncestor struct {
 	identity ancestorIdentity
 	payload  json.RawMessage
+	shared   bool
 }
 
 type resolvedInput struct {
@@ -150,6 +169,13 @@ type resolvedInput struct {
 	outputContract *entity.RunOutputContract
 	ancestors      []resolvedAncestor
 	workspace      workspaceSection
+	inputs         []entity.RunInput
+	inputEdges     []entity.Edge
+	tasks          []taskInputSection
+	inputNodeIDs   []string
+	workspaceRoots []workspaceRootIdentity
+	dag            bool
+	contextVersion int
 }
 
 // Build creates the prompt, its hashes and a preflight estimate. If necessary,
@@ -171,9 +197,16 @@ func (b *Builder) Build(ctx context.Context, input Input) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	contextVersion := resolved.contextVersion
+	if contextVersion == 0 {
+		contextVersion = valueobject.DefaultContextVersion
+	}
 	body := contextBody{
-		Version: valueobject.DefaultContextVersion, Target: resolved.target,
+		Version: contextVersion, Target: resolved.target,
 		TaskNodeID: resolved.taskNodeID, Task: resolved.params,
+		Inputs:        append([]entity.RunInput(nil), resolved.inputs...),
+		InputEdges:    append([]entity.Edge(nil), resolved.inputEdges...),
+		Tasks:         append([]taskInputSection(nil), resolved.tasks...),
 		Workspace:     resolved.workspace,
 		Contract:      outputContract(resolved.target, resolved.outputBinding),
 		OutputBinding: resolved.outputBinding, OutputContract: resolved.outputContract,
@@ -184,7 +217,13 @@ func (b *Builder) Build(ctx context.Context, input Input) (Result, error) {
 		if err := ctx.Err(); err != nil {
 			return Result{}, err
 		}
-		body.Path = renderAncestors(resolved.ancestors, levels)
+		if resolved.dag {
+			body.Sources = renderAncestors(resolved.ancestors, levels)
+			body.Path = nil
+		} else {
+			body.Path = renderAncestors(resolved.ancestors, levels)
+			body.Sources = nil
+		}
 		prompt, contextHash, estimated, err := renderPrompt(body)
 		if err != nil {
 			return Result{}, err
@@ -193,11 +232,15 @@ func (b *Builder) Build(ctx context.Context, input Input) (Result, error) {
 			hashes.ContextHash = contextHash
 			return Result{
 				TreeID: resolved.target.TreeID, NodeID: resolved.target.NodeID,
-				ChainPath:  append([]string(nil), resolved.target.ChainPath...),
-				OutputKind: resolved.target.OutputKind, ContextVersion: valueobject.DefaultContextVersion,
+				ChainPath:    append([]string(nil), resolved.target.ChainPath...),
+				InputNodeIDs: append([]string(nil), resolved.inputNodeIDs...),
+				OutputKind:   resolved.target.OutputKind, ContextVersion: contextVersion,
 				InitialPrompt: prompt, Hashes: hashes,
 				Estimate: valueobject.ContextEstimate{EstimatorVersion: EstimatorVersion, EstimatedTokens: estimated, TokenBudget: budget},
 			}, nil
+		}
+		for nextAncestor < len(levels) && resolved.ancestors[nextAncestor].shared {
+			nextAncestor++
 		}
 		if nextAncestor == len(levels) {
 			return Result{}, &ContextTooLargeError{EstimatedTokens: estimated, TokenBudget: budget}
@@ -216,7 +259,8 @@ func (b *Builder) BuildRunContext(ctx context.Context, project entity.Project, n
 	}
 	return port.RunContext{
 		TreeID: result.TreeID, NodeID: result.NodeID, ChainPath: append([]string(nil), result.ChainPath...),
-		OutputKind: result.OutputKind, ContextVersion: result.ContextVersion,
+		InputNodeIDs: append([]string(nil), result.InputNodeIDs...),
+		OutputKind:   result.OutputKind, ContextVersion: result.ContextVersion,
 		InitialPrompt: result.InitialPrompt, Hashes: result.Hashes, Estimate: result.Estimate,
 	}, nil
 }
@@ -230,6 +274,10 @@ func (b *Builder) InputHashes(ctx context.Context, input Input) (valueobject.Con
 		return valueobject.ContextHashes{}, err
 	}
 	return inputHashes(resolved)
+}
+
+func (b *Builder) InputHashesForSnapshot(ctx context.Context, project entity.Project, snapshot entity.RunExecutionSnapshot) (valueobject.ContextHashes, error) {
+	return b.InputHashes(ctx, Input{Project: project, NodeID: snapshot.NodeID, Snapshot: snapshot})
 }
 
 func (b *Builder) resolve(ctx context.Context, input Input, includeWorkspace bool) (resolvedInput, error) {
@@ -354,6 +402,9 @@ func (b *Builder) resolveSnapshot(ctx context.Context, input Input, includeWorks
 	}
 	if snapshot.ProjectID != project.ID || snapshot.NodeID != input.NodeID {
 		return resolvedInput{}, fmt.Errorf("%w: snapshot does not match project and target", ErrWorkspaceScope)
+	}
+	if snapshot.Version == 3 {
+		return b.resolveDAGSnapshot(ctx, input, snapshot, includeWorkspace)
 	}
 	if snapshot.PathNodes[0].Type != valueobject.NodeTypeTopic {
 		return resolvedInput{}, fmt.Errorf("%w: run path must start at a topic", ErrNotInChain)
@@ -507,6 +558,141 @@ func (b *Builder) resolveSnapshot(ctx context.Context, input Input, includeWorks
 	}, nil
 }
 
+func (b *Builder) resolveDAGSnapshot(ctx context.Context, input Input, snapshot entity.RunExecutionSnapshot, includeWorkspace bool) (resolvedInput, error) {
+	target := snapshot.InputNodes[len(snapshot.InputNodes)-1]
+	kind, err := outputKind(&target)
+	if err != nil {
+		return resolvedInput{}, err
+	}
+	if kind != snapshot.OutputContract.Kind {
+		return resolvedInput{}, fmt.Errorf("%w: snapshot output contract does not match target", ErrNodeKindMismatch)
+	}
+	if includeWorkspace {
+		if isNil(input.Workspace) {
+			return resolvedInput{}, fmt.Errorf("%w: run workspace is required", ErrWorkspaceScope)
+		}
+		scope := input.Workspace.Scope()
+		if scope.ProjectID != snapshot.ProjectID || scope.TreeID != snapshot.TreeID || scope.NodeID != snapshot.NodeID ||
+			len(scope.ChainPath) != 0 || !slices.Equal(scope.InputNodeIDs, snapshot.ScopeNodeIDs()) {
+			return resolvedInput{}, fmt.Errorf("%w: workspace does not match DAG execution snapshot", ErrWorkspaceScope)
+		}
+	}
+
+	nodeByID := make(map[string]entity.Node, len(snapshot.InputNodes))
+	for _, node := range snapshot.InputNodes {
+		nodeByID[node.ID] = node
+	}
+	tasks := make([]taskInputSection, 0)
+	params := entity.NodeParams{}
+	taskNodeID := ""
+	for _, selected := range snapshot.Inputs {
+		if selected.Role != "task" {
+			continue
+		}
+		node := nodeByID[selected.SourceNodeID]
+		tasks = append(tasks, taskInputSection{NodeID: node.ID, Title: node.Title, Order: selected.Order, Task: node.Params})
+		if len(tasks) == 1 {
+			params = node.Params
+			taskNodeID = node.ID
+		}
+	}
+
+	var store port.ArtifactStore
+	if len(snapshot.Artifacts) > 0 {
+		if b == nil || isNil(b.artifacts) {
+			return resolvedInput{}, fmt.Errorf("%w: artifact store unavailable", ErrAncestorNotReady)
+		}
+		store, err = b.artifacts.ForProject(ctx, snapshot.ProjectID)
+		if err != nil {
+			return resolvedInput{}, fmt.Errorf("open artifact store: %w", err)
+		}
+		if isNil(store) {
+			return resolvedInput{}, fmt.Errorf("%w: artifact store unavailable", ErrAncestorNotReady)
+		}
+	}
+	ancestors := make([]resolvedAncestor, 0, len(snapshot.Artifacts))
+	loaded := make(map[string]resolvedAncestor, len(snapshot.Artifacts))
+	for _, reference := range snapshot.Artifacts {
+		node := nodeByID[reference.NodeID]
+		key := fmt.Sprintf("%s|%s|%d|%d", reference.Kind, reference.ArtifactID, reference.Version, -1)
+		if reference.CandidateIndex != nil {
+			key = fmt.Sprintf("%s|%s|%d|%d", reference.Kind, reference.ArtifactID, reference.Version, *reference.CandidateIndex)
+		}
+		if cached, ok := loaded[key]; ok {
+			cached.identity.NodeID = node.ID
+			cached.identity.NodeType = node.Type
+			cached.identity.Title = node.Title
+			cached.identity.Params = node.Params
+			cached.shared = true
+			ancestors = append(ancestors, cached)
+			continue
+		}
+		ancestor, err := loadSnapshotAncestor(ctx, store, node, reference)
+		if err != nil {
+			return resolvedInput{}, err
+		}
+		if reference.CandidateIndex != nil {
+			number := *reference.CandidateIndex + 1
+			ancestor.identity.CandidateNumber = &number
+		}
+		if reference.Kind == valueobject.OutputKindScript {
+			ancestor.identity.ArtifactVersion = reference.Version
+		}
+		loaded[key] = ancestor
+		ancestors = append(ancestors, ancestor)
+	}
+
+	workspace := workspaceSection{}
+	if includeWorkspace {
+		files, err := collectManifest(ctx, input.Workspace)
+		if err != nil {
+			return resolvedInput{}, err
+		}
+		overlay := make([]string, 0, len(input.Workspace.InputSources())+1)
+		for _, source := range input.Workspace.InputSources() {
+			overlay = append(overlay, source.LogicalPath)
+		}
+		overlay = append(overlay, "<exe>/runtime/")
+		writeRoot := "steps/" + snapshot.NodeID + "/"
+		cwd := "trees/" + snapshot.TreeID + "/"
+		if snapshot.TreeID == "" {
+			writeRoot = "."
+			cwd = "workspace/steps/" + snapshot.NodeID + "/"
+		}
+		workspace = workspaceSection{
+			CWD: cwd, Overlay: overlay, Files: files.Files, Truncated: files.Truncated,
+			NativeReadSources: input.Workspace.InputSources(),
+			NativeReadRoots:   []string{input.Workspace.RuntimeReadPath()}, NativeWriteRoot: writeRoot,
+		}
+	}
+	workspaceRoots := make([]workspaceRootIdentity, 0, len(snapshot.InputNodes)-1)
+	for _, node := range snapshot.InputNodes {
+		if node.ID == target.ID || node.Type == valueobject.NodeTypeTopic {
+			continue
+		}
+		rootID := node.WorkspaceRootID
+		if rootID == "" {
+			rootID = "project"
+		}
+		workspaceRoots = append(workspaceRoots, workspaceRootIdentity{NodeID: node.ID, RootID: rootID})
+	}
+	binding := snapshot.OutputBinding
+	contract := snapshot.OutputContract
+	return resolvedInput{
+		target: targetSection{
+			TreeID: snapshot.TreeID, NodeID: target.ID, NodeType: target.Type,
+			OutputKind: kind, ProjectVersion: snapshot.ProjectVersion,
+		},
+		params: params, targetParams: target.Params, taskNodeID: taskNodeID,
+		outputBinding: &binding, outputContract: &contract,
+		ancestors: ancestors, workspace: workspace,
+		inputs:     append([]entity.RunInput(nil), snapshot.Inputs...),
+		inputEdges: append([]entity.Edge(nil), snapshot.InputEdges...),
+		tasks:      tasks, inputNodeIDs: snapshot.ScopeNodeIDs(), workspaceRoots: workspaceRoots,
+		dag: true, contextVersion: 2,
+	}, nil
+}
+
 func snapshotArtifact(snapshot entity.RunExecutionSnapshot, nodeID string) (entity.RunArtifactReference, bool) {
 	var found entity.RunArtifactReference
 	ok := false
@@ -647,6 +833,11 @@ func renderAncestors(ancestors []resolvedAncestor, levels []int) []ancestorSecti
 	sections := make([]ancestorSection, 0, len(ancestors))
 	for i, ancestor := range ancestors {
 		section := ancestorSection{ancestorIdentity: ancestor.identity}
+		if ancestor.shared {
+			section.Representation = "shared"
+			sections = append(sections, section)
+			continue
+		}
 		switch levels[i] {
 		case 0:
 			section.Representation = "full"
@@ -669,17 +860,31 @@ func inputHashes(input resolvedInput) (valueobject.ContextHashes, error) {
 	for _, ancestor := range input.ancestors {
 		ancestors = append(ancestors, ancestor.identity)
 	}
+	version := input.contextVersion
+	if version == 0 {
+		version = valueobject.DefaultContextVersion
+	}
 	material := struct {
-		Version   int                `json:"version"`
-		TreeID    string             `json:"treeId"`
-		Ancestors []ancestorIdentity `json:"ancestors"`
-	}{valueobject.DefaultContextVersion, input.target.TreeID, ancestors}
+		Version        int                     `json:"version"`
+		TreeID         string                  `json:"treeId"`
+		Ancestors      []ancestorIdentity      `json:"ancestors"`
+		Inputs         []entity.RunInput       `json:"inputs,omitempty"`
+		InputEdges     []entity.Edge           `json:"inputEdges,omitempty"`
+		WorkspaceRoots []workspaceRootIdentity `json:"workspaceRoots,omitempty"`
+	}{version, input.target.TreeID, ancestors, input.inputs, input.inputEdges, input.workspaceRoots}
 	ancestorHash, err := hashJSON(material)
 	if err != nil {
 		return valueobject.ContextHashes{}, err
 	}
 	var paramsMaterial any = input.params
-	if input.outputContract != nil {
+	if input.outputContract != nil && input.dag {
+		paramsMaterial = struct {
+			Tasks          []taskInputSection        `json:"tasks"`
+			Target         entity.NodeParams         `json:"target"`
+			OutputBinding  *entity.RunOutputBinding  `json:"outputBinding"`
+			OutputContract *entity.RunOutputContract `json:"outputContract"`
+		}{input.tasks, input.targetParams, input.outputBinding, input.outputContract}
+	} else if input.outputContract != nil {
 		paramsMaterial = struct {
 			TaskNodeID     string                    `json:"taskNodeId"`
 			Task           entity.NodeParams         `json:"task"`
@@ -707,13 +912,26 @@ func outputContract(target targetSection, binding *entity.RunOutputBinding) []st
 		return append(contract, `topics payload: {"topics":[{"title":"...","angle":"...","hook":"..."}]}；候选为 3–10 条。`)
 	}
 	if target.NodeType == valueobject.NodeTypeAgent {
-		contract := []string{
-			"只根据当前路径与任务工作；禁止直接修改工程图。",
-			"工作区文件仅提供逻辑路径与大小，不自动注入文件内容；二进制资源仅通过路径引用。",
-			"祖先产物的摘录或引用可用 read_artifact 按块读取（每次不超过 16 KiB）；候选、提示词任务与脚本版本均按发送快照读取。",
-			"有歧义时调用 ask_user；结构化脚本结果必须通过 reply 提交。",
-			"输出契约固定为 script@1。",
-			fmt.Sprintf("reply 的 node_id 必须是 %s，kind 必须是 %s；输出 Script 节点以发送时绑定为准，不能自行指定。", target.NodeID, target.OutputKind),
+		var contract []string
+		if len(target.ChainPath) == 0 {
+			contract = []string{
+				"只根据本次已选输入及其冻结祖先工作，不推断或补入其他连接；禁止直接修改工程图。",
+				"多个 Prompt 按输入顺序分别作为任务，不自动合并或裁决冲突；Candidate 与 Script 按冻结来源作为上下文。",
+				"输入工作区按来源根和节点隔离，只能读取授权输入目录及 exe 同级只读 runtime；工作区文件正文不自动注入。",
+				"祖先产物的摘录或引用可用 read_artifact 按块读取（每次不超过 16 KiB）；候选及脚本版本均按发送快照读取。",
+				"有歧义时调用 ask_user；结构化脚本结果必须通过 reply 提交。",
+				"输出契约固定为 script@1。",
+				fmt.Sprintf("reply 的 node_id 必须是 %s，kind 必须是 %s；输出 Script 节点以发送时绑定为准，不能自行指定。", target.NodeID, target.OutputKind),
+			}
+		} else {
+			contract = []string{
+				"只根据当前路径与任务工作；禁止直接修改工程图。",
+				"工作区文件仅提供逻辑路径与大小，不自动注入文件内容；二进制资源仅通过路径引用。",
+				"祖先产物的摘录或引用可用 read_artifact 按块读取（每次不超过 16 KiB）；候选、提示词任务与脚本版本均按发送快照读取。",
+				"有歧义时调用 ask_user；结构化脚本结果必须通过 reply 提交。",
+				"输出契约固定为 script@1。",
+				fmt.Sprintf("reply 的 node_id 必须是 %s，kind 必须是 %s；输出 Script 节点以发送时绑定为准，不能自行指定。", target.NodeID, target.OutputKind),
+			}
 		}
 		switch {
 		case binding == nil || !binding.Bound:
@@ -747,7 +965,7 @@ func renderPrompt(body contextBody) (string, string, int, error) {
 	contextHash := hashBytes(canonical)
 	envelope := promptEnvelope{
 		Context:  canonical,
-		Metadata: promptMetadata{ContextVersion: valueobject.DefaultContextVersion, ContextHash: contextHash, EstimatorVersion: EstimatorVersion},
+		Metadata: promptMetadata{ContextVersion: body.Version, ContextHash: contextHash, EstimatorVersion: EstimatorVersion},
 	}
 	for i := 0; i < 16; i++ {
 		encoded, err := json.MarshalIndent(envelope, "", "  ")

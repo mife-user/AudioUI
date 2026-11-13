@@ -12,6 +12,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
+	"audio-ui/internal/domain/entity"
 	"audio-ui/internal/domain/port"
 	"audio-ui/internal/domain/valueobject"
 	"audio-ui/internal/infra/paths"
@@ -108,6 +109,165 @@ func TestViewListMergesDirectoriesAndShadowsNames(t *testing.T) {
 	}
 	if !limited.Truncated || len(limited.Entries) != 2 {
 		t.Fatalf("limited listing = %+v", limited)
+	}
+}
+
+func TestSnapshotRunViewSeparatesSameNamedFilesAcrossWorkspaceRoots(t *testing.T) {
+	layout, projectPaths := moverFixtures(t)
+	layout.RuntimeDir = filepath.Join(layout.Root, "runtime")
+	writeFile(t, filepath.Join(layout.RuntimeDir, "runtime.txt"), "runtime")
+	project := entity.Project{
+		Version: valueobject.ProjectFileVersion, ID: "p_test", Name: "多根输入", Revision: 1,
+		Nodes: []entity.Node{
+			{ID: "n_topic_a", Type: valueobject.NodeTypeTopic, Title: "根 A", WorkspaceRootID: "n_topic_a", Rounds: []entity.Round{}},
+			{ID: "n_topic_b", Type: valueobject.NodeTypeTopic, Title: "根 B", WorkspaceRootID: "n_topic_b", Rounds: []entity.Round{}},
+			{ID: "n_prompt_a", Type: valueobject.NodeTypePrompt, Title: "任务 A", WorkspaceRootID: "n_topic_a", Params: entity.NodeParams{Instruction: "任务 A"}, Rounds: []entity.Round{}},
+			{ID: "n_prompt_b", Type: valueobject.NodeTypePrompt, Title: "任务 B", WorkspaceRootID: "n_topic_b", Params: entity.NodeParams{Instruction: "任务 B"}, Rounds: []entity.Round{}},
+			{ID: "n_agent", Type: valueobject.NodeTypeAgent, Title: "Agent", WorkspaceRootID: "n_topic_a", Rounds: []entity.Round{}},
+		},
+		Edges: []entity.Edge{
+			{ID: "e_prompt_a", SourceNodeID: "n_prompt_a", TargetNodeID: "n_agent", Kind: entity.EdgeKindConnection},
+			{ID: "e_prompt_b", SourceNodeID: "n_prompt_b", TargetNodeID: "n_agent", Kind: entity.EdgeKindConnection},
+		},
+	}
+	graph, err := entity.NewGraph(&project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := graph.SnapshotForRun("n_agent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.Version != 3 || len(snapshot.InputRoots) != 2 {
+		t.Fatalf("multi-root snapshot = %+v", snapshot)
+	}
+	for _, source := range []struct{ rootID, nodeID, text string }{
+		{"n_topic_a", "n_prompt_a", "来自 A"},
+		{"n_topic_b", "n_prompt_b", "来自 B"},
+	} {
+		step, err := projectPaths.StepDir(source.rootID, source.nodeID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		writeFile(t, filepath.Join(step, "same.txt"), source.text)
+	}
+
+	view, err := NewSnapshotRunView(layout, project.ID, snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, source := range []struct{ rootID, nodeID, text string }{
+		{"n_topic_a", "n_prompt_a", "来自 A"},
+		{"n_topic_b", "n_prompt_b", "来自 B"},
+	} {
+		path := "inputs/" + source.rootID + "/" + source.nodeID + "/same.txt"
+		read, err := view.ReadFile(context.Background(), path, 0)
+		if err != nil || string(read.Data) != source.text {
+			t.Fatalf("ReadFile(%q) = %q err=%v", path, read.Data, err)
+		}
+	}
+	listing, err := view.ListDir(context.Background(), "inputs", 20)
+	if err != nil || len(listing.Entries) != 2 {
+		t.Fatalf("input namespace listing = %+v err=%v", listing, err)
+	}
+	rootListing, err := view.ListDir(context.Background(), "inputs/n_topic_a/n_prompt_a", 20)
+	if err != nil || len(rootListing.Entries) != 1 || rootListing.Entries[0].Name != "same.txt" {
+		t.Fatalf("input root listing = %+v err=%v", rootListing, err)
+	}
+	sources := view.InputSources()
+	if len(sources) != 2 || sources[0].LogicalPath != "inputs/n_topic_a/n_prompt_a/" || sources[1].LogicalPath != "inputs/n_topic_b/n_prompt_b/" {
+		t.Fatalf("native read manifest = %+v", sources)
+	}
+	targetTree, err := projectPaths.TreeDir("n_topic_a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	targetStep, err := projectPaths.StepDir("n_topic_a", "n_agent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if filepath.Clean(view.CWD()) != filepath.Clean(targetTree) || filepath.Clean(view.WriteDir()) != filepath.Clean(targetStep) {
+		t.Fatalf("target workspace cwd=%q write=%q", view.CWD(), view.WriteDir())
+	}
+	if _, err := view.Resolver().ResolveWrite(filepath.Join("steps", "n_agent", "output.txt")); err != nil {
+		t.Fatalf("target workspace write was denied: %v", err)
+	}
+	if _, err := view.Resolver().ResolveRead(filepath.Join(projectPaths.TreesDir, "n_topic_a", "steps", "n_unselected", "secret.txt")); !errors.Is(err, paths.ErrPathDenied) {
+		t.Fatalf("unselected node read error = %v, want PATH_DENIED", err)
+	}
+	if _, err := view.Resolver().ResolveRead(filepath.Join(projectPaths.TreesDir, "n_topic_b", "steps", "n_prompt_b", "same.txt")); err != nil {
+		t.Fatalf("authorized cross-root native read: %v", err)
+	}
+	if _, err := view.Resolver().ResolveWrite(filepath.Join(projectPaths.TreesDir, "n_topic_b", "steps", "n_prompt_b", "same.txt")); !errors.Is(err, paths.ErrPathDenied) {
+		t.Fatalf("cross-root write error = %v, want PATH_DENIED", err)
+	}
+}
+
+func TestSnapshotRunViewUsesProjectWorkspaceWithoutTopic(t *testing.T) {
+	layout, projectPaths := moverFixtures(t)
+	layout.RuntimeDir = filepath.Join(layout.Root, "runtime")
+	project := entity.Project{
+		Version: valueobject.ProjectFileVersion, ID: "p_test", Name: "无 Topic", Revision: 1,
+		Nodes: []entity.Node{
+			{ID: "n_prompt", Type: valueobject.NodeTypePrompt, Title: "任务", Params: entity.NodeParams{Instruction: "执行任务"}, Rounds: []entity.Round{}},
+			{ID: "n_agent", Type: valueobject.NodeTypeAgent, Title: "Agent", Rounds: []entity.Round{}},
+		},
+		Edges: []entity.Edge{{ID: "e_prompt_agent", SourceNodeID: "n_prompt", TargetNodeID: "n_agent", Kind: entity.EdgeKindConnection}},
+	}
+	graph, err := entity.NewGraph(&project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := graph.SnapshotForRun("n_agent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	step, err := projectPaths.WorkspaceStepDir("n_prompt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(step, "input.txt"), "project input")
+
+	view, err := NewSnapshotRunView(layout, project.ID, snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	read, err := view.ReadFile(context.Background(), "inputs/project/n_prompt/input.txt", 0)
+	if err != nil || string(read.Data) != "project input" || view.Scope().TreeID != "" || len(view.Scope().ChainPath) != 0 {
+		t.Fatalf("rootless workspace read=%q scope=%+v err=%v", read.Data, view.Scope(), err)
+	}
+	listing, err := view.ListDir(context.Background(), ".", 20)
+	if err != nil || len(listing.Entries) != 1 || listing.Entries[0].Name != "inputs" {
+		t.Fatalf("rootless workspace listing=%+v err=%v", listing, err)
+	}
+	inputRoot := "inputs/project/n_prompt"
+	inputListing, err := view.ListDir(context.Background(), inputRoot, 20)
+	if err != nil || len(inputListing.Entries) != 1 || inputListing.Entries[0].Name != "input.txt" {
+		t.Fatalf("rootless input listing=%+v err=%v", inputListing, err)
+	}
+	inputStat, err := view.Stat(context.Background(), inputRoot)
+	if err != nil || !inputStat.Dir {
+		t.Fatalf("rootless input stat=%+v err=%v", inputStat, err)
+	}
+	targetStep, err := projectPaths.WorkspaceStepDir("n_agent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sources := view.InputSources()
+	if len(sources) != 1 || sources[0].LogicalPath != "inputs/project/n_prompt/" || filepath.Clean(sources[0].PhysicalPath) != filepath.Clean(step) {
+		t.Fatalf("rootless native read manifest = %+v", sources)
+	}
+	if filepath.Clean(view.CWD()) != filepath.Clean(targetStep) || filepath.Clean(view.WriteDir()) != filepath.Clean(targetStep) {
+		t.Fatalf("rootless target workspace cwd=%q write=%q, want %q", view.CWD(), view.WriteDir(), targetStep)
+	}
+	if _, err := view.Resolver().ResolveRead(filepath.Join(step, "input.txt")); err != nil {
+		t.Fatalf("rootless input native read was denied: %v", err)
+	}
+	if _, err := view.Resolver().ResolveWrite(filepath.Join(step, "input.txt")); !errors.Is(err, paths.ErrPathDenied) {
+		t.Fatalf("rootless input write error = %v, want PATH_DENIED", err)
+	}
+	if _, err := view.Resolver().ResolveWrite("result.txt"); err != nil {
+		t.Fatalf("target workspace write was denied: %v", err)
 	}
 }
 

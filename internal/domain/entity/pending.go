@@ -6,26 +6,27 @@ import "audio-ui/internal/domain/valueobject"
 // produced it. The raw payload is stored separately so invalid output is
 // preserved.
 type Pending struct {
-	ID           string                    `json:"id"`
-	RunID        string                    `json:"runId"`
-	RequestID    string                    `json:"requestId,omitempty"`
-	ChainID      string                    `json:"chainId"`
-	ChainPath    []string                  `json:"chainPath"`
-	NodeID       string                    `json:"nodeId"`
-	Kind         valueobject.OutputKind    `json:"kind"`
-	Status       valueobject.PendingStatus `json:"status"`
-	ContextHash  string                    `json:"contextHash,omitempty"`
-	AncestorHash string                    `json:"ancestorHash,omitempty"`
-	ParamsHash   string                    `json:"paramsHash,omitempty"`
-	Payload      string                    `json:"payload"`
-	Summary      string                    `json:"summary,omitempty"`
-	Error        string                    `json:"error,omitempty"`
-	ArtifactID    string                    `json:"artifactId,omitempty"`
-	OutputBinding      *RunOutputBinding         `json:"outputBinding,omitempty"`
-	OutputSchemaVersion int                      `json:"outputSchemaVersion,omitempty"`
-	ResultNodeID       string                    `json:"resultNodeId,omitempty"`
-	CreatedNodeIDs     []string                  `json:"createdNodeIds,omitempty"`
-	CreatedAt          string                    `json:"createdAt"`
+	ID                  string                    `json:"id"`
+	RunID               string                    `json:"runId"`
+	RequestID           string                    `json:"requestId,omitempty"`
+	ChainID             string                    `json:"chainId"`
+	ChainPath           []string                  `json:"chainPath"`
+	NodeID              string                    `json:"nodeId"`
+	Kind                valueobject.OutputKind    `json:"kind"`
+	Status              valueobject.PendingStatus `json:"status"`
+	ContextHash         string                    `json:"contextHash,omitempty"`
+	AncestorHash        string                    `json:"ancestorHash,omitempty"`
+	ParamsHash          string                    `json:"paramsHash,omitempty"`
+	Payload             string                    `json:"payload"`
+	Summary             string                    `json:"summary,omitempty"`
+	Error               string                    `json:"error,omitempty"`
+	ArtifactID          string                    `json:"artifactId,omitempty"`
+	OutputBinding       *RunOutputBinding         `json:"outputBinding,omitempty"`
+	OutputSchemaVersion int                       `json:"outputSchemaVersion,omitempty"`
+	ExecutionSnapshot   *RunExecutionSnapshot     `json:"executionSnapshot,omitempty"`
+	ResultNodeID        string                    `json:"resultNodeId,omitempty"`
+	CreatedNodeIDs      []string                  `json:"createdNodeIds,omitempty"`
+	CreatedAt           string                    `json:"createdAt"`
 }
 
 func (p Pending) Clone() Pending {
@@ -35,6 +36,10 @@ func (p Pending) Clone() Pending {
 	if p.OutputBinding != nil {
 		binding := *p.OutputBinding
 		clone.OutputBinding = &binding
+	}
+	if p.ExecutionSnapshot != nil {
+		snapshot := p.ExecutionSnapshot.Clone()
+		clone.ExecutionSnapshot = &snapshot
 	}
 	return clone
 }

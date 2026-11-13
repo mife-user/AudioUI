@@ -18,6 +18,7 @@ export type {
     Round,
     RunArtifactReference,
     RunExecutionSnapshot,
+    RunInput,
     RunOutputBinding,
     RunOutputContract,
     RunRecord,

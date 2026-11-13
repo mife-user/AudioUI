@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"slices"
 
 	"audio-ui/internal/domain/entity"
@@ -50,7 +51,12 @@ func validateAppliedReplyGraph(project entity.Project, pending entity.Pending, a
 	if pending.Status != valueobject.PendingApplied || pending.OutputBinding == nil {
 		return nil
 	}
-	if pending.OutputSchemaVersion != 1 || pending.ChainID != "c_"+pending.NodeID || len(pending.ChainPath) == 0 || pending.ChainPath[len(pending.ChainPath)-1] != pending.NodeID {
+	dagSnapshot := pending.ExecutionSnapshot != nil && pending.ExecutionSnapshot.Version == 3
+	if pending.OutputSchemaVersion != 1 || pending.ChainID != "c_"+pending.NodeID ||
+		(!dagSnapshot && (len(pending.ChainPath) == 0 || pending.ChainPath[len(pending.ChainPath)-1] != pending.NodeID)) ||
+		(dagSnapshot && (pending.ExecutionSnapshot.Validate() != nil || pending.ExecutionSnapshot.NodeID != pending.NodeID ||
+			pending.ExecutionSnapshot.OutputContract.Kind != pending.Kind || pending.ExecutionSnapshot.OutputContract.SchemaVersion != pending.OutputSchemaVersion ||
+			pending.ExecutionSnapshot.OutputBinding != *pending.OutputBinding || len(pending.ChainPath) != 0)) {
 		return fmt.Errorf("invalid reply identity")
 	}
 	graph, err := entity.NewGraph(&project)
@@ -60,9 +66,31 @@ func validateAppliedReplyGraph(project entity.Project, pending entity.Pending, a
 	if err := graph.Validate(); err != nil {
 		return err
 	}
-	path, err := graph.PathToRoot(pending.NodeID)
-	if err != nil || !slices.Equal(path, pending.ChainPath) {
-		return fmt.Errorf("reply path does not match persisted graph")
+	if dagSnapshot {
+		snapshot := pending.ExecutionSnapshot
+		for _, frozen := range snapshot.InputNodes {
+			live, ok := graph.Node(frozen.ID)
+			if !ok || !samePendingSnapshotNode(live, frozen) {
+				return fmt.Errorf("DAG input node does not match persisted graph")
+			}
+		}
+		for _, root := range snapshot.InputRoots {
+			live, ok := graph.Node(root.ID)
+			if !ok || live.Type != valueobject.NodeTypeTopic || live.WorkspaceRootID != root.WorkspaceRootID {
+				return fmt.Errorf("DAG input root does not match persisted graph")
+			}
+		}
+		for _, frozen := range snapshot.InputEdges {
+			live, ok := graph.Edge(frozen.ID)
+			if !ok || live != frozen {
+				return fmt.Errorf("DAG input edge does not match persisted graph")
+			}
+		}
+	} else {
+		path, err := graph.PathToRoot(pending.NodeID)
+		if err != nil || !slices.Equal(path, pending.ChainPath) {
+			return fmt.Errorf("reply path does not match persisted graph")
+		}
 	}
 	target, ok := graph.Node(pending.NodeID)
 	if !ok {
@@ -164,4 +192,12 @@ func validateAppliedReplyGraph(project entity.Project, pending entity.Pending, a
 		return fmt.Errorf("generated Script version does not match pending")
 	}
 	return nil
+}
+
+func samePendingSnapshotNode(live *entity.Node, frozen entity.Node) bool {
+	return live.Type == frozen.Type && live.Title == frozen.Title && live.Parent == frozen.Parent &&
+		live.WorkspaceRootID == frozen.WorkspaceRootID && live.Locked == frozen.Locked && live.Stale == frozen.Stale &&
+		reflect.DeepEqual(live.ParentCandidate, frozen.ParentCandidate) && reflect.DeepEqual(live.CandidateSource, frozen.CandidateSource) &&
+		reflect.DeepEqual(live.Params, frozen.Params) && slices.Equal(live.Rounds, frozen.Rounds) &&
+		slices.Equal(live.ScriptVersions, frozen.ScriptVersions)
 }

@@ -13,6 +13,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"audio-ui/internal/domain/entity"
 	"audio-ui/internal/domain/port"
 	"audio-ui/internal/domain/valueobject"
 	"audio-ui/internal/infra/paths"
@@ -39,10 +40,15 @@ type viewLayer struct {
 // from the current node through its ancestors, with root runtime last.
 type View struct {
 	projectID       string
+	treeID          string
 	treeDir         string
+	cwd             string
 	writeDir        string
 	chainPath       []string
+	inputNodeIDs    []string
 	layers          []viewLayer
+	sourceLayers    map[string]viewLayer
+	inputSources    []port.WorkspaceSource
 	runGuard        *paths.RunGuard
 	runtimeReadPath string
 	allowAbsolute   bool
@@ -104,12 +110,12 @@ func NewRunView(layout valueobject.Layout, projectID, treeID, nodeID string, cha
 	}
 
 	view := &View{
-		projectID: projectID,
-		treeDir:   runGuard.TreeDir(),
-		writeDir:  runGuard.WriteDir(),
-		chainPath: runGuard.ChainPath(),
-		layers:    make([]viewLayer, 0, len(chainPath)+1),
-		runGuard:  runGuard, runtimeReadPath: filepath.ToSlash(runtimeReadPath),
+		projectID: projectID, treeID: treeID,
+		treeDir: runGuard.TreeDir(), cwd: runGuard.TreeDir(), writeDir: runGuard.WriteDir(),
+		chainPath: runGuard.ChainPath(), inputNodeIDs: append([]string(nil), chainPath...),
+		layers:       make([]viewLayer, 0, len(chainPath)+1),
+		sourceLayers: make(map[string]viewLayer),
+		runGuard:     runGuard, runtimeReadPath: filepath.ToSlash(runtimeReadPath),
 	}
 	for i := len(chainPath) - 1; i >= 0; i-- {
 		stepDir, stepErr := projectPaths.StepDir(treeID, chainPath[i])
@@ -144,6 +150,109 @@ func NewRunView(layout valueobject.Layout, projectID, treeID, nodeID string, cha
 	}
 	view.layers = append(view.layers, layer)
 	return view, nil
+}
+
+func NewSnapshotRunView(layout valueobject.Layout, projectID string, snapshot entity.RunExecutionSnapshot) (*View, error) {
+	if err := valueobject.ValidateID(projectID); err != nil {
+		return nil, err
+	}
+	if err := snapshot.Validate(); err != nil || snapshot.ProjectID != projectID || snapshot.Version != 3 {
+		return nil, fmt.Errorf("%w: invalid DAG execution snapshot", paths.ErrWorkspaceScopeInvalid)
+	}
+	projectPaths, err := paths.ResolveProject(layout, projectID)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(layout.Root) == "" {
+		return nil, fmt.Errorf("%w: application root is required", paths.ErrWorkspaceScopeInvalid)
+	}
+	if _, err := os.Stat(projectPaths.Dir); err != nil {
+		return nil, fmt.Errorf("%w: project directory: %v", paths.ErrWorkspaceScopeInvalid, err)
+	}
+	if err := secureDirectoryPath(layout.Root, projectPaths.Dir, false); err != nil {
+		return nil, err
+	}
+	var treeDir, cwd, writeDir string
+	if snapshot.TreeID != "" {
+		treeDir, err = projectPaths.TreeDir(snapshot.TreeID)
+		if err != nil {
+			return nil, err
+		}
+		if err := secureDirectoryPath(layout.Root, treeDir, true); err != nil {
+			return nil, err
+		}
+		cwd = treeDir
+		writeDir, err = projectPaths.StepDir(snapshot.TreeID, snapshot.NodeID)
+	} else {
+		treeDir = projectPaths.WorkspaceDir
+		if err := secureDirectoryPath(layout.Root, treeDir, true); err != nil {
+			return nil, err
+		}
+		cwd, err = projectPaths.WorkspaceStepDir(snapshot.NodeID)
+		if err == nil {
+			writeDir = cwd
+		}
+	}
+	if err != nil {
+		return nil, err
+	}
+	if err := secureDirectoryPath(layout.Root, writeDir, true); err != nil {
+		return nil, err
+	}
+
+	sourceLayers := make(map[string]viewLayer)
+	inputSources := make([]port.WorkspaceSource, 0, len(snapshot.InputNodes)-1)
+	readRoots := make([]string, 0, len(snapshot.InputNodes)-1)
+	for _, node := range snapshot.InputNodes {
+		if node.ID == snapshot.NodeID || node.Type == valueobject.NodeTypeTopic {
+			continue
+		}
+		var stepDir string
+		rootID := node.WorkspaceRootID
+		if rootID == "" {
+			rootID = "project"
+			stepDir, err = projectPaths.WorkspaceStepDir(node.ID)
+		} else {
+			stepDir, err = projectPaths.StepDir(rootID, node.ID)
+		}
+		if err != nil {
+			return nil, err
+		}
+		if err := secureDirectoryPath(layout.Root, stepDir, true); err != nil {
+			return nil, err
+		}
+		layer, err := newViewLayer(stepDir)
+		if err != nil {
+			return nil, err
+		}
+		logicalRoot := "inputs/" + rootID + "/" + node.ID
+		sourceLayers[logicalRoot] = layer
+		readRoots = append(readRoots, stepDir)
+		inputSources = append(inputSources, port.WorkspaceSource{LogicalPath: logicalRoot + "/", PhysicalPath: stepDir})
+	}
+
+	runtimeDir := filepath.Join(layout.Root, "runtime")
+	if err := secureDirectoryPath(layout.Root, runtimeDir, false); err != nil {
+		return nil, err
+	}
+	runtimeLayer, err := newViewLayer(runtimeDir)
+	if err != nil {
+		return nil, err
+	}
+	runGuard, err := paths.NewRunGuardWithRoots(cwd, snapshot.NodeID, readRoots, writeDir, runtimeDir)
+	if err != nil {
+		return nil, err
+	}
+	runtimeReadPath, err := filepath.Rel(cwd, runtimeDir)
+	if err != nil {
+		return nil, err
+	}
+	return &View{
+		projectID: projectID, treeID: snapshot.TreeID, treeDir: treeDir, cwd: cwd, writeDir: writeDir,
+		chainPath: []string{}, inputNodeIDs: snapshot.ScopeNodeIDs(), layers: []viewLayer{runtimeLayer},
+		sourceLayers: sourceLayers, inputSources: inputSources,
+		runGuard: runGuard, runtimeReadPath: filepath.ToSlash(runtimeReadPath),
+	}, nil
 }
 
 // NewDirectView preserves M1's single physical workspace while sharing the
@@ -201,11 +310,19 @@ func newViewLayer(root string) (viewLayer, error) {
 	return viewLayer{root: absolute, guard: guard}, nil
 }
 
-func (v *View) TreeDir() string         { return v.treeDir }
-func (v *View) WriteDir() string        { return v.writeDir }
-func (v *View) ChainPath() []string     { return append([]string(nil), v.chainPath...) }
-func (v *View) CWD() string             { return v.treeDir }
+func (v *View) TreeDir() string     { return v.treeDir }
+func (v *View) WriteDir() string    { return v.writeDir }
+func (v *View) ChainPath() []string { return append([]string(nil), v.chainPath...) }
+func (v *View) CWD() string {
+	if v.cwd != "" {
+		return v.cwd
+	}
+	return v.treeDir
+}
 func (v *View) RuntimeReadPath() string { return v.runtimeReadPath }
+func (v *View) InputSources() []port.WorkspaceSource {
+	return append([]port.WorkspaceSource(nil), v.inputSources...)
+}
 func (v *View) Resolver() port.ScopedPathResolver {
 	if v.runGuard == nil {
 		return nil
@@ -216,15 +333,31 @@ func (v *View) Resolver() port.ScopedPathResolver {
 // Scope is empty for the legacy direct view, which is not a run-scoped
 // overlay and must not be used to construct M2 path context.
 func (v *View) Scope() port.WorkspaceScope {
-	if v.projectID == "" || len(v.chainPath) == 0 {
+	if v.projectID == "" {
 		return port.WorkspaceScope{}
 	}
-	return port.WorkspaceScope{
-		ProjectID: v.projectID,
-		TreeID:    v.chainPath[0],
-		NodeID:    v.chainPath[len(v.chainPath)-1],
-		ChainPath: v.ChainPath(),
+	treeID := v.treeID
+	if treeID == "" && len(v.chainPath) > 0 {
+		treeID = v.chainPath[0]
 	}
+	inputNodeIDs := v.inputNodeIDs
+	if len(inputNodeIDs) == 0 {
+		inputNodeIDs = v.chainPath
+	}
+	return port.WorkspaceScope{
+		ProjectID: v.projectID, TreeID: treeID, NodeID: v.ScopeNodeID(),
+		ChainPath: v.ChainPath(), InputNodeIDs: append([]string(nil), inputNodeIDs...),
+	}
+}
+
+func (v *View) ScopeNodeID() string {
+	if len(v.chainPath) > 0 {
+		return v.chainPath[len(v.chainPath)-1]
+	}
+	if len(v.inputNodeIDs) > 0 {
+		return v.inputNodeIDs[len(v.inputNodeIDs)-1]
+	}
+	return ""
 }
 
 func (v *View) ReadFile(ctx context.Context, input string, maxBytes int64) (port.WorkspaceRead, error) {
@@ -277,7 +410,15 @@ func (v *View) ListDir(ctx context.Context, input string, maxEntries int) (port.
 	if err != nil {
 		return port.WorkspaceList{}, err
 	}
-	_, top, err := v.lookup(clean)
+	if namespace, relative, level, ok := inputNamespace(clean); ok {
+		return v.listInputNamespace(ctx, clean, namespace, relative, level, maxEntries)
+	}
+	var top os.FileInfo
+	if clean == "." && len(v.sourceLayers) > 0 {
+		top, err = os.Stat(v.CWD())
+	} else {
+		_, top, err = v.lookup(clean)
+	}
 	if err != nil {
 		return port.WorkspaceList{}, err
 	}
@@ -287,6 +428,10 @@ func (v *View) ListDir(ctx context.Context, input string, maxEntries int) (port.
 
 	visible := make(map[string]port.WorkspaceEntry)
 	seen := make(map[string]struct{})
+	if clean == "." && len(v.sourceLayers) > 0 {
+		visible["inputs"] = port.WorkspaceEntry{Name: "inputs", Dir: true}
+		seen["inputs"] = struct{}{}
+	}
 	for _, layer := range v.layers {
 		if err := ctx.Err(); err != nil {
 			return port.WorkspaceList{}, err
@@ -476,7 +621,128 @@ func (v *View) Grep(ctx context.Context, expression, input string, options port.
 	return result, nil
 }
 
+func inputNamespace(clean string) (string, string, int, bool) {
+	parts := strings.Split(filepath.ToSlash(clean), "/")
+	if len(parts) == 0 || parts[0] != "inputs" {
+		return "", "", 0, false
+	}
+	if len(parts) == 1 {
+		return "", "", 1, true
+	}
+	if len(parts) == 2 {
+		return "", parts[1], 2, true
+	}
+	return strings.Join(parts[:3], "/"), strings.Join(parts[3:], "/"), 3, true
+}
+
+func (v *View) listInputNamespace(ctx context.Context, clean, namespace, relative string, level, maxEntries int) (port.WorkspaceList, error) {
+	if err := ctx.Err(); err != nil {
+		return port.WorkspaceList{}, err
+	}
+	if level < 3 {
+		seen := make(map[string]struct{})
+		entries := make([]port.WorkspaceEntry, 0)
+		for key := range v.sourceLayers {
+			parts := strings.Split(key, "/")
+			if level == 1 {
+				if _, exists := seen[parts[1]]; !exists {
+					seen[parts[1]] = struct{}{}
+					entries = append(entries, port.WorkspaceEntry{Name: parts[1], Dir: true})
+				}
+			} else if parts[1] == relative {
+				if _, exists := seen[parts[2]]; !exists {
+					seen[parts[2]] = struct{}{}
+					entries = append(entries, port.WorkspaceEntry{Name: parts[2], Dir: true})
+				}
+			}
+		}
+		sort.Slice(entries, func(i, j int) bool { return strings.ToLower(entries[i].Name) < strings.ToLower(entries[j].Name) })
+		if maxEntries <= 0 {
+			maxEntries = defaultEntries
+		} else if maxEntries > maxWalkEntries {
+			maxEntries = maxWalkEntries
+		}
+		result := port.WorkspaceList{Path: logicalPath(clean), Entries: entries}
+		if len(result.Entries) > maxEntries {
+			result.Entries = result.Entries[:maxEntries]
+			result.Truncated = true
+		}
+		return result, nil
+	}
+	layer, exists := v.sourceLayers[namespace]
+	if !exists {
+		return port.WorkspaceList{}, fmt.Errorf("%w: %s", os.ErrNotExist, logicalPath(clean))
+	}
+	if relative == "" {
+		relative = "."
+	}
+	physical, err := layer.guard.Resolve(relative)
+	if err != nil {
+		return port.WorkspaceList{}, err
+	}
+	info, err := os.Lstat(physical)
+	if err != nil {
+		return port.WorkspaceList{}, err
+	}
+	if !info.IsDir() {
+		return port.WorkspaceList{}, fmt.Errorf("cannot list a file: %s", logicalPath(clean))
+	}
+	dirEntries, err := os.ReadDir(physical)
+	if err != nil {
+		return port.WorkspaceList{}, err
+	}
+	entries := make([]port.WorkspaceEntry, 0, len(dirEntries))
+	seen := make(map[string]struct{})
+	for _, entry := range dirEntries {
+		nameKey := strings.ToLower(entry.Name())
+		if _, duplicate := seen[nameKey]; duplicate || reservedLogicalName(entry.Name()) {
+			continue
+		}
+		seen[nameKey] = struct{}{}
+		child := filepath.Join(relative, entry.Name())
+		if _, err := layer.guard.Resolve(child); err != nil {
+			continue
+		}
+		entryInfo, err := entry.Info()
+		if err != nil {
+			return port.WorkspaceList{}, err
+		}
+		entries = append(entries, port.WorkspaceEntry{Name: entry.Name(), Dir: entryInfo.IsDir(), Size: entryInfo.Size()})
+	}
+	sort.Slice(entries, func(i, j int) bool { return strings.ToLower(entries[i].Name) < strings.ToLower(entries[j].Name) })
+	if maxEntries <= 0 {
+		maxEntries = defaultEntries
+	} else if maxEntries > maxWalkEntries {
+		maxEntries = maxWalkEntries
+	}
+	result := port.WorkspaceList{Path: logicalPath(clean), Entries: entries}
+	if len(result.Entries) > maxEntries {
+		result.Entries = result.Entries[:maxEntries]
+		result.Truncated = true
+	}
+	return result, nil
+}
+
 func (v *View) lookup(clean string) (string, os.FileInfo, error) {
+	if namespace, relative, level, ok := inputNamespace(clean); ok {
+		if level < 3 {
+			info, err := os.Stat(v.treeDir)
+			return v.treeDir, info, err
+		}
+		layer, exists := v.sourceLayers[namespace]
+		if !exists {
+			return "", nil, fmt.Errorf("%w: %s", os.ErrNotExist, logicalPath(clean))
+		}
+		if relative == "" {
+			relative = "."
+		}
+		physical, err := layer.guard.Resolve(relative)
+		if err != nil {
+			return "", nil, err
+		}
+		info, err := os.Lstat(physical)
+		return physical, info, err
+	}
 	for _, layer := range v.layers {
 		physical, err := layer.guard.Resolve(clean)
 		if err != nil {

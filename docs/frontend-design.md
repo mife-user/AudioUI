@@ -504,13 +504,13 @@ Topic ──应用校验 topics──> Candidate A ──> Prompt ──> Agent 
 
 **连线弧线（U10，已于 2026-11-10 通过用户验收）**：正向可用路径采用三次贝塞尔；反向、窄间距或受卡片阻挡时使用带圆角过渡的复合曲线，并采样检查当前节点矩形。拖线预览与已连接边共享路由和实时节点尺寸；箭头、20px 命中区、路径高亮、运行锁样式及无效连接提示保留。没有可行避让路径时以平滑贝塞尔曲线退化并保留真实端点，密集布局可能与卡片相交。用户已完成界面验收；助手未代为操作真实页面。
 
-**U12 已于 2026-11-12 通过用户验收；U13 已于 2026-11-12 通过用户界面验收；U14 已于 2026-11-12 通过用户界面验收；U15～U16 目标已确认、未实现**：见[单文件原型](design/u10-u16-canvas-optimization-demo.html)与[任务计划](plans/active/canvas-workbench-optimization-plan.md)。用户确认去掉的是卡片**缩放控制框线**，普通卡片边框、局部缩放手柄、八向命中区及焦点提示保留；节点正文可折叠，Topic 候选及固定连接锚点可见。目标画布允许各阶段有向连接、多个上游但禁止成环；独立 Prompt → Agent 的有效任务可无 Topic 运行。执行时检查实际输入与目标契约，不兼容须说明而不删除连线；原型中的单主任务只是文本任务示例，不是所有节点的限制。已有结果默认确认后追加版本，也可显式新建并行结果；每个下游输入固定版本，预览标签不能暗中修改绑定。Topic 再次生成先预览新批次，确认后创建独立候选并保留旧来源。输入角色/次序及交互细节仍须评审；上述目标不等于当前 M2 行为已改变；原型不作为产品实现或验收证据。
+**U12 已于 2026-11-12 通过用户验收；U13 已于 2026-11-12 通过用户界面验收；U14 已于 2026-11-12 通过用户界面验收；U15 已于 2026-11-13 通过用户界面验收；U16 未实现**：U12 去掉完整缩放控制框线，普通卡片边框、局部手柄、八向命中区及焦点提示保留；U16 目标仍是已有输出确认后追加或显式新建并行结果、按连接固定版本、Topic 新批次先预览确认，本次不实现。见[单文件原型](design/u10-u16-canvas-optimization-demo.html)与[任务计划](plans/active/canvas-workbench-optimization-plan.md)。U15 保留有效 Topic 单路径运行；无 Topic 或 DAG 输入通过运行前“选择运行输入”对话框确认。默认选择全部直接普通边，可取消可选输入并调整次序；Prompt 标为任务，Candidate/Script 标为上下文，不兼容边必须先取消，且至少保留一个非空 Prompt。连接确认不修改图；确认输入后、启动前先保存本次选中的 Prompt 草稿，提交期间临时锁定快照输入子图及受保护的输出。输入祖先按来源根和节点隔离只读，目标工作区唯一可写；v2 单路径与 v3 DAG 快照分开表达，不伪造 `chainPath`。U15 不改变 `reply` Schema、pending 确认或 U16 的逐边版本/并行结果规则。原型仍是模拟数据，不作为实现或验收证据。
 
 **节点折叠与 Topic 候选锚点（U13）**：五类节点正文可折叠，工程节点另存 `collapsed` 状态；折叠展示高度为 56 画布像素，但不覆盖持久化展开尺寸，展开恢复原尺寸。折叠状态经工程作用域 `SetNodeCollapsed` 命令保存；折叠时仍可移动，不显示八向缩放和尺寸设置，展开后恢复。正文保持挂载并用 `hidden` 隐藏，保留 Topic/Prompt 编辑草稿及组件内状态；状态、运行请求和待处理入口保留在标题区。Topic 标题区显示候选数及固定锚点；各 Candidate 的 handle ID 仍唯一并固定在同一可见位置，实际边仍对应原 Candidate 与来源索引。正文候选列表可滚动，定位操作聚焦真实 Candidate，不移动节点；读取加载/失败显式呈现，关系从工程快照中的真实 Candidate 派生。折叠/展开后刷新 React Flow Handle 测量；避让排布继续使用保存的展开尺寸。用户于 2026-11-12 确认界面验收通过；本任务未归档截图或逐项操作记录。
 
 **U14 连接过渡方案（已通过用户验收）**：五类节点均提供手动输入/输出连接入口，普通连线只新增关系，不替换已有上游；保留键盘等价入口。改挂或断开须在输入关系列表中明确选择一条普通边并确认；候选的生成来源受保护。断开不通过点击画布连线直接删除，不自动迁移文件；工作区归属不匹配时阻止运行。无 Topic、多上游或不符合旧契约时显示暂不支持运行的原因，不能假报成功。关系与合法性来自 Go 快照和命令，叶子汇合不得展示为单一路径。交互示意见 [U14 单文件演示](design/u14-dag-transition-demo.html)；它不是实现或验收证据。
 
-**输入与运行前保存**：自动保存不禁用正在输入的控件；IME 组合结束后再保存，旧响应不能覆盖新草稿。启动 Agent 只 flush 根到目标节点的路径前缀及受保护输出；下游和无关分支不得误锁或阻止运行。工程切换、失败与仅重试快照均保留明确状态。
+**输入与运行前保存**：自动保存不禁用正在输入的控件；IME 组合结束后再保存，旧响应不能覆盖新草稿。U15 启动 Agent 时只 flush 本次选中的 Prompt 任务；提交期间临时锁定快照输入子图及绑定输出，未选输入和无关分支不得误锁或阻止运行。工程切换、失败与仅重试快照均保留明确状态。
 
 详细行为与 AC-U-01～20 见[优化计划](plans/active/canvas-workbench-optimization-plan.md)和[验收标准](acceptance.md)。U5 已实现并经用户确认验收；U6 原范围及标题栏拖拽补充项、U7 均于 2026-11-10 通过用户验收；U10 已通过用户验收；U11 用户于 2026-11-10 确认实际页面验收通过（助手未启动浏览器）；U12 已于 2026-11-12 通过用户页面验收，整文件测试无进度并已停止（见[自检证据](dev/evidence/u12-resize-outline.md)）；U13 已于 2026-11-12 通过用户界面验收；完整 Vitest 套件未通过且 worker/Node 堆退出（见[自检记录](dev/evidence/u13-node-folding.md)）；U14 已于 2026-11-12 通过用户界面验收（见[U14 证据](dev/evidence/u14-dag-transition.md)）；U7 真实页面操作未测；U8～U9 尚未实施。
 
@@ -538,7 +538,7 @@ Topic ──应用校验 topics──> Candidate A ──> Prompt ──> Agent 
 | `CandidateNode` | 展示由有效 topics 结果生成的候选与固定来源 | default/selected/locked/stale/error | `--panel` `--accent` `--warn` |
 | `PromptNode` | 编辑任务与约束，不提供运行入口；连接后可创建 Agent | draft/saved/dirty/saving/save-error/locked/error | `--panel` `--accent` `--danger` |
 | `PromptParameters` | Prompt 任务与约束、320ms 保存、失败保留/重试及 Agent 启动前 flush | saved/dirty/saving/save-error/sync-pending/invalid/disabled | `--panel-2` `--accent` `--danger` |
-| `AgentNode` | 本地运行入口、输出绑定与运行状态 | idle/starting/running/succeeded/failed/interrupted/busy/error | `--panel` `--accent` `--ok` `--danger` |
+| `AgentNode` | 本地运行入口、输出绑定、运行状态及运行前输入选择 | idle/input-select/starting/running/succeeded/failed/interrupted/busy/error | `--panel` `--accent` `--ok` `--danger` |
 | `ScriptNode` | 展示最新正文摘要、全文/历史按需读取及冻结目标待确认入口 | empty/ready/pending/conflict/invalid/error | `--panel` `--warn` `--danger` |
 | `ScriptVersionList` | 展示不可变脚本版本与来源运行 | empty/ready/selected | `--panel-2` `--muted` |
 | `ScriptResultConfirmation` | 确认追加版本或取消，不覆盖旧版本 | pending/confirming/confirmed/cancelled/conflict | `--warn` `--ok` `--danger` |

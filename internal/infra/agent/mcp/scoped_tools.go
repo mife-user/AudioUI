@@ -18,12 +18,13 @@ import (
 const maxArtifactChunkBytes = 16 * 1024
 
 type RunChainOutput struct {
-	RunID     string   `json:"runId"`
-	TreeID    string   `json:"treeId"`
-	ChainID   string   `json:"chainId"`
-	ChainPath []string `json:"chainPath"`
-	NodeID    string   `json:"nodeId"`
-	Workspace string   `json:"workspace"`
+	RunID        string   `json:"runId"`
+	TreeID       string   `json:"treeId,omitempty"`
+	ChainID      string   `json:"chainId"`
+	ChainPath    []string `json:"chainPath"`
+	InputNodeIDs []string `json:"inputNodeIds,omitempty"`
+	NodeID       string   `json:"nodeId"`
+	Workspace    string   `json:"workspace"`
 }
 
 type GetNodeInput struct {
@@ -85,13 +86,22 @@ type rawReplyInput struct {
 
 func validateRunToolOptions(options Options) error {
 	scope := options.RunScope
-	if scope.RunID == "" || scope.ProjectID == "" || scope.TreeID == "" || scope.NodeID == "" || scope.ChainID != "c_"+scope.NodeID || len(scope.ChainPath) == 0 || scope.ChainPath[0] != scope.TreeID || scope.ChainPath[len(scope.ChainPath)-1] != scope.NodeID {
+	if scope.RunID == "" || scope.ProjectID == "" || scope.NodeID == "" || scope.ChainID != "c_"+scope.NodeID {
 		return errors.New("invalid MCP run scope")
+	}
+	if scope.ExecutionSnapshot.Version == 3 {
+		snapshot := scope.ExecutionSnapshot
+		if snapshot.Validate() != nil || snapshot.ProjectID != scope.ProjectID || snapshot.TreeID != scope.TreeID ||
+			snapshot.NodeID != scope.NodeID || len(scope.ChainPath) != 0 || !slices.Equal(snapshot.ScopeNodeIDs(), scope.InputNodeIDs) {
+			return errors.New("invalid MCP execution snapshot")
+		}
+	} else if scope.TreeID == "" || len(scope.ChainPath) == 0 || scope.ChainPath[0] != scope.TreeID || scope.ChainPath[len(scope.ChainPath)-1] != scope.NodeID {
+		return errors.New("invalid MCP run path")
 	}
 	if scope.ContextHash == "" || scope.AncestorHash == "" || scope.ParamsHash == "" {
 		return errors.New("MCP run scope is missing context hashes")
 	}
-	if scope.ExecutionSnapshot.Version != 0 {
+	if scope.ExecutionSnapshot.Version != 0 && scope.ExecutionSnapshot.Version != 3 {
 		snapshot := scope.ExecutionSnapshot
 		if snapshot.Validate() != nil || snapshot.ProjectID != scope.ProjectID || snapshot.TreeID != scope.TreeID || snapshot.NodeID != scope.NodeID || !slices.Equal(snapshot.ChainPath, scope.ChainPath) {
 			return errors.New("invalid MCP execution snapshot")
@@ -151,8 +161,8 @@ func (s *Server) getRunChain(ctx context.Context, _ *sdkmcp.CallToolRequest, _ G
 		scope := s.options.RunScope
 		output = RunChainOutput{
 			RunID: scope.RunID, TreeID: scope.TreeID, ChainID: scope.ChainID,
-			ChainPath: append([]string(nil), scope.ChainPath...), NodeID: scope.NodeID,
-			Workspace: s.options.Workspace,
+			ChainPath: append([]string(nil), scope.ChainPath...), InputNodeIDs: append([]string(nil), scope.InputNodeIDs...),
+			NodeID: scope.NodeID, Workspace: s.options.Workspace,
 		}
 		return nil
 	})
@@ -278,7 +288,7 @@ func (s *Server) replyRun(ctx context.Context, request *sdkmcp.CallToolRequest) 
 	err := s.withActiveRun(ctx, func() error {
 		scope := *s.options.RunScope
 		if input.NodeID != scope.NodeID {
-			if slices.Contains(scope.ChainPath, input.NodeID) {
+			if slices.Contains(scope.ChainPath, input.NodeID) || slices.Contains(scope.InputNodeIDs, input.NodeID) {
 				return port.ErrTurnNotActive
 			}
 			return port.ErrChainScopeDenied
@@ -316,7 +326,7 @@ func (s *Server) replyRun(ctx context.Context, request *sdkmcp.CallToolRequest) 
 		}
 		output = ScopedReplyOutput{
 			Accepted: true, PendingID: pending.ID, Status: pending.Status,
-			ResultNodeID: pending.ResultNodeID,
+			ResultNodeID:   pending.ResultNodeID,
 			CreatedNodeIDs: append([]string(nil), pending.CreatedNodeIDs...), Error: pending.Error,
 		}
 		return nil

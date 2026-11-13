@@ -1635,6 +1635,224 @@
   opacity: .5;
 }
 
+.agent-run-input-backdrop {
+  position: fixed;
+  z-index: 1200;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: var(--s4);
+  background: var(--glass);
+  backdrop-filter: blur(6px);
+}
+
+.agent-run-input-dialog {
+  width: min(620px, 100%);
+  max-height: min(80vh, 720px);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+  padding: var(--s4);
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: 0 18px 64px var(--glass);
+}
+
+.agent-run-input-head,
+.agent-run-input-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s3);
+}
+
+.agent-run-input-kicker {
+  margin: 0 0 var(--s1);
+  color: var(--muted);
+  font-size: 10px;
+  letter-spacing: .08em;
+}
+
+.agent-run-input-head h2 {
+  margin: 0;
+  font-size: 16px;
+  line-height: 1.3;
+}
+
+.agent-run-input-close,
+.agent-run-input-move button,
+.agent-run-input-cancel,
+.agent-run-input-confirm {
+  min-height: 32px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.agent-run-input-close {
+  width: 32px;
+  padding: 0;
+  font-size: 18px;
+}
+
+.agent-run-input-description,
+.agent-run-input-empty,
+.agent-run-input-note {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.agent-run-input-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+}
+
+.agent-run-input-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: var(--s3);
+  padding: var(--s3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+}
+
+.agent-run-input-item.is-selected {
+  border-color: var(--border-strong);
+  background: var(--accent-soft);
+}
+
+.agent-run-input-item.is-unsupported {
+  border-style: dashed;
+}
+
+.agent-run-input-choice {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  gap: var(--s2);
+  cursor: pointer;
+}
+
+.agent-run-input-choice input {
+  flex: 0 0 auto;
+  margin: var(--s1) 0 0;
+  accent-color: var(--accent);
+}
+
+.agent-run-input-copy {
+  display: grid;
+  min-width: 0;
+  gap: var(--s1);
+}
+
+.agent-run-input-copy strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-run-input-copy small,
+.agent-run-input-order {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.agent-run-input-copy em {
+  color: var(--warn);
+  font-size: 10px;
+  font-style: normal;
+}
+
+.agent-run-input-order {
+  min-width: 52px;
+  text-align: right;
+}
+
+.agent-run-input-move {
+  display: flex;
+  gap: var(--s1);
+}
+
+.agent-run-input-move button {
+  width: 30px;
+  min-height: 30px;
+  padding: 0;
+  color: var(--text-dim);
+}
+
+.agent-run-input-close:focus-visible,
+.agent-run-input-move button:focus-visible,
+.agent-run-input-cancel:focus-visible,
+.agent-run-input-confirm:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.agent-run-input-close:disabled,
+.agent-run-input-move button:disabled,
+.agent-run-input-cancel:disabled,
+.agent-run-input-confirm:disabled {
+  cursor: not-allowed;
+  opacity: .45;
+}
+
+.agent-run-input-note.is-warning {
+  color: var(--warn);
+}
+
+.agent-run-input-actions {
+  justify-content: flex-end;
+  padding-top: var(--s2);
+  border-top: 1px solid var(--border);
+}
+
+.agent-run-input-cancel,
+.agent-run-input-confirm {
+  padding: 0 var(--s3);
+  font-size: 11px;
+}
+
+.agent-run-input-confirm {
+  border-color: var(--border-strong);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+@media (max-width: 560px) {
+  .agent-run-input-backdrop {
+    padding: var(--s2);
+  }
+
+  .agent-run-input-dialog {
+    padding: var(--s3);
+  }
+
+  .agent-run-input-item {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .agent-run-input-order {
+    display: none;
+  }
+}
+
 .canvas-empty-overlay {
   position: absolute;
   z-index: 2;

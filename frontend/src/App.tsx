@@ -117,7 +117,7 @@ function App() {
     await bridge.openProject(projectId)
   }, [bridge, prepareProjectChange])
   const refreshGraph = useCallback((receipt: GraphMutationReceipt) => bridge.syncGraphMutation(receipt), [bridge])
-  const startNodeRun = useCallback((nodeId: string, projectId: string) => bridge.startRun(nodeId, projectId), [bridge])
+  const startNodeRun = useCallback((nodeId: string, projectId: string, inputEdgeIds?: string[]) => bridge.startRun(nodeId, projectId, inputEdgeIds), [bridge])
   const onSelectRun = useCallback((runId: string) => bridge.selectRun(runId), [bridge])
   const onRetryRun = useCallback((runId: string) => bridge.retryRun(runId), [bridge])
   const onGetPending = useCallback((id: string, projectId: string) => pendingAPI.getPending(id, projectId), [])

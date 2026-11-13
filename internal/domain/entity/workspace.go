@@ -43,10 +43,11 @@ type WorkspaceRunSummary struct {
 // being prepared. The persisted run summary replaces this placeholder once it
 // becomes available.
 type WorkspaceRunLock struct {
-	RunID     string   `json:"runId"`
-	TreeID    string   `json:"treeId"`
-	NodeID    string   `json:"nodeId"`
-	ChainPath []string `json:"chainPath"`
+	RunID        string   `json:"runId"`
+	TreeID       string   `json:"treeId,omitempty"`
+	NodeID       string   `json:"nodeId"`
+	ChainPath    []string `json:"chainPath"`
+	InputNodeIDs []string `json:"inputNodeIds,omitempty"`
 }
 
 // WorkspaceChain is a leaf path derived from Graph.LeafChains.

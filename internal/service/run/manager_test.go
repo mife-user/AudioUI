@@ -98,6 +98,36 @@ func TestStartRunUsesOneShotSpecAndPersistsTerminalUsage(t *testing.T) {
 	}
 }
 
+func TestStartWithInputsSupportsRootlessDAGSnapshot(t *testing.T) {
+	h := newRunHarness(t)
+	project := entity.Project{
+		Version: valueobject.ProjectFileVersion, ID: "p_test", Name: "Rootless", Revision: 1, ActiveNodeID: "n_agent",
+		Nodes: []entity.Node{
+			{ID: "n_prompt", Type: valueobject.NodeTypePrompt, Title: "任务", Params: entity.NodeParams{Instruction: "整理输入"}, Rounds: []entity.Round{}},
+			{ID: "n_agent", Type: valueobject.NodeTypeAgent, Title: "Agent", Rounds: []entity.Round{}},
+		},
+		Edges: []entity.Edge{{ID: "e_prompt_agent", SourceNodeID: "n_prompt", TargetNodeID: "n_agent", Kind: entity.EdgeKindConnection}},
+	}
+	h.workflow.project = project
+	h.projects.project = project
+	inputEdgeIDs := []string{"e_prompt_agent"}
+	record, err := h.manager.StartWithInputs(context.Background(), "n_agent", inputEdgeIDs, project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if record.TreeID != "" || len(record.ChainPath) != 0 || record.ExecutionSnapshot == nil || record.ExecutionSnapshot.Version != 3 {
+		t.Fatalf("rootless run record = %+v", record.RunSummary)
+	}
+	if h.toolFactory.scope.TreeID != "" || len(h.toolFactory.scope.ChainPath) != 0 ||
+		!slices.Equal(h.toolFactory.scope.InputNodeIDs, record.ExecutionSnapshot.ScopeNodeIDs()) {
+		t.Fatalf("rootless run scope = %+v", h.toolFactory.scope)
+	}
+	if err := h.manager.Interrupt(context.Background(), record.ID); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, func() bool { return !h.manager.IsBusy() })
+}
+
 func TestRecordRunPendingRetryAfterStoreFailureDoesNotDuplicateEvent(t *testing.T) {
 	h := newRunHarness(t)
 	record, err := h.manager.Start(context.Background(), "n_topic")
@@ -734,7 +764,11 @@ type fakeWorkflow struct {
 	released bool
 }
 
-func (w *fakeWorkflow) BeginRun(_ context.Context, _ string, nodeID string, expectedProjectID ...string) (entity.Project, entity.RunExecutionSnapshot, error) {
+func (w *fakeWorkflow) BeginRun(ctx context.Context, runID, nodeID string, expectedProjectID ...string) (entity.Project, entity.RunExecutionSnapshot, error) {
+	return w.BeginRunWithInputs(ctx, runID, nodeID, nil, expectedProjectID...)
+}
+
+func (w *fakeWorkflow) BeginRunWithInputs(_ context.Context, _ string, nodeID string, inputEdgeIDs []string, expectedProjectID ...string) (entity.Project, entity.RunExecutionSnapshot, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if len(expectedProjectID) > 0 && expectedProjectID[0] != "" && expectedProjectID[0] != w.project.ID {
@@ -747,7 +781,7 @@ func (w *fakeWorkflow) BeginRun(_ context.Context, _ string, nodeID string, expe
 	if err != nil {
 		return entity.Project{}, entity.RunExecutionSnapshot{}, err
 	}
-	snapshot, err := graph.SnapshotForRun(nodeID)
+	snapshot, err := graph.SnapshotForRunWithInputs(nodeID, inputEdgeIDs)
 	if err != nil {
 		return entity.Project{}, entity.RunExecutionSnapshot{}, err
 	}
@@ -767,7 +801,7 @@ type fakeContextBuilder struct{}
 func (fakeContextBuilder) BuildRunContext(_ context.Context, project entity.Project, nodeID string, snapshot entity.RunExecutionSnapshot, workspace port.RunWorkspace, budget int) (port.RunContext, error) {
 	scope := workspace.Scope()
 	return port.RunContext{
-		TreeID: scope.TreeID, NodeID: nodeID, ChainPath: scope.ChainPath,
+		TreeID: scope.TreeID, NodeID: nodeID, ChainPath: scope.ChainPath, InputNodeIDs: snapshot.ScopeNodeIDs(),
 		OutputKind: snapshot.OutputContract.Kind, ContextVersion: 1, InitialPrompt: "initial context",
 		Hashes:   valueobject.ContextHashes{ContextHash: "context", AncestorHash: "ancestor", ParamsHash: "params"},
 		Estimate: valueobject.ContextEstimate{EstimatorVersion: 1, EstimatedTokens: 40, TokenBudget: budget},
@@ -776,16 +810,20 @@ func (fakeContextBuilder) BuildRunContext(_ context.Context, project entity.Proj
 
 type fakeWorkspaceProvider struct{}
 
-func (fakeWorkspaceProvider) OpenRun(_ context.Context, projectID, treeID, nodeID string, chainPath []string) (port.RunWorkspace, error) {
-	return &fakeRunWorkspace{scope: port.WorkspaceScope{ProjectID: projectID, TreeID: treeID, NodeID: nodeID, ChainPath: append([]string(nil), chainPath...)}}, nil
+func (fakeWorkspaceProvider) OpenRun(_ context.Context, projectID string, snapshot entity.RunExecutionSnapshot) (port.RunWorkspace, error) {
+	return &fakeRunWorkspace{scope: port.WorkspaceScope{
+		ProjectID: projectID, TreeID: snapshot.TreeID, NodeID: snapshot.NodeID,
+		ChainPath: append([]string(nil), snapshot.ChainPath...), InputNodeIDs: snapshot.ScopeNodeIDs(),
+	}}, nil
 }
 
 type fakeRunWorkspace struct{ scope port.WorkspaceScope }
 
-func (w *fakeRunWorkspace) Scope() port.WorkspaceScope      { return w.scope }
-func (*fakeRunWorkspace) CWD() string                       { return `C:\workspace\trees\n_topic` }
-func (*fakeRunWorkspace) RuntimeReadPath() string           { return `..\..\..\..\..\runtime` }
-func (*fakeRunWorkspace) Resolver() port.ScopedPathResolver { return fakePathResolver{} }
+func (w *fakeRunWorkspace) Scope() port.WorkspaceScope         { return w.scope }
+func (*fakeRunWorkspace) CWD() string                          { return `C:\workspace\trees\n_topic` }
+func (*fakeRunWorkspace) RuntimeReadPath() string              { return `..\..\..\..\..\runtime` }
+func (*fakeRunWorkspace) InputSources() []port.WorkspaceSource { return nil }
+func (*fakeRunWorkspace) Resolver() port.ScopedPathResolver    { return fakePathResolver{} }
 func (w *fakeRunWorkspace) ReadFile(context.Context, string, int64) (port.WorkspaceRead, error) {
 	return port.WorkspaceRead{}, nil
 }

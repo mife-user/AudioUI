@@ -18,12 +18,19 @@ func (s *Service) ReadRunGraph(ctx context.Context, scope port.RunScope) (port.R
 	if err != nil {
 		return port.RunGraph{}, err
 	}
-	result := port.RunGraph{Nodes: make([]port.RunGraphNode, 0, len(scope.ChainPath))}
+	result := port.RunGraph{Nodes: make([]port.RunGraphNode, 0, len(scope.ExecutionSnapshot.ScopeNodeIDs()))}
 	if scope.ExecutionSnapshot.Version != 0 && scope.ExecutionSnapshot.OutputBinding.Bound {
 		binding := scope.ExecutionSnapshot.OutputBinding
 		result.OutputBinding = &binding
 	}
-	for _, id := range scope.ChainPath {
+	nodeIDs := scope.ChainPath
+	if scope.ExecutionSnapshot.Version == 3 {
+		nodeIDs = scope.InputNodeIDs
+		result.Edges = append([]entity.Edge(nil), scope.ExecutionSnapshot.InputEdges...)
+	} else {
+		result.Edges = append([]entity.Edge(nil), scope.ExecutionSnapshot.PathEdges...)
+	}
+	for _, id := range nodeIDs {
 		node, ok := graph.Node(id)
 		if !ok {
 			return port.RunGraph{}, port.ErrChainScopeDenied
@@ -38,7 +45,11 @@ func (s *Service) ReadRunNode(ctx context.Context, scope port.RunScope, nodeID s
 	if err != nil {
 		return port.RunNode{}, err
 	}
-	if !slices.Contains(scope.ChainPath, nodeID) {
+	allowedNodes := scope.ChainPath
+	if scope.ExecutionSnapshot.Version == 3 {
+		allowedNodes = scope.InputNodeIDs
+	}
+	if !slices.Contains(allowedNodes, nodeID) {
 		return port.RunNode{}, port.ErrChainScopeDenied
 	}
 	node, ok := graph.Node(nodeID)
@@ -215,7 +226,33 @@ func (s *Service) runGraph(ctx context.Context, scope port.RunScope) (entity.Pro
 	if err := ctx.Err(); err != nil {
 		return entity.Project{}, nil, err
 	}
-	if scope.RunID == "" || scope.ProjectID == "" || scope.TreeID == "" || scope.NodeID == "" || scope.ChainID != "c_"+scope.NodeID || len(scope.ChainPath) == 0 || scope.ChainPath[len(scope.ChainPath)-1] != scope.NodeID {
+	if scope.RunID == "" || scope.ProjectID == "" || scope.NodeID == "" || scope.ChainID != "c_"+scope.NodeID {
+		return entity.Project{}, nil, port.ErrTurnNotActive
+	}
+	if scope.ExecutionSnapshot.Version == 3 {
+		snapshot := scope.ExecutionSnapshot
+		if snapshot.Validate() != nil || snapshot.ProjectID != scope.ProjectID || snapshot.TreeID != scope.TreeID ||
+			snapshot.NodeID != scope.NodeID || len(scope.ChainPath) != 0 || !slices.Equal(snapshot.ScopeNodeIDs(), scope.InputNodeIDs) {
+			return entity.Project{}, nil, port.ErrChainScopeDenied
+		}
+		project := entity.Project{
+			Version: snapshot.ProjectVersion, ID: snapshot.ProjectID, Revision: snapshot.ProjectRevision,
+			Nodes: make([]entity.Node, 0, len(snapshot.InputNodes)+len(snapshot.InputRoots)),
+			Edges: append([]entity.Edge(nil), snapshot.InputEdges...),
+		}
+		for _, node := range snapshot.InputNodes {
+			project.Nodes = append(project.Nodes, node.Clone())
+		}
+		for _, root := range snapshot.InputRoots {
+			project.Nodes = append(project.Nodes, root.Clone())
+		}
+		graph, err := entity.NewGraph(&project)
+		if err != nil {
+			return entity.Project{}, nil, port.ErrChainScopeDenied
+		}
+		return project, graph, nil
+	}
+	if scope.TreeID == "" || len(scope.ChainPath) == 0 || scope.ChainPath[len(scope.ChainPath)-1] != scope.NodeID {
 		return entity.Project{}, nil, port.ErrTurnNotActive
 	}
 	if scope.ExecutionSnapshot.Version != 0 {

@@ -9,6 +9,15 @@ export const COLLAPSED_NODE_HEIGHT = 56
 
 export type ChildNodeType = 'prompt' | 'agent' | 'script'
 
+export type RunInputOption = {
+  edgeId: string
+  sourceNodeId: string
+  sourceType: Node['type']
+  title: string
+  role: 'task' | 'candidate' | 'artifact' | 'unsupported'
+  taskReady: boolean
+}
+
 export type CanvasNodeData = {
   node: Node
   runningLocked: boolean
@@ -32,9 +41,10 @@ export type CanvasNodeData = {
   pendingOutputIds?: string[]
   globalRunBusy?: boolean
   runSubmitting?: boolean
+  runInputs?: RunInputOption[]
   onUpdateTopicParams?: (nodeId: string, title: string, params: NodeParams, projectId: string) => Promise<boolean | void>
   onUpdateNodeParams?: (nodeId: string, title: string, params: NodeParams, projectId: string) => Promise<boolean | void>
-  onStartRun?: (nodeId: string, projectId: string) => Promise<RunStartResult>
+  onStartRun?: (nodeId: string, projectId: string, inputEdgeIds?: string[]) => Promise<RunStartResult>
   onGetScriptVersion?: (nodeId: string, version: number, projectId: string) => Promise<ScriptVersionDetail>
   onRegisterPromptFlush?: (nodeId: string, projectId: string, flush: () => Promise<boolean>) => () => void
   onRegisterTopicFlush?: (nodeId: string, projectId: string, flush: () => Promise<boolean>) => () => void
@@ -59,6 +69,7 @@ export function deriveHighlightedPath(snapshot: WorkspaceSnapshot): Set<string> 
 type CanvasCallbacks = {
   paramsEditingDisabled?: boolean
   runSubmittingNodeId?: string
+  runSubmittingInputNodeIDs?: string[]
   candidateErrors?: Record<string, string>
   candidateLoading?: Record<string, boolean>
   onUpdateTopicParams?: CanvasNodeData['onUpdateTopicParams']
@@ -206,6 +217,7 @@ export function buildFlowModel(
   const submittingNodeId = callbacks.runSubmittingNodeId
   if (submittingNodeId) {
     locked.add(submittingNodeId)
+    for (const nodeId of callbacks.runSubmittingInputNodeIDs ?? []) locked.add(nodeId)
     for (const nodeId of snapshot.nodePaths?.[submittingNodeId] ?? []) locked.add(nodeId)
   }
   const highlighted = deriveHighlightedPath(snapshot)
@@ -217,10 +229,24 @@ export function buildFlowModel(
   const candidateNodeIdsByTopic = new Map<string, Record<number, string>>()
   const incomingCount = new Map<string, number>()
   const scriptsByAgent = new Map<string, Node[]>()
+  const runInputsByAgent = new Map<string, RunInputOption[]>()
   for (const edge of projectEdges) {
     incomingCount.set(edge.targetNodeId, (incomingCount.get(edge.targetNodeId) ?? 0) + 1)
     const sourceNode = projectNodeById.get(edge.sourceNodeId)
     const targetNode = projectNodeById.get(edge.targetNodeId)
+    if (edge.kind === 'connection' && targetNode?.type === 'agent' && sourceNode) {
+      let role: RunInputOption['role'] = 'unsupported'
+      if (sourceNode.type === 'prompt') role = 'task'
+      else if (sourceNode.type === 'candidate') role = 'candidate'
+      else if (sourceNode.type === 'script') role = 'artifact'
+      const inputs = runInputsByAgent.get(targetNode.id) ?? []
+      inputs.push({
+        edgeId: edge.id, sourceNodeId: sourceNode.id, sourceType: sourceNode.type,
+        title: sourceNode.title, role,
+        taskReady: role === 'task' && Boolean(sourceNode.params?.instruction?.trim()),
+      })
+      runInputsByAgent.set(targetNode.id, inputs)
+    }
     if (edge.kind === 'candidate_source' && sourceNode?.type === 'topic'
       && targetNode?.type === 'candidate' && targetNode.candidateSource?.topicNodeId === sourceNode.id) {
       const indexes = candidateIndexesByTopic.get(sourceNode.id) ?? []
@@ -292,6 +318,7 @@ export function buildFlowModel(
         candidateLoading: candidateTopicId ? callbacks.candidateLoading?.[candidateTopicId] : callbacks.candidateLoading?.[node.id] ?? false,
         outputScript: node.type === 'agent' ? outputForAgent(node.id) : undefined,
         outputAmbiguous: node.type === 'agent' && (scriptsByAgent.get(node.id)?.length ?? 0) > 0 && !outputForAgent(node.id),
+        runInputs: node.type === 'agent' ? runInputsByAgent.get(node.id) ?? [] : undefined,
         mutationsDisabled,
         paramsEditingDisabled: callbacks.paramsEditingDisabled ?? mutationsDisabled,
         projectId,

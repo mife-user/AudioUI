@@ -138,6 +138,7 @@ vi.mock('@xyflow/react', async () => {
     }, nodes),
     Background: () => null,
     BackgroundVariant: { Dots: 'dots' },
+    MarkerType: { ArrowClosed: 'arrowclosed' },
     Controls: () => null,
     Panel: ({ children }: PropsWithChildren) => React.createElement('div', null, children),
     ReactFlow,

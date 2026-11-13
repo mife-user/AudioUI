@@ -3,6 +3,8 @@ package entity
 import (
 	"errors"
 	"fmt"
+	"sort"
+	"strings"
 
 	"audio-ui/internal/domain/valueobject"
 )
@@ -118,8 +120,25 @@ func (g *Graph) EdgeBetween(sourceID, targetID string) (Edge, bool) {
 }
 
 func (g *Graph) SnapshotForRun(nodeID string) (RunExecutionSnapshot, error) {
+	return g.SnapshotForRunWithInputs(nodeID, nil)
+}
+
+func (g *Graph) SnapshotForRunWithInputs(nodeID string, inputEdgeIDs []string) (RunExecutionSnapshot, error) {
 	if g.project.Version >= valueobject.DAGProjectVersion {
-		return g.snapshotDAGForRun(nodeID)
+		if inputEdgeIDs != nil {
+			return g.snapshotDAGInputsForRun(nodeID, inputEdgeIDs)
+		}
+		snapshot, legacyErr := g.snapshotDAGForRun(nodeID)
+		if legacyErr == nil {
+			return snapshot, nil
+		}
+		if target, ok := g.Node(nodeID); ok && target.Type == valueobject.NodeTypeAgent {
+			return g.snapshotDAGInputsForRun(nodeID, nil)
+		}
+		return RunExecutionSnapshot{}, legacyErr
+	}
+	if inputEdgeIDs != nil {
+		return RunExecutionSnapshot{}, fmt.Errorf("%w: explicit input selection requires a DAG project", ErrRunGraphUnsupported)
 	}
 	target, ok := g.Node(nodeID)
 	if !ok {
@@ -196,6 +215,221 @@ func (g *Graph) SnapshotForRun(nodeID string) (RunExecutionSnapshot, error) {
 		}
 	}
 	return snapshot, nil
+}
+
+func (g *Graph) snapshotDAGInputsForRun(nodeID string, inputEdgeIDs []string) (RunExecutionSnapshot, error) {
+	target, ok := g.Node(nodeID)
+	if !ok {
+		return RunExecutionSnapshot{}, fmt.Errorf("%w: %s", ErrGraphNodeNotFound, nodeID)
+	}
+	if target.Type != valueobject.NodeTypeAgent {
+		return RunExecutionSnapshot{}, fmt.Errorf("%w: DAG input runs require an Agent target", ErrRunGraphUnsupported)
+	}
+	if inputEdgeIDs == nil {
+		inputEdgeIDs = make([]string, 0, len(g.incoming[nodeID]))
+		for _, edge := range g.incoming[nodeID] {
+			if edge.Kind == EdgeKindConnection {
+				inputEdgeIDs = append(inputEdgeIDs, edge.ID)
+			}
+		}
+	}
+	inputs := make([]RunInput, 0, len(inputEdgeIDs))
+	selectedEdges := make(map[string]Edge, len(inputEdgeIDs))
+	tasks := 0
+	for order, edgeID := range inputEdgeIDs {
+		edge, exists := g.Edge(edgeID)
+		if !exists || edge.Kind != EdgeKindConnection || edge.TargetNodeID != nodeID {
+			return RunExecutionSnapshot{}, fmt.Errorf("%w: selected input edge %s does not target Agent", ErrRunGraphUnsupported, edgeID)
+		}
+		if _, duplicate := selectedEdges[edgeID]; duplicate {
+			return RunExecutionSnapshot{}, fmt.Errorf("%w: duplicate selected input %s", ErrRunGraphUnsupported, edgeID)
+		}
+		source, exists := g.Node(edge.SourceNodeID)
+		if !exists {
+			return RunExecutionSnapshot{}, fmt.Errorf("%w: input source not found", ErrGraphInvalid)
+		}
+		role := InputRoleForNodeType(source.Type)
+		if role == "" {
+			return RunExecutionSnapshot{}, fmt.Errorf("%w: %s cannot be an Agent input", ErrRunGraphUnsupported, source.Type)
+		}
+		if role == "task" {
+			if strings.TrimSpace(source.Params.Instruction) == "" {
+				return RunExecutionSnapshot{}, fmt.Errorf("%w: Prompt %s has no task", ErrRunGraphUnsupported, source.ID)
+			}
+			tasks++
+		}
+		selectedEdges[edgeID] = edge
+		inputs = append(inputs, RunInput{EdgeID: edge.ID, SourceNodeID: source.ID, Role: role, Order: order})
+	}
+	if tasks == 0 {
+		return RunExecutionSnapshot{}, fmt.Errorf("%w: Agent run requires a connected Prompt task", ErrRunGraphUnsupported)
+	}
+
+	included := map[string]struct{}{nodeID: {}}
+	inputEdgeSet := make(map[string]Edge)
+	for _, edge := range selectedEdges {
+		inputEdgeSet[edge.ID] = edge
+	}
+	processed := make(map[string]struct{})
+	var includeAncestors func(string, bool) error
+	includeAncestors = func(id string, includeIncoming bool) error {
+		included[id] = struct{}{}
+		if !includeIncoming {
+			return nil
+		}
+		if _, exists := processed[id]; exists {
+			return nil
+		}
+		processed[id] = struct{}{}
+		for _, edge := range g.incoming[id] {
+			if id == nodeID {
+				if _, selected := selectedEdges[edge.ID]; !selected {
+					continue
+				}
+			} else if edge.Kind == EdgeKindConnection {
+				source, _ := g.Node(edge.SourceNodeID)
+				if source.Type == valueobject.NodeTypeTopic {
+					return fmt.Errorf("%w: Topic inputs must use a generated Candidate", ErrRunGraphUnsupported)
+				}
+			}
+			inputEdgeSet[edge.ID] = edge
+			if edge.Kind == EdgeKindCandidateSource {
+				included[edge.SourceNodeID] = struct{}{}
+				continue
+			}
+			if err := includeAncestors(edge.SourceNodeID, true); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	for _, input := range inputs {
+		if err := includeAncestors(input.SourceNodeID, true); err != nil {
+			return RunExecutionSnapshot{}, err
+		}
+	}
+	workspaceRoots := make(map[string]struct{})
+	for id := range included {
+		node, _ := g.Node(id)
+		if node.WorkspaceRootID == "" {
+			continue
+		}
+		if _, exists := included[node.WorkspaceRootID]; !exists {
+			workspaceRoots[node.WorkspaceRootID] = struct{}{}
+		}
+	}
+	inputRoots := make([]Node, 0, len(workspaceRoots))
+	for _, projectNode := range g.project.Nodes {
+		if _, needed := workspaceRoots[projectNode.ID]; needed {
+			if projectNode.Type != valueobject.NodeTypeTopic {
+				return RunExecutionSnapshot{}, fmt.Errorf("%w: invalid workspace root %s", ErrWorkspaceRootMismatch, projectNode.ID)
+			}
+			inputRoots = append(inputRoots, projectNode.Clone())
+		}
+	}
+	if len(inputRoots) != len(workspaceRoots) {
+		return RunExecutionSnapshot{}, fmt.Errorf("%w: missing input workspace root", ErrWorkspaceRootMismatch)
+	}
+	inputNodes, err := g.topologicalSubset(included, inputEdgeSet)
+	if err != nil {
+		return RunExecutionSnapshot{}, err
+	}
+	inputEdges := make([]Edge, 0, len(inputEdgeSet))
+	for _, edge := range g.project.Edges {
+		if _, exists := inputEdgeSet[edge.ID]; exists {
+			inputEdges = append(inputEdges, edge)
+		}
+	}
+
+	kind := valueobject.OutputKindScript
+	outputBinding := RunOutputBinding{}
+	var output *Node
+	for _, childID := range g.children[nodeID] {
+		child, _ := g.Node(childID)
+		if child.Type != valueobject.NodeTypeScript {
+			continue
+		}
+		if output != nil {
+			return RunExecutionSnapshot{}, fmt.Errorf("%w: 存在多个 Script 输出，暂不能选择运行目标", ErrOutputBindingConflict)
+		}
+		output = child
+	}
+	if output != nil {
+		if len(g.incoming[output.ID]) != 1 || output.WorkspaceRootID != target.WorkspaceRootID {
+			return RunExecutionSnapshot{}, fmt.Errorf("%w: Script 输出有其他输入或工作区不匹配", ErrRunGraphUnsupported)
+		}
+		outputBinding = RunOutputBinding{Bound: true, NodeID: output.ID, ParentNodeID: target.ID}
+		if len(output.ScriptVersions) > 0 {
+			latest := output.ScriptVersions[len(output.ScriptVersions)-1]
+			outputBinding.BaselineVersion = latest.N
+			outputBinding.BaselineArtifactID = latest.ArtifactID
+		}
+	}
+
+	snapshot := RunExecutionSnapshot{
+		Version: 3, ProjectVersion: g.project.Version, ProjectID: g.project.ID,
+		ProjectRevision: g.project.Revision, TreeID: target.WorkspaceRootID, NodeID: target.ID,
+		InputNodes: inputNodes, InputRoots: inputRoots, InputEdges: inputEdges, Inputs: inputs,
+		Artifacts: []RunArtifactReference{}, OutputBinding: outputBinding,
+		OutputContract: RunOutputContract{Kind: kind, SchemaVersion: 1},
+	}
+	for _, node := range inputNodes[:len(inputNodes)-1] {
+		switch {
+		case node.Type == valueobject.NodeTypeCandidate && node.CandidateSource != nil:
+			index := node.CandidateSource.Index
+			snapshot.Artifacts = append(snapshot.Artifacts, RunArtifactReference{
+				NodeID: node.ID, ArtifactID: node.CandidateSource.ArtifactID,
+				Kind: valueobject.OutputKindTopics, CandidateIndex: &index,
+			})
+		case node.Type == valueobject.NodeTypeScript && len(node.ScriptVersions) > 0:
+			latest := node.ScriptVersions[len(node.ScriptVersions)-1]
+			snapshot.Artifacts = append(snapshot.Artifacts, RunArtifactReference{
+				NodeID: node.ID, ArtifactID: latest.ArtifactID,
+				Kind: valueobject.OutputKindScript, Version: latest.N,
+			})
+		}
+	}
+	if err := snapshot.Validate(); err != nil {
+		return RunExecutionSnapshot{}, err
+	}
+	return snapshot, nil
+}
+
+func (g *Graph) topologicalSubset(nodes map[string]struct{}, edges map[string]Edge) ([]Node, error) {
+	order := make(map[string]int, len(g.project.Nodes))
+	for i, node := range g.project.Nodes {
+		order[node.ID] = i
+	}
+	indegree := make(map[string]int, len(nodes))
+	children := make(map[string][]string, len(nodes))
+	for _, edge := range edges {
+		indegree[edge.TargetNodeID]++
+		children[edge.SourceNodeID] = append(children[edge.SourceNodeID], edge.TargetNodeID)
+	}
+	ready := make([]string, 0, len(nodes))
+	for _, node := range g.project.Nodes {
+		if _, exists := nodes[node.ID]; exists && indegree[node.ID] == 0 {
+			ready = append(ready, node.ID)
+		}
+	}
+	result := make([]Node, 0, len(nodes))
+	for len(ready) > 0 {
+		sort.Slice(ready, func(i, j int) bool { return order[ready[i]] < order[ready[j]] })
+		id := ready[0]
+		ready = ready[1:]
+		node, _ := g.Node(id)
+		result = append(result, node.Clone())
+		for _, childID := range children[id] {
+			indegree[childID]--
+			if indegree[childID] == 0 {
+				ready = append(ready, childID)
+			}
+		}
+	}
+	if len(result) != len(nodes) {
+		return nil, fmt.Errorf("%w: input graph contains a cycle", ErrGraphInvalid)
+	}
+	return result, nil
 }
 
 func (g *Graph) snapshotDAGForRun(nodeID string) (RunExecutionSnapshot, error) {

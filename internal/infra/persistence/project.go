@@ -230,6 +230,7 @@ func writeProjectSkeleton(dir string, project entity.Project) error {
 		RunsFile:     filepath.Join(dir, "runs.json"),
 		RunsDir:      filepath.Join(dir, "runs"),
 		TreesDir:     filepath.Join(dir, "trees"),
+		WorkspaceDir: filepath.Join(dir, "workspace"),
 	}
 	if err := paths.EnsureProjectDirs(projectPaths); err != nil {
 		return err

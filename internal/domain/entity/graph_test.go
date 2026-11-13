@@ -277,14 +277,18 @@ func TestDAGRunSnapshotRejectsAmbiguousInputsAndOutputs(t *testing.T) {
 		t.Fatalf("snapshot.Validate() = %v", err)
 	}
 	project.Edges = append(project.Edges, Edge{ID: "e_extra_input", SourceNodeID: "n_draft", TargetNodeID: "n_agent", Kind: EdgeKindConnection})
+	project.Nodes[2].Params.Instruction = "主任务"
+	project.Nodes[8].Params.Instruction = "附加任务"
 	graph, _ = NewGraph(&project)
 	if err := graph.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := graph.SnapshotForRun("n_agent"); !errors.Is(err, ErrRunGraphUnsupported) {
-		t.Fatalf("multi-input error = %v", err)
+	snapshot, err = graph.SnapshotForRun("n_agent")
+	if err != nil || snapshot.Version != 3 || len(snapshot.Inputs) != 2 {
+		t.Fatalf("multi-input snapshot=%+v error=%v", snapshot, err)
 	}
 	project = dagProject()
+	project.Nodes[2].Params.Instruction = "主任务"
 	project.Nodes = append(project.Nodes, Node{ID: "n_script2", Type: valueobject.NodeTypeScript, WorkspaceRootID: "n_topic"})
 	project.Edges = append(project.Edges, Edge{ID: "e_script2", SourceNodeID: "n_agent", TargetNodeID: "n_script2", Kind: EdgeKindConnection})
 	graph, _ = NewGraph(&project)
@@ -296,15 +300,68 @@ func TestDAGRunSnapshotRejectsAmbiguousInputsAndOutputs(t *testing.T) {
 	}
 }
 
-func TestDAGRunRejectsWorkspaceRootMismatch(t *testing.T) {
+func TestDAGRunSnapshotFreezesSelectedInputOrderAndRoles(t *testing.T) {
+	project := dagProject()
+	project.Nodes[2].Params.Instruction = "主任务"
+	project.Nodes = append(project.Nodes, Node{
+		ID: "n_input_script", Type: valueobject.NodeTypeScript, WorkspaceRootID: "n_topic",
+		ScriptVersions: []ScriptVersion{{N: 1, ArtifactID: "sha256:input", RunID: "r_seed"}},
+	})
+	project.Edges = append(project.Edges,
+		Edge{ID: "e_script_input", SourceNodeID: "n_input_script", TargetNodeID: "n_agent", Kind: EdgeKindConnection},
+	)
+	graph, err := NewGraph(&project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := graph.Validate(); err != nil {
+		t.Fatal(err)
+	}
+
+	selected, err := graph.SnapshotForRunWithInputs("n_agent", []string{"e_script_input", "e_n_agent"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if selected.Version != 3 || len(selected.ChainPath) != 0 || len(selected.Inputs) != 2 ||
+		selected.Inputs[0] != (RunInput{EdgeID: "e_script_input", SourceNodeID: "n_input_script", Role: "artifact", Order: 0}) ||
+		selected.Inputs[1] != (RunInput{EdgeID: "e_n_agent", SourceNodeID: "n_a", Role: "task", Order: 1}) {
+		t.Fatalf("selected inputs = %+v", selected.Inputs)
+	}
+	if err := selected.Validate(); err != nil {
+		t.Fatalf("selected.Validate() = %v", err)
+	}
+
+	withoutScript, err := graph.SnapshotForRunWithInputs("n_agent", []string{"e_n_agent"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, node := range withoutScript.InputNodes {
+		if node.ID == "n_input_script" {
+			t.Fatal("deselected Script was included in the frozen input subgraph")
+		}
+	}
+	if _, err := graph.SnapshotForRunWithInputs("n_agent", []string{"e_script_input"}); !errors.Is(err, ErrRunGraphUnsupported) {
+		t.Fatalf("snapshot without a Prompt task error = %v", err)
+	}
+}
+
+func TestDAGRunSnapshotIsolatesDifferentWorkspaceRoot(t *testing.T) {
 	project := dagProject()
 	project.Nodes = append(project.Nodes, Node{ID: "n_topic2", Type: valueobject.NodeTypeTopic, WorkspaceRootID: "n_topic2"})
-	project.Nodes[3].WorkspaceRootID = "n_topic2"
+	project.Nodes[2].Params.Instruction = "延续已选输入"
+	project.Nodes[2].WorkspaceRootID = "n_topic2"
 	graph, _ := NewGraph(&project)
 	if err := graph.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := graph.SnapshotForRun("n_agent"); !errors.Is(err, ErrWorkspaceRootMismatch) {
-		t.Fatalf("workspace mismatch error = %v", err)
+	snapshot, err := graph.SnapshotForRun("n_agent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.Version != 3 || len(snapshot.ChainPath) != 0 || len(snapshot.InputRoots) != 1 || snapshot.InputRoots[0].ID != "n_topic2" {
+		t.Fatalf("DAG snapshot did not preserve the isolated source root: %+v", snapshot)
+	}
+	if err := snapshot.Validate(); err != nil {
+		t.Fatalf("snapshot.Validate() = %v", err)
 	}
 }
