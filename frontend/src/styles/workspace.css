@@ -2275,50 +2275,52 @@
 .agent-console-body {
   min-height: 0;
   flex: 1;
+  padding-bottom: 36px;
+  overflow: hidden;
 }
 
-.console-tabs {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: var(--s1);
-  padding: 3px;
+.agent-recovery-panel {
+  min-height: 0;
+  max-height: 48%;
+  flex: 0 1 auto;
+  overflow: auto;
+  padding: var(--s2);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  background: var(--panel-2);
-}
-
-.console-tabs button {
-  min-height: 30px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--s1);
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--muted);
-  cursor: pointer;
-  font-size: 11px;
-}
-
-.console-tabs button[aria-selected="true"] {
-  border-color: var(--border-strong);
   background: var(--panel);
-  color: var(--text);
 }
 
-.console-tabs button span {
-  min-width: 18px;
-  padding: 0 4px;
-  border-radius: 999px;
-  background: var(--border);
+.agent-recovery-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s2);
+  margin-bottom: var(--s2);
   color: var(--text-dim);
-  font-family: var(--mono);
-  font-size: 9px;
+  font-size: 10.5px;
+}
+
+.agent-recovery-content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+}
+
+.agent-console-transcript {
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+  padding: 0;
+}
+
+.agent-console-transcript .agent-empty {
+  margin: auto;
 }
 
 .console-conversation {
   min-height: 0;
+  flex: 1;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   gap: var(--s2);
@@ -2340,13 +2342,6 @@
 
 .console-pending-empty p {
   margin: 6px 0 0;
-}
-
-.console-pending-panel {
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  gap: var(--s2);
 }
 
 .console-pending-list {
@@ -2669,6 +2664,8 @@
 
 .run-detail {
   min-height: 0;
+  flex: 1;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   gap: var(--s2);

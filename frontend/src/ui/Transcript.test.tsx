@@ -1,12 +1,8 @@
-import { render, screen } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { fireEvent, render, screen } from '@testing-library/react'
+import { describe, expect, it } from 'vitest'
 import { Transcript } from './Transcript'
 import type { TranscriptItem } from '../api/runs'
 import { TranscriptKind } from '../../bindings/audio-ui/internal/domain/valueobject'
-
-beforeEach(() => {
-  Element.prototype.scrollIntoView = vi.fn()
-})
 
 function item(overrides: Partial<TranscriptItem> = {}): TranscriptItem {
   return {
@@ -57,5 +53,41 @@ describe('Transcript', () => {
     render(<Transcript items={[item({ kind: TranscriptKind.TranscriptTool, toolName: '', toolSummary: '', text: 'raw output' })]} />)
     expect(screen.getByText('工具')).toBeInTheDocument()
     expect(screen.getByText('raw output')).toBeInTheDocument()
+  })
+
+  it('keeps long tool summaries available without truncating their text', () => {
+    const longPath = 'workspace/inputs/project/node_example/averyveryveryveryveryverylongunbrokenfilename_for_readability_demo.txt'
+    render(<Transcript items={[item({ kind: TranscriptKind.TranscriptTool, toolSummary: longPath })]} />)
+    expect(screen.getByText(longPath)).toBeInTheDocument()
+  })
+
+  it('follows new transcript content when already scrolled to the bottom', () => {
+    const { container, rerender } = render(<Transcript items={[item({ text: '第一条' })]} />)
+    const transcript = container.querySelector<HTMLElement>('.agent-console-transcript')
+    if (!transcript) throw new Error('transcript container is missing')
+    let scrollHeight = 600
+    Object.defineProperty(transcript, 'scrollHeight', { configurable: true, get: () => scrollHeight })
+    Object.defineProperty(transcript, 'clientHeight', { configurable: true, value: 200 })
+    Object.defineProperty(transcript, 'scrollTop', { configurable: true, writable: true, value: 400 })
+    fireEvent.scroll(transcript)
+
+    scrollHeight = 900
+    rerender(<Transcript items={[item({ text: '第一条更新' })]} />)
+    expect(transcript.scrollTop).toBe(900)
+  })
+
+  it('preserves the current history position when new transcript content arrives', () => {
+    const { container, rerender } = render(<Transcript items={[item({ text: '第一条' })]} />)
+    const transcript = container.querySelector<HTMLElement>('.agent-console-transcript')
+    if (!transcript) throw new Error('transcript container is missing')
+    let scrollHeight = 600
+    Object.defineProperty(transcript, 'scrollHeight', { configurable: true, get: () => scrollHeight })
+    Object.defineProperty(transcript, 'clientHeight', { configurable: true, value: 200 })
+    Object.defineProperty(transcript, 'scrollTop', { configurable: true, writable: true, value: 120 })
+    fireEvent.scroll(transcript)
+
+    scrollHeight = 900
+    rerender(<Transcript items={[item({ text: '第一条更新' })]} />)
+    expect(transcript.scrollTop).toBe(120)
   })
 })
