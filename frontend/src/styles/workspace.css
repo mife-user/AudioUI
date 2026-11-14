@@ -594,11 +594,8 @@
 .canvas-context-menu {
   position: fixed;
   z-index: 40;
-  width: 250px;
-  max-width: calc(100vw - 16px);
-  max-height: calc(100vh - 16px);
-  overflow: auto;
-  padding: 7px;
+  width: 158px;
+  padding: 4px;
   border: 1px solid var(--border-strong);
   border-radius: var(--radius);
   background: var(--bg-elev);
@@ -606,31 +603,55 @@
   color: var(--text);
 }
 
-.canvas-context-menu:focus-visible {
+.canvas-context-menu:focus-visible,
+.canvas-context-menu-submenu:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
+.canvas-context-menu-submenu {
+  position: absolute;
+  z-index: 1;
+  left: calc(100% + 4px);
+  width: 218px;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100vh - 16px);
+  overflow: auto;
+  padding: 5px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-elev);
+  box-shadow: var(--shadow-dialog);
+  color: var(--text);
+}
+
+.canvas-context-menu-submenu[data-side='left'] {
+  right: calc(100% + 4px);
+  left: auto;
+}
+
 .canvas-context-menu-title {
   display: block;
-  padding: 5px 8px 8px;
+  padding: 4px 8px 6px;
   color: var(--muted);
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 600;
 }
 
 .canvas-context-menu-options {
   display: flex;
   flex-direction: column;
-  gap: 2px;
 }
 
 .canvas-context-menu-item {
+  position: relative;
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
   width: 100%;
-  padding: 7px 8px;
+  min-height: 34px;
+  padding: 6px 8px;
   border: 0;
   border-radius: var(--radius-sm);
   background: transparent;
@@ -638,7 +659,18 @@
   cursor: pointer;
   text-align: left;
   font: inherit;
-  font-size: 11px;
+  font-size: 10px;
+}
+
+.canvas-context-menu-submenu .canvas-context-menu-item:not(.canvas-context-menu-item-info)::after {
+  position: absolute;
+  right: 8px;
+  bottom: -1px;
+  left: 8px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--border) 24%, var(--border) 76%, transparent);
+  content: '';
+  pointer-events: none;
 }
 
 .canvas-context-menu-item:hover:not(:disabled),
@@ -654,20 +686,32 @@
 .canvas-context-menu-item small {
   color: var(--muted);
   font-size: 9px;
+  white-space: nowrap;
 }
 
-.canvas-context-menu-note,
+.canvas-context-menu-trigger {
+  min-height: 32px;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.canvas-context-menu-chevron {
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1;
+}
+
+.canvas-context-menu-item-info {
+  color: var(--muted);
+  cursor: default;
+}
+
 .canvas-context-menu-hint {
   display: block;
-  margin: 6px 8px 0;
+  margin: 4px 8px 2px;
   color: var(--muted);
   font-size: 9px;
   line-height: 1.5;
-}
-
-.canvas-context-menu-hint {
-  padding-top: 6px;
-  border-top: 1px solid var(--border);
 }
 
 .canvas-flow-root > .react-flow {

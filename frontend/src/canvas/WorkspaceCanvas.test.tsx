@@ -228,6 +228,7 @@ function makeAPI(): GraphAPI {
 
 async function createFromCanvasMenu(type: string, x = 320, y = 240) {
   fireEvent.contextMenu(screen.getByTestId('mock-flow-pane'), { clientX: x, clientY: y })
+  fireEvent.click(await screen.findByRole('menuitem', { name: '新增节点' }))
   fireEvent.click(await screen.findByRole('menuitem', { name: type }))
 }
 
@@ -366,7 +367,7 @@ describe('WorkspaceCanvas', () => {
     expect(screen.getByTestId('edge-count')).toHaveTextContent('4')
   })
 
-  it('places a context-menu draft at the transformed click coordinate without moving the viewport', async () => {
+  it('shows node types in a second menu and keeps the original transformed click position', async () => {
     const api = makeAPI()
     const onSelectNode = vi.fn().mockResolvedValue(undefined)
     render(<WorkspaceCanvas snapshot={makeSnapshot()} onSelectNode={onSelectNode} onGraphMutation={vi.fn()} api={api} />)
@@ -378,7 +379,13 @@ describe('WorkspaceCanvas', () => {
     expect(screen.queryByRole('button', { name: '草稿提示词' })).not.toBeInTheDocument()
     fireEvent.contextMenu(screen.getByTestId('mock-flow-pane'), { clientX: 380, clientY: 260 })
     expect(await screen.findByRole('menu', { name: '新建节点' })).toBeInTheDocument()
-    expect(screen.getByText('候选节点由选题运行生成，不能手动创建。')).toBeInTheDocument()
+    expect(screen.queryByRole('menu', { name: '选择节点类型' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('menuitem', { name: '提示词' })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('menuitem', { name: '新增节点' }))
+    expect(await screen.findByRole('menu', { name: '选择节点类型' })).toBeInTheDocument()
+    expect(screen.getByText('候选')).toBeInTheDocument()
+    expect(screen.getByText('由选题生成')).toBeInTheDocument()
     expect(screen.queryByRole('menuitem', { name: '候选' })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('menuitem', { name: '提示词' }))
 
@@ -393,7 +400,19 @@ describe('WorkspaceCanvas', () => {
     expect(flowMocks.fitView).not.toHaveBeenCalled()
   })
 
-  it('opens a centered menu from Shift+F10 and the menu key with keyboard focus control', async () => {
+  it('routes the QuickBar creation entry through the same two-level menu', async () => {
+    const api = makeAPI()
+    render(<WorkspaceCanvas snapshot={makeSnapshot()} onSelectNode={vi.fn().mockResolvedValue(undefined)} api={api} />)
+
+    fireEvent.click(screen.getByRole('button', { name: '＋ 新建节点' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: '新增节点' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Agent' }))
+
+    await waitFor(() => expect(api.addNode).toHaveBeenCalledOnce())
+    expect(api.addNode).toHaveBeenCalledWith(expect.objectContaining({ type: 'agent', parent: '' }))
+  })
+
+  it('opens the submenu with the keyboard and returns focus one level at a time', async () => {
     const api = makeAPI()
     const { container } = render(<WorkspaceCanvas snapshot={makeSnapshot()} onSelectNode={vi.fn().mockResolvedValue(undefined)} api={api} />)
     const canvas = container.querySelector<HTMLElement>('.canvas-flow-root')
@@ -404,6 +423,9 @@ describe('WorkspaceCanvas', () => {
     })
 
     fireEvent.keyDown(canvas, { key: 'F10', shiftKey: true })
+    const addNodeItem = await screen.findByRole('menuitem', { name: '新增节点' })
+    expect(document.activeElement).toBe(addNodeItem)
+    fireEvent.keyDown(addNodeItem, { key: 'ArrowRight' })
     const topicItem = await screen.findByRole('menuitem', { name: '选题' })
     expect(document.activeElement).toBe(topicItem)
     fireEvent.keyDown(topicItem, { key: 'ArrowDown' })
@@ -411,32 +433,111 @@ describe('WorkspaceCanvas', () => {
     fireEvent.keyDown(screen.getByRole('menuitem', { name: '提示词' }), { key: 'ArrowDown' })
     expect(document.activeElement).toBe(screen.getByRole('menuitem', { name: 'Agent' }))
     fireEvent.keyDown(screen.getByRole('menuitem', { name: 'Agent' }), { key: 'Escape' })
+    expect(screen.getByRole('menu', { name: '新建节点' })).toBeInTheDocument()
+    expect(screen.queryByRole('menu', { name: '选择节点类型' })).not.toBeInTheDocument()
+    expect(document.activeElement).toBe(addNodeItem)
+    fireEvent.keyDown(addNodeItem, { key: 'Escape' })
     expect(screen.queryByRole('menu', { name: '新建节点' })).not.toBeInTheDocument()
     await waitFor(() => expect(document.activeElement).toBe(canvas))
 
     fireEvent.keyDown(canvas, { key: 'ContextMenu' })
-    fireEvent.click(await screen.findByRole('menuitem', { name: '脚本' }))
+    const secondAddNodeItem = await screen.findByRole('menuitem', { name: '新增节点' })
+    fireEvent.keyDown(secondAddNodeItem, { key: 'Enter' })
+    const secondTopicItem = await screen.findByRole('menuitem', { name: '选题' })
+    fireEvent.keyDown(secondTopicItem, { key: 'ArrowDown' })
+    fireEvent.keyDown(screen.getByRole('menuitem', { name: '提示词' }), { key: 'ArrowDown' })
+    fireEvent.keyDown(screen.getByRole('menuitem', { name: 'Agent' }), { key: 'ArrowDown' })
+    const scriptItem = screen.getByRole('menuitem', { name: '脚本' })
+    expect(document.activeElement).toBe(scriptItem)
+    fireEvent.keyDown(scriptItem, { key: 'Enter' })
     await waitFor(() => expect(api.addNode).toHaveBeenCalledOnce())
-    expect(api.addNode).toHaveBeenCalledWith(expect.objectContaining({ position: { x: 400, y: 250 }, parent: '' }))
+    expect(api.addNode).toHaveBeenCalledWith(expect.objectContaining({ type: 'script', position: { x: 400, y: 250 }, parent: '' }))
   })
 
-  it('clamps the menu inside the viewport near its lower-right edge', async () => {
+  it('reports a failed creation and allows a deliberate retry', async () => {
+    const api = makeAPI()
+    vi.mocked(api.addNode).mockRejectedValueOnce(new Error('disk full'))
+    render(<WorkspaceCanvas snapshot={makeSnapshot()} onSelectNode={vi.fn().mockResolvedValue(undefined)} api={api} />)
+
+    await createFromCanvasMenu('提示词')
+    expect(await screen.findByRole('alert')).toHaveTextContent('创建提示词失败：disk full')
+    expect(api.addNode).toHaveBeenCalledOnce()
+
+    await createFromCanvasMenu('提示词')
+    await waitFor(() => expect(api.addNode).toHaveBeenCalledTimes(2))
+  })
+
+  it('blocks another menu selection while a node creation is in flight', async () => {
+    const api = makeAPI()
+    let resolveAddNode!: (receipt: Awaited<ReturnType<GraphAPI['addNode']>>) => void
+    vi.mocked(api.addNode).mockImplementation(() => new Promise((resolve) => { resolveAddNode = resolve }))
+    const onGraphMutation = vi.fn().mockResolvedValue(undefined)
+    render(
+      <WorkspaceCanvas
+        snapshot={makeSnapshot()}
+        onSelectNode={vi.fn().mockResolvedValue(undefined)}
+        onGraphMutation={onGraphMutation}
+        api={api}
+      />,
+    )
+
+    await createFromCanvasMenu('选题')
+    await waitFor(() => expect(api.addNode).toHaveBeenCalledOnce())
+    fireEvent.contextMenu(screen.getByTestId('mock-flow-pane'), { clientX: 400, clientY: 300 })
+    fireEvent.click(await screen.findByRole('menuitem', { name: '新增节点' }))
+    const agentItem = await screen.findByRole('menuitem', { name: 'Agent' })
+    expect(agentItem).toBeDisabled()
+    fireEvent.click(agentItem)
+    expect(api.addNode).toHaveBeenCalledOnce()
+
+    resolveAddNode({ projectId: 'p_test', projectRevision: 3, nodeId: 'n_created' })
+    await waitFor(() => expect(screen.getByRole('button', { name: '＋ 新建节点' })).toBeEnabled())
+  })
+
+  it.each([
+    { label: 'upper-left', x: 2, y: 2, side: 'right' },
+    { label: 'upper-right', x: 798, y: 2, side: 'left' },
+    { label: 'lower-left', x: 2, y: 598, side: 'right' },
+    { label: 'lower-right', x: 798, y: 598, side: 'left' },
+  ])('keeps both menu levels in the viewport at the $label corner', async ({ x, y, side }) => {
     const originalWidth = window.innerWidth
     const originalHeight = window.innerHeight
-    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 500 })
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 800 })
     Object.defineProperty(window, 'innerHeight', { configurable: true, value: 600 })
     try {
       render(<WorkspaceCanvas snapshot={makeSnapshot()} onSelectNode={vi.fn().mockResolvedValue(undefined)} api={makeAPI()} />)
-      fireEvent.contextMenu(screen.getByTestId('mock-flow-pane'), { clientX: 495, clientY: 590 })
+      fireEvent.contextMenu(screen.getByTestId('mock-flow-pane'), { clientX: x, clientY: y })
       const menu = await screen.findByRole('menu', { name: '新建节点' })
-      vi.spyOn(menu, 'getBoundingClientRect').mockReturnValue({
-        x: 0, y: 0, left: 0, top: 0, right: 240, bottom: 250, width: 240, height: 250,
-        toJSON: () => ({}),
+      vi.spyOn(menu, 'getBoundingClientRect').mockImplementation(() => {
+        const left = Number.parseFloat(menu.style.left) || 0
+        const top = Number.parseFloat(menu.style.top) || 0
+        return { x: left, y: top, left, top, right: left + 158, bottom: top + 40, width: 158, height: 40, toJSON: () => ({}) }
       })
       fireEvent.resize(window)
       await waitFor(() => {
-        expect(menu).toHaveStyle({ left: '252px', top: '342px' })
+        expect(Number.parseFloat(menu.style.left)).toBeGreaterThanOrEqual(8)
+        expect(Number.parseFloat(menu.style.top)).toBeGreaterThanOrEqual(8)
       })
+      fireEvent.click(screen.getByRole('menuitem', { name: '新增节点' }))
+      const submenu = await screen.findByRole('menu', { name: '选择节点类型' })
+      vi.spyOn(submenu, 'getBoundingClientRect').mockImplementation(() => ({
+        x: 0, y: 0, left: 0, top: 0, right: 218, bottom: 240, width: 218, height: 240, toJSON: () => ({}),
+      }))
+      fireEvent.resize(window)
+
+      await waitFor(() => expect(submenu).toHaveAttribute('data-side', side))
+      const menuLeft = Number.parseFloat(menu.style.left)
+      const menuTop = Number.parseFloat(menu.style.top)
+      const submenuLeft = side === 'right' ? menuLeft + 158 + 4 : menuLeft - 218 - 4
+      const submenuTop = menuTop + Number.parseFloat(submenu.style.top)
+      expect(menuLeft).toBeGreaterThanOrEqual(8)
+      expect(menuLeft + 158).toBeLessThanOrEqual(window.innerWidth - 8)
+      expect(menuTop).toBeGreaterThanOrEqual(8)
+      expect(menuTop + 40).toBeLessThanOrEqual(window.innerHeight - 8)
+      expect(submenuLeft).toBeGreaterThanOrEqual(8)
+      expect(submenuLeft + 218).toBeLessThanOrEqual(window.innerWidth - 8)
+      expect(submenuTop).toBeGreaterThanOrEqual(8)
+      expect(submenuTop + 240).toBeLessThanOrEqual(window.innerHeight - 8)
     } finally {
       Object.defineProperty(window, 'innerWidth', { configurable: true, value: originalWidth })
       Object.defineProperty(window, 'innerHeight', { configurable: true, value: originalHeight })

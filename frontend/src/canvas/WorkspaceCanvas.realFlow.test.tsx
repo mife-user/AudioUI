@@ -222,6 +222,12 @@ describe('WorkspaceCanvas with real React Flow', () => {
     if (!pane) throw new Error('React Flow pane missing')
     fireEvent.contextMenu(pane, { clientX: 760, clientY: 580 })
     expect(await screen.findByRole('menu', { name: '新建节点' })).toBeInTheDocument()
+    expect(screen.queryByRole('menu', { name: '选择节点类型' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('menuitem', { name: '新增节点' }))
+    expect(await screen.findByRole('menu', { name: '选择节点类型' })).toBeInTheDocument()
+    fireEvent.keyDown(screen.getByRole('menuitem', { name: '选题' }), { key: 'Escape' })
+    expect(screen.getByRole('menu', { name: '新建节点' })).toBeInTheDocument()
+    expect(screen.queryByRole('menu', { name: '选择节点类型' })).not.toBeInTheDocument()
   })
 
   it('hides the resize outline while keeping edge and corner resize controls', async () => {
