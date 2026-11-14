@@ -53,7 +53,7 @@ export function WorkspacePage({ status, snapshot, error, onRetry, onGraphMutatio
 
   if (!snapshot && status === 'loading') {
     return (
-      <main className="workspace-main" aria-label="工作台">
+      <main className="workspace-main workspace-main-placeholder" aria-label="工作台">
         <div className="workspace-state" role="status">正在读取工作台快照…</div>
       </main>
     )
@@ -61,7 +61,7 @@ export function WorkspacePage({ status, snapshot, error, onRetry, onGraphMutatio
 
   if (!snapshot && status === 'error') {
     return (
-      <main className="workspace-main" aria-label="工作台">
+      <main className="workspace-main workspace-main-placeholder" aria-label="工作台">
         <section className="workspace-state workspace-state-error" role="alert">
           <h1>工作台加载失败</h1>
           <p>{error || '读取工程快照失败。'}</p>
@@ -73,7 +73,7 @@ export function WorkspacePage({ status, snapshot, error, onRetry, onGraphMutatio
 
   if (!snapshot?.project) {
     return (
-      <main className="workspace-main" aria-label="工作台">
+      <main className="workspace-main workspace-main-placeholder" aria-label="工作台">
         {status === 'error' ? (
           <div className="workspace-sync-error" role="alert">
             <span>同步失败：{error || '未知错误'}</span>

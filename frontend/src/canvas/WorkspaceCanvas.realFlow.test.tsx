@@ -173,6 +173,31 @@ describe('WorkspaceCanvas with real React Flow', () => {
     await waitFor(() => expect(onSelectNode).toHaveBeenLastCalledWith('n_topic'))
   })
 
+  it('renders one viewport-aware dot pattern whose spacing follows zoom', async () => {
+    const { container } = render(
+      <WorkspaceCanvas snapshot={makeSnapshot()} onSelectNode={vi.fn().mockResolvedValue(undefined)} api={makeAPI()} />,
+    )
+    const background = await waitFor(() => {
+      const element = container.querySelector<SVGElement>('.react-flow__background')
+      if (!element) throw new Error('React Flow background missing from fixture')
+      return element
+    })
+    const pattern = background.querySelector('pattern')
+    const dot = pattern?.querySelector('.canvas-dot-pattern')
+    const zoomIn = container.querySelector<HTMLButtonElement>('.react-flow__controls-zoomin')
+    if (!pattern || !dot || !zoomIn) throw new Error('React Flow dot background missing from fixture')
+    const initialWidth = pattern.getAttribute('width')
+
+    expect(container.querySelectorAll('.react-flow__background')).toHaveLength(1)
+    expect(background.style.zIndex).toBe('0')
+    expect(pattern).toHaveAttribute('patternUnits', 'userSpaceOnUse')
+    expect(Number(dot.getAttribute('r'))).toBeGreaterThan(0.5)
+    expect(dot.tagName.toLowerCase()).toBe('circle')
+
+    fireEvent.click(zoomIn)
+    await waitFor(() => expect(pattern.getAttribute('width')).not.toBe(initialWidth))
+  })
+
   it('keeps an unsaved Topic draft and its measured edge through collapse and expand', async () => {
     const api = makeAPI()
     const { container } = render(

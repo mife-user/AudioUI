@@ -240,6 +240,9 @@
   flex-direction: column;
   overflow: hidden;
   background-color: var(--bg);
+}
+
+.workspace-main-placeholder {
   background-image: radial-gradient(var(--grid) 1px, transparent 1px);
   background-size: 22px 22px;
 }
@@ -722,8 +725,21 @@
   background: transparent;
 }
 
-.canvas-flow-root .react-flow__background pattern circle {
+@keyframes canvas-dot-breathe {
+  from { opacity: .85; }
+  to { opacity: 1; }
+}
+
+.canvas-flow-root .canvas-dot-pattern {
   fill: var(--grid);
+  opacity: .85;
+  animation: canvas-dot-breathe 10s ease-in-out infinite alternate;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .canvas-flow-root .canvas-dot-pattern {
+    animation: none;
+  }
 }
 
 .workspace-edge {

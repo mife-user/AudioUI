@@ -1243,7 +1243,7 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFl
           proOptions={{ hideAttribution: false }}
           aria-label="工作台节点画布；使用鼠标平移与缩放，双击节点聚焦。"
         >
-          <Background variant={BackgroundVariant.Dots} gap={22} size={1} />
+          <Background variant={BackgroundVariant.Dots} gap={22} size={2} patternClassName="canvas-dot-pattern" style={{ zIndex: 0 }} />
           <Controls showInteractive={false} position="bottom-right" />
           <Panel position="bottom-left" className="canvas-legend">
             <span><i className="legend-mark path-mark" />选中路径</span>

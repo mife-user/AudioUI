@@ -37,18 +37,21 @@ function deferred<T>() {
 describe('WorkspacePage', () => {
   it('shows loading and retryable error states', () => {
     const onRetry = vi.fn()
-    const { rerender } = render(<WorkspacePage status="loading" snapshot={null} error="" onRetry={onRetry} />)
+    const { rerender, container } = render(<WorkspacePage status="loading" snapshot={null} error="" onRetry={onRetry} />)
+    expect(container.querySelector('main')).toHaveClass('workspace-main-placeholder')
     expect(screen.getByRole('status')).toHaveTextContent('正在读取工作台快照')
 
     rerender(<WorkspacePage status="error" snapshot={null} error="WORKSPACE_CHANGED" onRetry={onRetry} />)
+    expect(container.querySelector('main')).toHaveClass('workspace-main-placeholder')
     expect(screen.getByRole('alert')).toHaveTextContent('WORKSPACE_CHANGED')
     fireEvent.click(screen.getByRole('button', { name: '重试' }))
     expect(onRetry).toHaveBeenCalledOnce()
   })
 
   it('does not show a normal sync notice when an existing snapshot is displayed', () => {
-    render(<WorkspacePage status="loading" snapshot={emptyProject} error="" onRetry={vi.fn()} />)
+    const { container } = render(<WorkspacePage status="loading" snapshot={emptyProject} error="" onRetry={vi.fn()} />)
 
+    expect(container.querySelector('main')).not.toHaveClass('workspace-main-placeholder')
     expect(screen.getByRole('region', { name: '节点画布' })).toBeInTheDocument()
     expect(screen.queryByText('正在同步工程快照…')).not.toBeInTheDocument()
   })
@@ -63,7 +66,8 @@ describe('WorkspacePage', () => {
   })
 
   it('shows an empty project state without fabricating a project', () => {
-    render(<WorkspacePage status="ready" snapshot={{ ...emptyProject, project: null }} error="" onRetry={vi.fn()} />)
+    const { container } = render(<WorkspacePage status="ready" snapshot={{ ...emptyProject, project: null }} error="" onRetry={vi.fn()} />)
+    expect(container.querySelector('main')).toHaveClass('workspace-main-placeholder')
     expect(screen.getByText('还没有打开的工程')).toBeInTheDocument()
   })
 
