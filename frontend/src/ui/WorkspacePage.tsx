@@ -91,14 +91,16 @@ export function WorkspacePage({ status, snapshot, error, onRetry, onGraphMutatio
 
   return (
     <main className="workspace-main" aria-label="工作台">
-      {status === 'loading' ? <div className="workspace-sync-notice" role="status">正在同步工程快照…</div> : null}
-      {status === 'error' ? (
-        <div className="workspace-sync-error" role="alert">
-          <span>快照同步失败：{error || '未知错误'}</span>
-          <button className="agent-mini-btn" type="button" onClick={onRetry}>重试</button>
-        </div>
-      ) : null}
-      <WorkspaceCanvas snapshot={snapshot} onSelectNode={selectNode} onGraphMutation={onGraphMutation} onRegisterDraftFlush={onRegisterDraftFlush} onRegisterNodeLocator={runRequestContext?.registerNodeLocator} onStartRun={onStartRun} api={api} />
+      <WorkspaceCanvas
+        snapshot={snapshot}
+        onSelectNode={selectNode}
+        onGraphMutation={onGraphMutation}
+        onRegisterDraftFlush={onRegisterDraftFlush}
+        onRegisterNodeLocator={runRequestContext?.registerNodeLocator}
+        onStartRun={onStartRun}
+        api={api}
+        workspaceSyncError={status === 'error' ? { message: error || '未知错误', retry: onRetry } : undefined}
+      />
     </main>
   )
 }

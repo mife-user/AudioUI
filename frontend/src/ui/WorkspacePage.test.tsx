@@ -6,8 +6,17 @@ import { useWorkspaceStore } from '../stores/workspaceStore'
 import { WorkspacePage } from './WorkspacePage'
 
 vi.mock('../canvas/WorkspaceCanvas', () => ({
-  WorkspaceCanvas: ({ onSelectNode }: { onSelectNode: (id: string) => Promise<void> }) => (
+  WorkspaceCanvas: ({ onSelectNode, workspaceSyncError }: {
+    onSelectNode: (id: string) => Promise<void>
+    workspaceSyncError?: { message: string; retry: () => void }
+  }) => (
     <section aria-label="节点画布">
+      {workspaceSyncError ? (
+        <div role="alert">
+          <span>快照同步失败：{workspaceSyncError.message}</span>
+          <button type="button" onClick={workspaceSyncError.retry}>重试</button>
+        </div>
+      ) : null}
       可创建选题和提示词草稿。
       <button type="button" onClick={() => void onSelectNode('n_selected').catch(() => undefined)}>选择节点</button>
     </section>
@@ -33,6 +42,22 @@ describe('WorkspacePage', () => {
 
     rerender(<WorkspacePage status="error" snapshot={null} error="WORKSPACE_CHANGED" onRetry={onRetry} />)
     expect(screen.getByRole('alert')).toHaveTextContent('WORKSPACE_CHANGED')
+    fireEvent.click(screen.getByRole('button', { name: '重试' }))
+    expect(onRetry).toHaveBeenCalledOnce()
+  })
+
+  it('does not show a normal sync notice when an existing snapshot is displayed', () => {
+    render(<WorkspacePage status="loading" snapshot={emptyProject} error="" onRetry={vi.fn()} />)
+
+    expect(screen.getByRole('region', { name: '节点画布' })).toBeInTheDocument()
+    expect(screen.queryByText('正在同步工程快照…')).not.toBeInTheDocument()
+  })
+
+  it('keeps snapshot sync errors retryable inside the canvas', () => {
+    const onRetry = vi.fn()
+    render(<WorkspacePage status="error" snapshot={emptyProject} error="WORKSPACE_CHANGED" onRetry={onRetry} />)
+
+    expect(screen.getByRole('alert')).toHaveTextContent('快照同步失败：WORKSPACE_CHANGED')
     fireEvent.click(screen.getByRole('button', { name: '重试' }))
     expect(onRetry).toHaveBeenCalledOnce()
   })

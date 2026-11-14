@@ -6,7 +6,7 @@
 
 | 计划 | 状态 | 用途 |
 |---|---|---|
-| [画布、节点与 Agent 交互优化](active/canvas-workbench-optimization-plan.md) | U0 已确认；U1～U7 已通过用户验收；U8～U9 尚未实施；U10～U15 已通过用户验收；U16 设计已确认、实现中 | 包含多上游无环图、无 Topic 有效任务运行、版本引用及 Topic 新批次；U15 输入选择与工作区实施方案见 ADR-030。 | |
+| [画布、节点与 Agent 交互优化](active/canvas-workbench-optimization-plan.md) | U0 已确认；U1～U7、U10～U17 已通过用户验收；U8～U9 尚未实施；U18～U20 已评审、待实施 | 包含多上游无环图、无 Topic 有效任务运行、版本引用及 Topic 新批次；U17～U20 补充保存提示、Agent 浮窗、右键菜单和点阵背景。 |
 | [提示词节点拖动渲染问题](active/canvas-drag-rendering-fix-plan.md) | 实现与本地自检完成，待评审 | 015 受控复现修复记录；Wails/WebView2 专项未覆盖。 |
 
 ## 阶段计划：M2

@@ -60,6 +60,7 @@ type Props = {
   api?: GraphAPI
   candidateFixtures?: Record<string, TopicCandidateFixture[]>
   onStartRun?: (nodeId: string, projectId: string, options?: RunStartOptions) => Promise<RunStartResult>
+  workspaceSyncError?: { message: string; retry: () => void }
 }
 
 type PendingSync = {
@@ -141,7 +142,7 @@ function candidateQueryKey(nodes: Node[] | undefined): string {
   return JSON.stringify(queries)
 }
 
-function CanvasBody({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFlush, onRegisterNodeLocator, api, candidateFixtures, onStartRun }: Props & { api: GraphAPI }) {
+function CanvasBody({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFlush, onRegisterNodeLocator, api, candidateFixtures, onStartRun, workspaceSyncError }: Props & { api: GraphAPI }) {
   const projectId = snapshot.project?.id ?? ''
   const graphNodes = snapshot.nodes ?? []
   const [candidateState, setCandidateState] = useState<CandidateReadState>({ projectId: '', entries: {} })
@@ -217,7 +218,6 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFl
   const createRequestId = useRef(0)
   const [nodes, setNodes] = useState<CanvasFlowNode[]>([])
   const [error, setError] = useState('')
-  const [notice, setNotice] = useState('')
   const [busy, setBusy] = useState(false)
   const [connectSubmitting, setConnectSubmitting] = useState(false)
   const [scriptVersionSavingEdgeIDs, setScriptVersionSavingEdgeIDs] = useState<Set<string>>(() => new Set())
@@ -261,7 +261,6 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFl
   const locateNode = useCallback((nodeId: string) => {
     if (currentProjectId.current !== projectId || !flowRef.current.getNode(nodeId)) return false
     setError('')
-    setNotice('')
     void onSelectNode(nodeId).catch((failure) => {
       if (currentProjectId.current === projectId) setError(`保存节点选择失败：${errorMessage(failure)}`)
     })
@@ -338,7 +337,6 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFl
   }, [api, candidateFixtures, projectId, snapshot.project?.revision, topicCandidateQueryKey, topicCandidateQueries])
 
   const syncMutation = useCallback(async (receipt: GraphMutationReceipt, label: string, focusNodeId?: string) => {
-    setNotice(`${label}已提交，正在同步工程图。`)
     try {
       await onGraphMutation?.(receipt)
       if (currentProjectId.current !== receipt.projectId) return false
@@ -350,7 +348,6 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFl
       pendingSyncRef.current = null
       setPendingSync(null)
       setError('')
-      setNotice(`${label}已同步。`)
       if (focusNodeId) setPendingFocusNodeId(focusNodeId)
       return true
     } catch (failure) {
@@ -362,13 +359,11 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFl
           pendingSyncRef.current = null
           setPendingSync(null)
           setError('')
-          setNotice(`${label}已同步。`)
         }
         return true
       }
       const existing = pendingSyncRef.current
       if (existing?.receipt.projectId === receipt.projectId && existing.receipt.projectRevision > receipt.projectRevision) return false
-      setNotice('')
       const pending = { receipt, label, focusNodeId }
       pendingSyncRef.current = pending
       setPendingSync(pending)
@@ -537,7 +532,6 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFl
     const label = type === 'prompt' ? '提示词' : type === 'agent' ? 'Agent' : 'Script'
     setBusy(true)
     setError('')
-    setNotice('')
     try {
       const receipt = await api.addNode({
         projectId,
@@ -553,7 +547,6 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFl
       if (synced && selectAfterSync) await selectCreatedNode(receipt.nodeId)
     } catch (failure) {
       if (currentProjectId.current !== projectId) return
-      setNotice('')
       setError(`创建${label}失败：${errorMessage(failure)}`)
     } finally {
       if (createRequestId.current === requestId) {
@@ -569,7 +562,6 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFl
     const requestId = ++createRequestId.current
     setBusy(true)
     setError('')
-    setNotice('')
     try {
       const receipt = await api.addNode({
         projectId,
@@ -585,7 +577,6 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFl
       if (synced && selectAfterSync) await selectCreatedNode(receipt.nodeId)
     } catch (failure) {
       if (currentProjectId.current !== projectId) return
-      setNotice('')
       setError(`创建选题节点失败：${errorMessage(failure)}`)
     } finally {
       if (createRequestId.current === requestId) {
@@ -786,7 +777,6 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFl
     setConfirmIntent(null)
     confirmReturnFocus.current = null
     setError('')
-    setNotice('')
     pendingSyncRef.current = null
     paramsSaveQueue.current = Promise.resolve()
     setPendingSync(null)
@@ -890,7 +880,6 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFl
     for (const change of changes) {
       if (change.type === 'select' && change.selected) {
         setError('')
-        setNotice('')
         void onSelectNode(change.id).catch((failure) => {
           setNodes((current) => current.map((node) => ({
             ...node,
@@ -934,7 +923,6 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFl
   const selectedNode = nodes.find((node) => node.selected)?.data.node
   const selectChain = useCallback((tailNodeId: string) => {
     setError('')
-    setNotice('')
     if (snapshot.project?.activeNodeId === tailNodeId) return
     void onSelectNode(tailNodeId).catch((failure) => {
       setError(`保存链路选择失败：${errorMessage(failure)}`)
@@ -1021,7 +1009,6 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFl
     setConnectSubmitting(true)
     const ownerProjectId = projectId
     setError('')
-    setNotice('')
     try {
       const receipt = await api.connect(sourceId, targetId, ownerProjectId)
       if (currentProjectId.current !== ownerProjectId || receipt.projectId !== ownerProjectId) return
@@ -1046,7 +1033,6 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFl
     connectInFlight.current = true
     setConnectSubmitting(true)
     setError('')
-    setNotice('')
     try {
       const receipt = intent.mode === 'disconnect'
         ? await api.disconnect(intent.edgeId, intent.projectId)
@@ -1074,7 +1060,6 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFl
 
   const onNodeClick: NodeMouseHandler<CanvasFlowNode> = () => {
     setError('')
-    setNotice('')
   }
 
   async function connectSelectedTarget() {
@@ -1208,15 +1193,6 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFl
         </details>
       ) : null}
 
-      {error ? (
-        <div className="canvas-message canvas-message-error" role="alert">
-          <span>{error}</span>
-          {pendingSync ? <button type="button" className="canvas-retry-sync" onClick={() => void retryPendingSync()} disabled={busy}>仅重试快照同步</button> : null}
-          <button type="button" onClick={() => setError('')} aria-label="关闭错误">×</button>
-        </div>
-      ) : null}
-      {notice ? <div className="canvas-message" role="status">{notice}</div> : null}
-
       <div
         className="canvas-flow-root"
         ref={flowRoot}
@@ -1224,6 +1200,14 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFl
         aria-label="画布；按 Shift+F10 或菜单键打开新建菜单"
         onKeyDown={handleCanvasKeyDown}
       >
+        {error || workspaceSyncError ? (
+          <div className="canvas-message canvas-message-error" role="alert">
+            <span>{error || `快照同步失败：${workspaceSyncError?.message || '未知错误'}`}</span>
+            {pendingSync ? <button type="button" className="canvas-retry-sync" onClick={() => void retryPendingSync()} disabled={busy}>仅重试快照同步</button> : null}
+            {workspaceSyncError ? <button type="button" className="canvas-retry-sync" onClick={workspaceSyncError.retry}>重试</button> : null}
+            {error ? <button type="button" onClick={() => setError('')} aria-label="关闭错误">×</button> : null}
+          </div>
+        ) : null}
         {!graphNodes.length ? (
           <div className="canvas-empty-overlay" aria-label="空画布提示">
             <span aria-hidden="true">＋</span>
@@ -1344,10 +1328,10 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFl
   )
 }
 
-export function WorkspaceCanvas({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFlush, onRegisterNodeLocator, api = graphAPI, candidateFixtures, onStartRun = startRunAPI }: Props) {
+export function WorkspaceCanvas({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFlush, onRegisterNodeLocator, api = graphAPI, candidateFixtures, onStartRun = startRunAPI, workspaceSyncError }: Props) {
   return (
     <ReactFlowProvider>
-      <CanvasBody snapshot={snapshot} onSelectNode={onSelectNode} onGraphMutation={onGraphMutation} onRegisterDraftFlush={onRegisterDraftFlush} onRegisterNodeLocator={onRegisterNodeLocator} api={api} candidateFixtures={candidateFixtures} onStartRun={onStartRun} />
+      <CanvasBody snapshot={snapshot} onSelectNode={onSelectNode} onGraphMutation={onGraphMutation} onRegisterDraftFlush={onRegisterDraftFlush} onRegisterNodeLocator={onRegisterNodeLocator} api={api} candidateFixtures={candidateFixtures} onStartRun={onStartRun} workspaceSyncError={workspaceSyncError} />
     </ReactFlowProvider>
   )
 }

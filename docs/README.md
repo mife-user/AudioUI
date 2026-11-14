@@ -1,6 +1,6 @@
 # 文档导航
 
-> **先看这页，再按任务进入相应文档。** M2-11～13 本地脚本闭环已通过用户验收；独立工作台交互优化批次已确认并进行中，U16 设计已确认、实现中；M3 尚未开始，状态以[路线图](dev/roadmap.md)为准。
+> **先看这页，再按任务进入相应文档。** M2-11～13 本地脚本闭环已通过用户验收；独立工作台交互优化批次已确认并进行中，U16、U17 已通过用户验收，U18～U20 已评审、待实施；M3 尚未开始，状态以[路线图](dev/roadmap.md)为准。
 >
 > - [当前计划与阶段计划总览](plans/README.md)
 > - [当前工作计划：画布、节点与 Agent 交互优化](plans/active/canvas-workbench-optimization-plan.md)
@@ -30,9 +30,10 @@
 - M2 本地脚本流程：[交互演示](design/m2-11-13-local-flow-demo.html)（模拟数据，不连接 Agent）。
 - 画布整体优化：[交互原型](design/canvas-workbench-redesign-demo.html)（待评审方案，不代表产品已实现）。
 - U10～U16 画布与重跑结果讨论：[单文件交互原型](design/u10-u16-canvas-optimization-demo.html)（模拟数据；U15 已通过用户界面验收）。
-- U16 结果版本与 Topic 批次：[单文件交互原型](design/u16-output-version-demo.html)（模拟数据，不连接工程或 Agent；设计已确认、实现中，原型不代表功能完成）。
+- U16 结果版本与 Topic 批次：[单文件交互原型](design/u16-output-version-demo.html)（模拟数据，不连接工程或 Agent；已通过用户验收，原型不代表实现或验收证据）。
 - U14 连线与运行过渡：[单文件交互演示](design/u14-dag-transition-demo.html)（已于 2026-11-12 通过用户验收；不连接工程或 Agent）。
 - U11 Agent 收起小窗拖动：[单文件交互演示](design/u11-agent-rail-demo.html)（模拟数据，不连接 Agent、不访问工程或网络；不代表产品实现或验收证据）。
+- U17～U20 后续界面优化：[单文件交互示意](design/u17-u20-workbench-polish-demo.html)（设计已评审；U17 已通过用户验收，U18～U20 待实施。模拟数据，不连接 Agent、不访问工程或网络，不代表产品实现或验收证据）。
 - 既有阶段自检与验收记录按编号存放在 [`dev/evidence/`](dev/evidence/m2.md)；M2-13 汇总见 [M2 集成证据](dev/evidence/m2.md)。
 - 其它历史原型、诊断示意按主题存放于 `design/`，历史验收截图与记录存放于 `dev/evidence/`。
 

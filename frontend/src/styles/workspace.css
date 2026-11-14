@@ -218,17 +218,6 @@
   overflow-wrap: anywhere;
 }
 
-.workspace-sync-notice {
-  position: sticky;
-  top: 0;
-  z-index: 2;
-  padding: 6px 10px;
-  border-bottom: 1px solid var(--border-strong);
-  background: var(--glass);
-  color: var(--text-dim);
-  font-size: 10px;
-}
-
 .workspace-banner {
   margin: 8px 12px 0;
 }
@@ -531,15 +520,31 @@
 }
 
 .canvas-message {
+  position: absolute;
+  z-index: 10;
+  top: var(--s2);
+  left: var(--s2);
+  right: var(--s2);
+  max-width: 720px;
+  margin-inline: auto;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: var(--s2);
   padding: 7px 11px;
-  border-bottom: 1px solid var(--border);
-  background: var(--accent-soft);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
   color: var(--text-dim);
   font-size: 10.5px;
+  box-shadow: var(--shadow);
+}
+
+.canvas-message > span {
+  min-width: 0;
+  flex: 1 1 180px;
+  overflow-wrap: anywhere;
 }
 
 .canvas-message-error {

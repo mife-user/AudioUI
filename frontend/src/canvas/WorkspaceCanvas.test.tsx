@@ -492,22 +492,44 @@ describe('WorkspaceCanvas', () => {
     expect(await screen.findByRole('button', { name: 'n_created' })).toBeInTheDocument()
     resolveSync()
 
-    await waitFor(() => expect(screen.getByText('选题节点已同步。')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole('button', { name: '＋ 新建节点' })).not.toBeDisabled())
     expect(disabledWhileSyncing).toBe(true)
     expect(screen.queryByText('选题节点已提交，正在同步工程图。')).not.toBeInTheDocument()
+    expect(screen.queryByText('选题节点已同步。')).not.toBeInTheDocument()
   })
 
   it('shows a visible error and only retries snapshot synchronization after a saved command', async () => {
     const api = makeAPI()
     const onGraphMutation = vi.fn().mockRejectedValueOnce(new Error('同步失败')).mockResolvedValueOnce(undefined)
-    render(<WorkspaceCanvas snapshot={makeSnapshot()} onSelectNode={vi.fn().mockResolvedValue(undefined)} onGraphMutation={onGraphMutation} api={api} />)
+    const { container } = render(<WorkspaceCanvas snapshot={makeSnapshot()} onSelectNode={vi.fn().mockResolvedValue(undefined)} onGraphMutation={onGraphMutation} api={api} />)
 
     await createFromCanvasMenu('选题')
-    expect(await screen.findByRole('alert')).toHaveTextContent('选题节点已保存，但画布同步失败：同步失败')
+    const syncError = await screen.findByRole('alert')
+    expect(syncError).toHaveTextContent('选题节点已保存，但画布同步失败：同步失败')
+    expect(container.querySelector('.canvas-flow-root')?.contains(syncError)).toBe(true)
     expect(api.addNode).toHaveBeenCalledOnce()
     fireEvent.click(screen.getByRole('button', { name: '仅重试快照同步' }))
-    await waitFor(() => expect(screen.getByText('选题节点已同步。')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole('button', { name: '＋ 新建节点' })).not.toBeDisabled())
     expect(api.addNode).toHaveBeenCalledOnce()
+    expect(screen.queryByText('选题节点已同步。')).not.toBeInTheDocument()
+  })
+
+  it('renders workspace snapshot sync errors inside the canvas without hiding retry', () => {
+    const retry = vi.fn()
+    const { container } = render(
+      <WorkspaceCanvas
+        snapshot={makeSnapshot()}
+        onSelectNode={vi.fn().mockResolvedValue(undefined)}
+        api={makeAPI()}
+        workspaceSyncError={{ message: '读取失败', retry }}
+      />,
+    )
+
+    const syncError = screen.getByRole('alert')
+    expect(syncError).toHaveTextContent('快照同步失败：读取失败')
+    expect(container.querySelector('.canvas-flow-root')?.contains(syncError)).toBe(true)
+    fireEvent.click(screen.getByRole('button', { name: '重试' }))
+    expect(retry).toHaveBeenCalledOnce()
   })
 
   it('enforces the zoom range and supports reset and double-click focus', () => {

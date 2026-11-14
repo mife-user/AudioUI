@@ -1,0 +1,333 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>U17～U20 工作台界面优化示意</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0d1215;
+    --surface: #151c20;
+    --surface-2: #1a2327;
+    --surface-hover: #233136;
+    --border: #303e43;
+    --border-strong: #4a5d61;
+    --text: #e1ebea;
+    --dim: #b4c5c4;
+    --muted: #849694;
+    --accent: #79c8c0;
+    --accent-soft: #234440;
+    --ok: #8cd4a9;
+    --warn: #e0bd7a;
+    --grid: #759b98;
+    --top-h: 48px;
+    --tools-h: 48px;
+    font: 13px/1.5 "Segoe UI", "Microsoft YaHei UI", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body { margin: 0; min-width: 320px; height: 100vh; overflow: hidden; background: var(--bg); color: var(--text); }
+  button, textarea { font: inherit; }
+  button { color: inherit; cursor: pointer; }
+  button:focus-visible, textarea:focus-visible, .canvas:focus-visible, .console-head:focus-visible, .rail:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .topbar { height: var(--top-h); display: flex; align-items: center; gap: 16px; padding: 0 18px; background: #11181b; border-bottom: 1px solid var(--border); }
+  .brand { color: var(--accent); font: 700 11px/1 ui-monospace, monospace; letter-spacing: .16em; }
+  .project-name { color: var(--dim); }
+  .prototype-badge { color: var(--muted); font-size: 10px; }
+  .top-right { margin-left: auto; color: var(--muted); font-size: 10px; }
+  .toolbar { height: var(--tools-h); display: flex; align-items: center; gap: 10px; padding: 0 16px; border-bottom: 1px solid var(--border); background: #12191d; }
+  .toolbar strong { font-size: 12px; font-weight: 600; }
+  .toolbar small { color: var(--muted); }
+  .reset { margin-left: auto; border: 1px solid var(--border-strong); border-radius: 6px; padding: 6px 10px; background: var(--surface-2); font-size: 11px; }
+  .reset:hover, .small-btn:hover { background: var(--surface-hover); }
+  .canvas { position: relative; width: 100%; height: calc(100vh - var(--top-h) - var(--tools-h)); overflow: hidden; background: var(--bg); }
+  .dots, .dots-glow { position: absolute; inset: 0; pointer-events: none; background-image: radial-gradient(circle, var(--grid) 1px, transparent 1.3px); background-size: 22px 22px; background-position: 0 0; }
+  .dots { opacity: .23; }
+  .dots-glow { opacity: .05; animation: breathe 10s ease-in-out infinite alternate; }
+  @keyframes breathe { from { opacity: .025; } to { opacity: .11; } }
+  @media (prefers-reduced-motion: reduce) { .dots-glow { animation: none; opacity: .05; } }
+  .demo-guide { position: absolute; z-index: 1; top: 18px; left: 20px; max-width: min(500px, calc(100% - 40px)); pointer-events: none; }
+  .guide-label { color: var(--accent); font: 10px ui-monospace, monospace; letter-spacing: .13em; }
+  .demo-guide strong { display: block; margin-top: 4px; font-size: 15px; font-weight: 600; }
+  .demo-guide p { margin: 5px 0 0; color: var(--muted); font-size: 11px; }
+  .node { position: absolute; z-index: 1; width: 235px; border: 1px solid var(--border-strong); border-radius: 9px; background: var(--surface); box-shadow: 0 12px 28px #0004; }
+  .node-head { display: flex; align-items: center; gap: 8px; padding: 9px 11px; border-bottom: 1px solid var(--border); }
+  .node-head strong { flex: 1; font-size: 11px; }
+  .node-type { color: var(--accent); font: 9px ui-monospace, monospace; letter-spacing: .08em; }
+  .node-body { padding: 11px; color: var(--dim); font-size: 11px; }
+  .node-body p { margin: 0; }
+  .node textarea { display: block; width: 100%; height: 70px; padding: 8px; resize: none; border: 1px solid var(--border); border-radius: 6px; background: #10171a; color: var(--text); font-size: 11px; line-height: 1.5; }
+  .node-status { display: block; margin-top: 7px; color: var(--muted); font-size: 10px; }
+  .prompt-node { left: 7%; top: 130px; }
+  .agent-node { left: 31%; top: 190px; width: 175px; }
+  .script-node { left: 49%; top: 150px; width: 190px; }
+  .connector { position: absolute; z-index: 0; height: 2px; background: linear-gradient(90deg, #537974, #779e99); opacity: .75; pointer-events: none; }
+  .connector-a { left: 20%; top: 213px; width: 13%; transform: rotate(7deg); }
+  .connector-b { left: 40%; top: 211px; width: 11%; transform: rotate(-9deg); }
+  .node.new-node { width: 170px; }
+  .bottom-hint { position: absolute; z-index: 2; left: 16px; bottom: 14px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; max-width: calc(100% - 32px); padding: 8px 10px; border: 1px solid var(--border); border-radius: 7px; background: #131d20ed; color: var(--muted); font-size: 10px; }
+  .small-btn { padding: 4px 7px; border: 1px solid var(--border-strong); border-radius: 5px; background: var(--surface-2); font-size: 10px; }
+  .demo-status { color: var(--dim); }
+  .menu, .submenu { position: absolute; z-index: 8; width: 176px; padding: 5px; border: 1px solid var(--border-strong); border-radius: 7px; background: #192226; box-shadow: 0 12px 28px #0008; }
+  .submenu { left: calc(100% + 4px); top: -1px; }
+  .submenu.leftward { left: auto; right: calc(100% + 4px); }
+  .menu-label { padding: 4px 8px 5px; color: var(--muted); font-size: 9px; }
+  .menu-item { position: relative; display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 8px; min-height: 31px; padding: 6px 8px; border: 0; border-radius: 4px; background: transparent; color: var(--dim); text-align: left; font-size: 10.5px; }
+  .menu-item:hover:not(:disabled), .menu-item:focus-visible { background: var(--accent-soft); color: var(--text); }
+  .menu-item:disabled { cursor: default; color: var(--muted); opacity: .72; }
+  .menu-item.separated::after { content: ""; position: absolute; right: 6px; bottom: -1px; left: 6px; height: 1px; background: linear-gradient(90deg, transparent, var(--border-strong) 25%, var(--border-strong) 75%, transparent); }
+  .menu-item small { color: var(--muted); font-size: 9px; }
+  .console, .rail { position: fixed; z-index: 5; border: 1px solid var(--border-strong); border-radius: 9px; background: #151d20; box-shadow: 0 15px 38px #0009; }
+  .console { display: flex; flex-direction: column; width: min(390px, calc(100vw - 24px)); height: min(520px, calc(100vh - 120px)); min-width: 0; min-height: 0; overflow: hidden; }
+  .console-head { flex: none; display: flex; align-items: center; gap: 8px; height: 48px; padding: 0 10px; border-bottom: 1px solid var(--border); cursor: grab; touch-action: none; user-select: none; }
+  .console-head:active, .rail:active { cursor: grabbing; }
+  .state-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); }
+  .console-title { color: var(--dim); font: 10px ui-monospace, monospace; letter-spacing: .12em; }
+  .running { color: var(--ok); font-size: 10px; }
+  .head-actions { margin-left: auto; display: flex; gap: 5px; }
+  .head-actions button, .rail button { padding: 4px 6px; border: 1px solid var(--border); border-radius: 5px; background: var(--surface-2); color: var(--dim); font-size: 10px; }
+  .head-actions button:hover, .rail button:hover { border-color: var(--accent); }
+  .console-body { flex: 1; min-height: 0; min-width: 0; overflow: auto; padding: 10px 12px 16px; }
+  .conversation-label { margin-bottom: 10px; color: var(--accent); font-size: 10px; }
+  .run { padding: 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-2); color: var(--dim); font-size: 10px; }
+  .run strong { color: var(--text); }
+  .run-meta { margin-top: 4px; color: var(--muted); overflow-wrap: anywhere; }
+  .message-label { margin: 14px 0 6px; color: var(--accent); font: 10px ui-monospace, monospace; }
+  .answer, .tool { min-width: 0; padding: 10px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface-2); color: var(--dim); font-size: 11px; line-height: 1.6; overflow-wrap: anywhere; white-space: pre-wrap; }
+  .tool { margin-top: 9px; color: var(--muted); font: 10px/1.5 ui-monospace, monospace; }
+  .resize-handle { position: absolute; left: 1px; bottom: 1px; width: 23px; height: 23px; padding: 0; border: 0; background: linear-gradient(135deg, transparent 58%, var(--border-strong) 60%, transparent 64%, transparent 72%, var(--border-strong) 74%, transparent 78%); cursor: nesw-resize; touch-action: none; }
+  .rail { display: flex; align-items: center; gap: 8px; min-height: 40px; padding: 5px 8px; cursor: grab; touch-action: none; user-select: none; }
+  .rail span { color: var(--dim); font-size: 10px; }
+  .rail .rail-warning { color: var(--warn); }
+  @media (max-width: 800px) { .script-node { display: none; } .connector-b { display: none; } .agent-node { left: 41%; } .bottom-hint { max-width: 290px; } }
+  @media (max-width: 540px) { .top-right, .prototype-badge, .toolbar small, .agent-node, .connector { display: none; } .prompt-node { left: 6%; } .demo-guide { top: 12px; } }
+</style>
+</head>
+<body>
+<header class="topbar"><span class="brand">AUDIOUI</span><span class="project-name">本地工作台</span><span class="prototype-badge">U17～U20 · 设计已评审</span><span class="top-right">模拟数据 · 不连接 Agent 或工程</span></header>
+<div class="toolbar"><strong>节点画布</strong><small>正常编辑时不出现顶部更新横幅</small><button class="reset" type="button">重置视图</button></div>
+<main class="canvas" tabindex="0" aria-label="模拟画布，在空白处右键或按 Shift+F10 打开菜单">
+  <div class="dots" aria-hidden="true"></div><div class="dots-glow" aria-hidden="true"></div>
+  <div class="demo-guide"><span class="guide-label">WORKBENCH POLISH / PREVIEW</span><strong>轻量的画布与可阅读的运行面板</strong><p>在画布空白处右键，点击「新增节点」查看类型。拖动面板标题栏，拖动左下角调整大小。</p></div>
+  <div class="connector connector-a" aria-hidden="true"></div><div class="connector connector-b" aria-hidden="true"></div>
+  <article class="node prompt-node"><div class="node-head"><span class="node-type">PROMPT</span><strong>提示词</strong></div><div class="node-body"><textarea aria-label="模拟提示词">介绍一个有趣的主题，并用清晰的小节组织内容。</textarea><span class="node-status" aria-live="polite">已保存（模拟）</span></div></article>
+  <article class="node agent-node"><div class="node-head"><span class="node-type">AGENT</span><strong>脚本生成</strong></div><div class="node-body"><p>工作中 · 正在生成内容</p><span class="node-status">请求与结果保留原处理语义</span></div></article>
+  <article class="node script-node"><div class="node-head"><span class="node-type">SCRIPT</span><strong>输出结果</strong></div><div class="node-body"><p>历史版本可查看，新结果按原流程确认。</p></div></article>
+  <div class="menu" role="menu" aria-label="画布菜单" hidden>
+    <button class="menu-item open-submenu" type="button" role="menuitem" aria-haspopup="menu" aria-expanded="false">新增节点 <span aria-hidden="true">›</span></button>
+    <div class="submenu" role="menu" aria-label="选择节点类型" hidden>
+      <div class="menu-label">选择节点类型</div>
+      <button class="menu-item separated" type="button" role="menuitem" data-type="选题">选题 <small>独立节点</small></button>
+      <button class="menu-item separated" type="button" role="menuitem" data-type="提示词">提示词 <small>未连接草稿</small></button>
+      <button class="menu-item separated" type="button" role="menuitem" data-type="Agent">Agent <small>未连接草稿</small></button>
+      <button class="menu-item separated" type="button" role="menuitem" data-type="脚本">脚本 <small>未连接草稿</small></button>
+      <button class="menu-item" type="button" role="menuitem" disabled>候选 <small>由选题生成</small></button>
+    </div>
+  </div>
+  <div class="bottom-hint">
+    <span>已移除「未决请求」栏与「待处理」页签；标题栏计数仅为恢复入口示意。</span>
+    <button class="small-btn open-menu-demo" type="button">演示右键菜单</button>
+    <span class="demo-status" aria-live="polite">仅作样式与交互示意</span>
+  </div>
+</main>
+<aside class="rail" role="group" tabindex="0" aria-label="模拟 Agent 小窗，可拖动或使用方向键移动" hidden>
+  <span class="state-dot" aria-hidden="true"></span><span>1 项运行中</span><span class="rail-warning">请求 1 · 结果 1</span><button class="expand" type="button" aria-label="展开模拟控制台">展开</button>
+</aside>
+<aside class="console" aria-label="模拟 Agent 控制台">
+  <div class="console-head" role="group" tabindex="0" aria-label="控制台标题栏，可拖动或使用方向键移动">
+    <span class="state-dot" aria-hidden="true"></span><span class="console-title">AGENT</span><span class="running">1 项运行中</span>
+    <div class="head-actions"><button class="request-badge" type="button" title="示意：请求处理与异常恢复的入口">请求 1</button><button class="result-badge" type="button" title="示意：结果处理与异常恢复的入口">结果 1</button><button class="collapse" type="button" aria-label="收起模拟控制台">×</button></div>
+  </div>
+  <div class="console-body" tabindex="0" aria-label="模拟运行详情及回答，可滚动">
+    <div class="conversation-label">对话 · 运行记录</div>
+    <div class="run"><strong>脚本生成</strong> · 运行中<div class="run-meta">运行 run_demo_01 · 仅供布局示意</div></div>
+    <div class="message-label">AGENT · 回答示例</div>
+    <div class="answer">下面是本次任务的结果示例。长回答应自动适配面板的宽度，保留段落和换行；当内容超过面板高度时，可以在面板内滚动阅读。
+
+即使遇到很长的路径或没有空格的连续文本，也不应该超出边框：
+workspace/inputs/project/node_example/averyveryveryveryveryverylongunbrokenfilename_for_readability_demo.txt
+
+查看历史内容时，不应因为新消息到达而被强制拉回底部。调整面板尺寸后，文字仍能完整阅读。</div>
+    <div class="tool">工具活动 · Read · inputs/project/node_example/another_long_path_for_the_tool_summary_without_spaces.txt</div>
+  </div>
+  <button class="resize-handle" type="button" aria-label="调整模拟控制台尺寸；方向键调整，按住 Shift 加快" title="拖动左下角或使用方向键调整大小"></button>
+</aside>
+<script>
+(() => {
+  const canvas = document.querySelector('.canvas');
+  const menu = document.querySelector('.menu');
+  const submenu = document.querySelector('.submenu');
+  const openSubmenu = document.querySelector('.open-submenu');
+  const status = document.querySelector('.demo-status');
+  const panel = document.querySelector('.console');
+  const rail = document.querySelector('.rail');
+  const toolbar = document.querySelector('.toolbar');
+  const head = document.querySelector('.console-head');
+  const handle = document.querySelector('.resize-handle');
+  let anchor = { x: 100, y: 100 };
+  let geometry = null;
+  let expandedSize = null;
+  let collapsed = false;
+  const clamp = (value, min, max) => Math.max(min, Math.min(value, Math.max(min, max)));
+  const say = text => { status.textContent = text; };
+
+  function closeMenu(returnFocus = false) {
+    menu.hidden = true;
+    submenu.hidden = true;
+    openSubmenu.setAttribute('aria-expanded', 'false');
+    if (returnFocus) canvas.focus();
+  }
+  function showMenu(x, y) {
+    anchor = { x, y };
+    submenu.hidden = true;
+    openSubmenu.setAttribute('aria-expanded', 'false');
+    menu.hidden = false;
+    menu.style.left = `${clamp(x, 8, canvas.clientWidth - menu.offsetWidth - 8)}px`;
+    menu.style.top = `${clamp(y, 8, canvas.clientHeight - menu.offsetHeight - 8)}px`;
+    openSubmenu.focus();
+  }
+  function showSubmenu() {
+    submenu.hidden = false;
+    const menuRect = menu.getBoundingClientRect();
+    submenu.classList.toggle('leftward', menuRect.right + submenu.offsetWidth + 8 > window.innerWidth);
+    const overflow = menuRect.top + submenu.offsetHeight + 8 - window.innerHeight;
+    submenu.style.top = `${overflow > 0 ? -overflow : -1}px`;
+    openSubmenu.setAttribute('aria-expanded', 'true');
+    submenu.querySelector('button:not(:disabled)').focus();
+  }
+  canvas.addEventListener('contextmenu', event => {
+    if (event.target.closest('textarea, input, .node, .bottom-hint')) return;
+    event.preventDefault();
+    const rect = canvas.getBoundingClientRect();
+    showMenu(event.clientX - rect.left, event.clientY - rect.top);
+  });
+  canvas.addEventListener('keydown', event => {
+    if (event.target === canvas && (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10'))) {
+      event.preventDefault();
+      showMenu(canvas.clientWidth / 2, canvas.clientHeight / 2);
+    }
+  });
+  openSubmenu.addEventListener('click', showSubmenu);
+  menu.addEventListener('keydown', event => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      if (!submenu.hidden) { submenu.hidden = true; openSubmenu.setAttribute('aria-expanded', 'false'); openSubmenu.focus(); }
+      else closeMenu(true);
+      return;
+    }
+    if (event.key === 'ArrowRight' && document.activeElement === openSubmenu) { event.preventDefault(); showSubmenu(); return; }
+    if (event.key === 'ArrowLeft' && !submenu.hidden) { event.preventDefault(); submenu.hidden = true; openSubmenu.setAttribute('aria-expanded', 'false'); openSubmenu.focus(); return; }
+    if (submenu.hidden || !['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+    event.preventDefault();
+    const items = [...submenu.querySelectorAll('button:not(:disabled)')];
+    const index = items.indexOf(document.activeElement);
+    const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : (index + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
+    items[next].focus();
+  });
+  submenu.addEventListener('click', event => {
+    const item = event.target.closest('[data-type]');
+    if (!item) return;
+    const node = document.createElement('article');
+    node.className = 'node new-node';
+    node.style.left = `${anchor.x}px`;
+    node.style.top = `${anchor.y}px`;
+    const title = document.createElement('div');
+    title.className = 'node-head';
+    title.textContent = `模拟新建 · ${item.dataset.type}`;
+    const body = document.createElement('div');
+    body.className = 'node-body';
+    body.textContent = '只在此示意中显示，不写入工程。';
+    node.append(title, body);
+    canvas.append(node);
+    closeMenu(true);
+    say('已在最初触发的位置显示模拟节点。');
+  });
+  document.addEventListener('pointerdown', event => { if (!menu.hidden && !menu.contains(event.target)) closeMenu(); });
+  document.querySelector('.open-menu-demo').addEventListener('click', () => showMenu(canvas.clientWidth * .3, canvas.clientHeight * .58));
+  document.querySelector('.reset').addEventListener('click', () => say('示意：重置视图按钮可点击，不操作真实工程。'));
+
+  document.querySelectorAll('.request-badge, .result-badge').forEach(button => button.addEventListener('click', () => say('请求、结果及异常恢复入口为示意，不执行实际操作。')));
+  let saveTimer;
+  const text = document.querySelector('textarea');
+  const saveState = document.querySelector('.node-status');
+  text.addEventListener('input', () => {
+    saveState.textContent = '编辑中（模拟）';
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => { saveState.textContent = '已保存（模拟，不写入文件）'; }, 320);
+  });
+
+  function place(left, top, width, height) {
+    width = clamp(width, Math.min(collapsed ? 200 : 260, window.innerWidth - 16), window.innerWidth - 16);
+    height = clamp(height, Math.min(collapsed ? 40 : 180, window.innerHeight - 16), window.innerHeight - 16);
+    left = clamp(left, 8, window.innerWidth - width - 8);
+    top = clamp(top, 8, window.innerHeight - height - 8);
+    geometry = { left, top, width, height };
+    const element = collapsed ? rail : panel;
+    Object.assign(element.style, { left: `${left}px`, top: `${top}px`, width: `${width}px`, height: `${height}px`, right: 'auto' });
+  }
+  function initialPlacement() {
+    const top = toolbar.getBoundingClientRect().bottom + 12;
+    const width = Math.min(390, window.innerWidth - 24);
+    const height = Math.min(520, window.innerHeight - top - 12);
+    expandedSize = { width, height };
+    place(window.innerWidth - width - 16, top, width, height);
+  }
+  function dragStart(event) {
+    if (event.button !== 0 || event.target.closest('button')) return;
+    event.preventDefault();
+    const start = { ...geometry, x: event.clientX, y: event.clientY, pointerId: event.pointerId };
+    const move = e => { if (e.pointerId === start.pointerId) place(start.left + e.clientX - start.x, start.top + e.clientY - start.y, start.width, start.height); };
+    const end = e => { if (e.pointerId !== start.pointerId) return; window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', end); window.removeEventListener('pointercancel', end); };
+    window.addEventListener('pointermove', move); window.addEventListener('pointerup', end); window.addEventListener('pointercancel', end);
+  }
+  function moveKeys(event) {
+    if (event.target !== event.currentTarget || !event.key.startsWith('Arrow')) return;
+    const step = event.shiftKey ? 32 : 8;
+    const dx = event.key === 'ArrowLeft' ? -step : event.key === 'ArrowRight' ? step : 0;
+    const dy = event.key === 'ArrowUp' ? -step : event.key === 'ArrowDown' ? step : 0;
+    event.preventDefault(); place(geometry.left + dx, geometry.top + dy, geometry.width, geometry.height);
+  }
+  head.addEventListener('pointerdown', dragStart); head.addEventListener('keydown', moveKeys);
+  rail.addEventListener('pointerdown', dragStart); rail.addEventListener('keydown', moveKeys);
+  handle.addEventListener('pointerdown', event => {
+    if (event.button !== 0) return;
+    event.preventDefault(); event.stopPropagation();
+    const start = { ...geometry, x: event.clientX, y: event.clientY, pointerId: event.pointerId };
+    const move = e => {
+      if (e.pointerId !== start.pointerId) return;
+      const width = clamp(start.width - (e.clientX - start.x), 260, start.left + start.width - 8);
+      place(start.left + start.width - width, start.top, width, start.height + e.clientY - start.y);
+      expandedSize = { width: geometry.width, height: geometry.height };
+    };
+    const end = e => { if (e.pointerId !== start.pointerId) return; window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', end); window.removeEventListener('pointercancel', end); };
+    window.addEventListener('pointermove', move); window.addEventListener('pointerup', end); window.addEventListener('pointercancel', end);
+  });
+  handle.addEventListener('keydown', event => {
+    if (!event.key.startsWith('Arrow')) return;
+    event.preventDefault();
+    const step = event.shiftKey ? 32 : 8;
+    const deltaWidth = event.key === 'ArrowLeft' ? step : event.key === 'ArrowRight' ? -step : 0;
+    const deltaHeight = event.key === 'ArrowDown' ? step : event.key === 'ArrowUp' ? -step : 0;
+    const right = geometry.left + geometry.width;
+    const width = clamp(geometry.width + deltaWidth, 260, right - 8);
+    place(right - width, geometry.top, width, geometry.height + deltaHeight);
+    expandedSize = { width: geometry.width, height: geometry.height };
+  });
+  document.querySelector('.collapse').addEventListener('click', () => {
+    expandedSize = { width: geometry.width, height: geometry.height };
+    collapsed = true; panel.hidden = true; rail.hidden = false;
+    place(geometry.left, geometry.top, Math.min(240, window.innerWidth - 16), 40);
+    document.querySelector('.expand').focus();
+  });
+  document.querySelector('.expand').addEventListener('click', () => {
+    collapsed = false; rail.hidden = true; panel.hidden = false;
+    place(geometry.left, geometry.top, expandedSize.width, expandedSize.height);
+    document.querySelector('.collapse').focus();
+  });
+  window.addEventListener('resize', () => { if (geometry) place(geometry.left, geometry.top, geometry.width, geometry.height); });
+  initialPlacement();
+})();
+</script>
+</body>
+</html>
