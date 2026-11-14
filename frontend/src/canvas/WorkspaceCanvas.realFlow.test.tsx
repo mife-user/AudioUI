@@ -303,7 +303,8 @@ describe('WorkspaceCanvas with real React Flow', () => {
     )
 
     await waitFor(() => expect(container.querySelectorAll('.react-flow__edge-path')).toHaveLength(4))
-    fireEvent.click(screen.getByRole('button', { name: '选择叶子链 测试链，空闲' }))
+    fireEvent.pointerEnter(screen.getByRole('navigation', { name: '链路选择' }))
+    fireEvent.click(screen.getByRole('button', { name: /选择链路 测试链/ }))
     expect(onSelectNode).toHaveBeenCalledWith('n_script')
 
     const nextSnapshot: WorkspaceSnapshot = {

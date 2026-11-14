@@ -1256,8 +1256,6 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFl
               nodes={graphNodes}
               activeNodeId={snapshot.project?.activeNodeId ?? ''}
               onSelectNode={selectChain}
-              onCreateNode={openCreateMenuAtCenter}
-              createNodeDisabled={mutationBlocked}
             />
           </Panel>
         </ReactFlow>

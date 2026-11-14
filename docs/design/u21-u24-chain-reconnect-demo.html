@@ -1,0 +1,304 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>U21～U24 链路与箭头改挂交互草案</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0d1215;
+    --canvas: #101719;
+    --surface: #172024;
+    --surface-hover: #21312f;
+    --line: #35494a;
+    --line-strong: #526968;
+    --text: #e2eeec;
+    --dim: #b6c9c6;
+    --muted: #859d98;
+    --accent: #7bd2c1;
+    --accent-bg: #1d413b;
+    --warning: #e0bd7a;
+    --grid: #668782;
+    --shadow: #0008;
+    font: 13px/1.5 "Segoe UI", "Microsoft YaHei UI", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body { margin: 0; min-width: 680px; height: 100vh; overflow: hidden; background: var(--bg); color: var(--text); }
+  button, select { font: inherit; }
+  button { color: inherit; cursor: pointer; }
+  button:focus-visible, select:focus-visible, .edge-drag:focus-visible, .edge-hit:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .top { height: 46px; display: flex; align-items: center; gap: 16px; padding: 0 20px; border-bottom: 1px solid var(--line); background: var(--surface); }
+  .brand { color: var(--accent); font: 700 11px ui-monospace, monospace; letter-spacing: .14em; }
+  .project { color: var(--dim); }
+  .draft { color: var(--muted); font-size: 11px; }
+  .top-end { margin-left: auto; color: var(--muted); font-size: 11px; }
+  .toolbar { height: 50px; display: flex; align-items: center; gap: 12px; padding: 0 20px; border-bottom: 1px solid var(--line); background: var(--surface); }
+  .toolbar strong { font-size: 12px; }
+  .toolbar small { color: var(--muted); }
+  .toolbar button { margin-left: auto; padding: 6px 10px; border: 1px solid var(--line-strong); border-radius: 5px; background: var(--surface); font-size: 11px; }
+  .canvas { position: relative; height: calc(100vh - 96px); min-height: 370px; overflow: hidden; background: var(--canvas); }
+  .dots { position: absolute; inset: 0; pointer-events: none; opacity: .18; background-image: radial-gradient(circle, var(--grid) 1px, transparent 1.2px); background-size: 22px 22px; }
+  .guide { position: absolute; z-index: 3; top: 20px; left: 24px; max-width: min(570px, calc(100% - 48px)); pointer-events: none; }
+  .guide span { color: var(--accent); font: 10px ui-monospace, monospace; letter-spacing: .1em; }
+  .guide strong { display: block; margin-top: 5px; font-size: 15px; }
+  .guide p { margin: 5px 0 0; color: var(--dim); font-size: 11px; }
+  .node { position: absolute; z-index: 2; width: clamp(150px, 18vw, 220px); min-height: 110px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface); box-shadow: 0 10px 26px var(--shadow); }
+  .node-head { display: flex; align-items: center; gap: 8px; padding: 9px 11px; border-bottom: 1px solid var(--line); }
+  .kind { color: var(--accent); font: 9px ui-monospace, monospace; letter-spacing: .08em; }
+  .node-head strong { overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+  .node-body { padding: 10px 11px; color: var(--muted); font-size: 11px; }
+  .node-body p { margin: 0; }
+  .node.is-drop { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-bg), 0 10px 26px var(--shadow); }
+  .node::before, .node::after { position: absolute; top: calc(50% - 4px); width: 8px; height: 8px; border: 1px solid var(--accent); border-radius: 50%; background: var(--canvas); content: ""; }
+  .node::before { left: -5px; }
+  .node::after { right: -5px; }
+  .prompt { left: 10%; top: 35%; }
+  .agent-a { left: 46%; top: 28%; }
+  .agent-b { left: 70%; top: 61%; }
+  .edges { position: absolute; inset: 0; z-index: 1; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+  .edge-line { fill: none; stroke: var(--accent); stroke-width: 2; opacity: .9; }
+  .edge-hit { fill: none; stroke: transparent; stroke-width: 22; pointer-events: stroke; cursor: pointer; }
+  .edge-drag { fill: transparent; stroke: transparent; pointer-events: all; cursor: grab; touch-action: none; }
+  .edge-drag:active { cursor: grabbing; }
+  .edge-arrow { fill: var(--accent); pointer-events: none; }
+  .edge-preview { fill: none; stroke: var(--accent); stroke-width: 2; stroke-dasharray: 6 4; pointer-events: none; }
+  .relation-popover { position: absolute; z-index: 6; width: 230px; padding: 10px; border: 1px solid var(--line-strong); border-radius: 7px; background: var(--surface); box-shadow: 0 12px 30px var(--shadow); }
+  .relation-popover strong { display: block; color: var(--dim); font-size: 11px; }
+  .relation-popover p { margin: 6px 0; color: var(--muted); font-size: 10px; }
+  .relation-popover label { display: flex; align-items: center; gap: 8px; margin: 8px 0; color: var(--dim); font-size: 10px; }
+  .relation-popover select { padding: 4px 6px; border: 1px solid var(--line-strong); border-radius: 4px; background: var(--canvas); color: var(--text); }
+  .relation-popover button { padding: 5px 8px; border: 1px solid var(--line-strong); border-radius: 4px; background: var(--canvas); font-size: 10px; }
+  .chain-dock { position: absolute; z-index: 5; bottom: 0; left: 50%; display: flex; align-items: center; flex-direction: column; transform: translateX(-50%); }
+  .chain-tab { width: 68px; height: 24px; border: 1px solid var(--line-strong); border-bottom: 0; border-radius: 6px 6px 0 0; background: var(--surface); color: var(--dim); font-size: 16px; line-height: 1; }
+  .chain-tab:hover, .chain-tab[aria-expanded="true"] { background: var(--surface-hover); color: var(--accent); }
+  .chain-list { position: absolute; bottom: 100%; left: 50%; width: min(640px, calc(100vw - 48px)); max-height: 148px; overflow: auto; transform: translateX(-50%); padding: 5px; border: 1px solid var(--line-strong); border-radius: 7px; background: var(--surface); box-shadow: 0 12px 30px var(--shadow); }
+  .chain-list button { display: block; width: 100%; overflow: hidden; padding: 7px 10px; border: 0; border-radius: 4px; background: transparent; color: var(--dim); font-size: 11px; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
+  .chain-list button:hover, .chain-list button[aria-pressed="true"] { background: var(--accent-bg); color: var(--text); }
+  .chain-list .empty { margin: 4px 10px; color: var(--muted); font-size: 11px; }
+  .status { position: absolute; z-index: 3; bottom: 15px; left: 20px; max-width: 260px; color: var(--muted); font-size: 10px; pointer-events: none; }
+  dialog { width: min(410px, calc(100vw - 40px)); padding: 20px; border: 1px solid var(--line-strong); border-radius: 9px; background: var(--surface); color: var(--text); box-shadow: 0 18px 42px var(--shadow); }
+  dialog::backdrop { background: var(--shadow); }
+  dialog h2 { margin: 0 0 8px; font-size: 15px; }
+  dialog p { color: var(--dim); font-size: 12px; }
+  dialog small { display: block; color: var(--muted); }
+  .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
+  .dialog-actions button { padding: 7px 12px; border: 1px solid var(--line-strong); border-radius: 5px; background: var(--canvas); }
+  .dialog-actions .primary { border-color: var(--accent); background: var(--accent-bg); }
+  @media (max-width: 950px) { .top-end, .toolbar small { display: none; } .agent-b { left: 68%; } }
+  @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; animation: none !important; } }
+</style>
+</head>
+<body>
+<header class="top"><span class="brand">AUDIOUI</span><span class="project">本地工作台</span><span class="draft">U21～U24 · 讨论草案</span><span class="top-end">模拟数据 · 不连接工程、Agent 或网络</span></header>
+<div class="toolbar"><strong>工作台 / 节点图</strong><small>上方不再出现连接下拉或自动占位的输入关系</small><button id="reset" type="button">重置演示</button></div>
+<main class="canvas" id="canvas" aria-label="链路与拖动改挂交互草案">
+  <div class="dots" aria-hidden="true"></div>
+  <div class="guide"><span>CHAIN &amp; RECONNECT / PROPOSAL</span><strong>底边一枚按钮，按需查看节点链路</strong><p>将鼠标移到底部箭头上；拖动连线末端箭头到另一张 Agent 卡片，松开直接改接。点击线身可查看断开操作。实际产品以输入端口为落点，并由后端校验。</p></div>
+  <svg class="edges" id="edges" aria-label="模拟连接">
+    <path id="edge-line" class="edge-line"></path>
+    <path id="edge-hit" class="edge-hit" tabindex="0" role="button" aria-label="查看模拟连接的操作"></path>
+    <path id="edge-preview" class="edge-preview" hidden></path>
+    <polygon id="edge-arrow" class="edge-arrow"></polygon>
+    <circle id="edge-drag" class="edge-drag" r="13" aria-label="用鼠标拖动箭头到其他节点"></circle>
+  </svg>
+  <article class="node prompt" id="source"><div class="node-head"><span class="kind">SCRIPT</span><strong>脚本</strong></div><div class="node-body"><p>模拟 Script 结果，可按连接固定版本。</p><p>节点输出 →</p></div></article>
+  <article class="node agent-a" id="agent-a"><div class="node-head"><span class="kind">AGENT</span><strong>策划 Agent</strong></div><div class="node-body"><p>原连接目标</p><p>运行前校验输入与输出</p></div></article>
+  <article class="node agent-b" id="agent-b"><div class="node-head"><span class="kind">AGENT</span><strong>写作 Agent</strong></div><div class="node-body"><p>将连线箭头拖到此处</p><p>模拟其他可连接节点</p></div></article>
+  <div class="relation-popover" id="relation-popover" hidden><strong id="relation-title"></strong><p>主动点击连线才显示操作，不自动占用画布高度。</p><label>固定版本 <select id="version-select" aria-label="模拟设置这条 Script 连线的固定版本"><option value="0">未绑定</option><option value="1" selected>v1</option><option value="2">v2</option></select></label><button type="button" id="disconnect">断开连接</button></div>
+  <nav class="chain-dock" id="chain-dock" aria-label="链路选择">
+    <div class="chain-list" id="chain-list" hidden>
+      <button id="chain-one" type="button" aria-pressed="true">脚本 → 策划 Agent</button>
+      <button id="chain-two" type="button" aria-pressed="false">选题 → 候选 → 提示词 → 脚本</button>
+    </div>
+    <button class="chain-tab" id="chain-tab" type="button" aria-label="显示节点链路" aria-controls="chain-list" aria-expanded="false">⌃</button>
+  </nav>
+  <div class="status" id="status" role="status">仅为交互模拟；不会读写工程。</div>
+</main>
+<dialog id="confirm-dialog" aria-labelledby="confirm-title">
+  <h2 id="confirm-title">确认断开连接？</h2>
+  <p id="confirm-message"></p>
+  <small>示意方案：仅断开这条普通边，不移动或删除工作区文件。</small>
+  <div class="dialog-actions"><button id="cancel-disconnect" type="button">取消</button><button id="confirm-disconnect" type="button" class="primary">确认断开</button></div>
+</dialog>
+<script>
+(() => {
+  const canvas = document.getElementById('canvas');
+  const source = document.getElementById('source');
+  const agentA = document.getElementById('agent-a');
+  const agentB = document.getElementById('agent-b');
+  const line = document.getElementById('edge-line');
+  const hit = document.getElementById('edge-hit');
+  const preview = document.getElementById('edge-preview');
+  const arrow = document.getElementById('edge-arrow');
+  const drag = document.getElementById('edge-drag');
+  const popover = document.getElementById('relation-popover');
+  const relationTitle = document.getElementById('relation-title');
+  const dock = document.getElementById('chain-dock');
+  const tab = document.getElementById('chain-tab');
+  const list = document.getElementById('chain-list');
+  const firstChain = document.getElementById('chain-one');
+  const secondChain = document.getElementById('chain-two');
+  const status = document.getElementById('status');
+  const dialog = document.getElementById('confirm-dialog');
+  const confirmMessage = document.getElementById('confirm-message');
+  let target = agentA;
+  let dragging = false;
+  let connected = true;
+  let hovered = false;
+  let focused = false;
+  let pinned = false;
+  let dismissed = false;
+
+  function point(element, side) {
+    const box = element.getBoundingClientRect();
+    const board = canvas.getBoundingClientRect();
+    return { x: (side === 'right' ? box.right : box.left) - board.left, y: (box.top + box.height / 2) - board.top };
+  }
+  function path(a, b) {
+    const bend = Math.max(42, Math.abs(b.x - a.x) * .45);
+    return `M ${a.x} ${a.y} C ${a.x + bend} ${a.y}, ${b.x - bend} ${b.y}, ${b.x} ${b.y}`;
+  }
+  function nodeName(node) { return node === agentA ? '策划 Agent' : '写作 Agent'; }
+  function draw() {
+    const a = point(source, 'right');
+    const b = point(target, 'left');
+    for (const item of [line, hit, drag, arrow]) item.toggleAttribute('hidden', !connected);
+    if (!connected) return;
+    line.setAttribute('d', path(a, b));
+    hit.setAttribute('d', path(a, b));
+    arrow.setAttribute('points', `${b.x - 11},${b.y - 5} ${b.x - 1},${b.y} ${b.x - 11},${b.y + 5}`);
+    drag.setAttribute('cx', String(b.x - 11));
+    drag.setAttribute('cy', String(b.y));
+    firstChain.textContent = `脚本 → ${nodeName(target)}`;
+    relationTitle.textContent = `脚本 → ${nodeName(target)}`;
+  }
+  function setDrop(node) {
+    for (const candidate of [agentA, agentB]) candidate.classList.toggle('is-drop', candidate === node);
+  }
+  function nodeAt(event) {
+    return [agentA, agentB].find((node) => {
+      const r = node.getBoundingClientRect();
+      return event.clientX >= r.left && event.clientX <= r.right && event.clientY >= r.top && event.clientY <= r.bottom;
+    }) || null;
+  }
+  function cancelDrag() {
+    dragging = false;
+    preview.setAttribute('hidden', '');
+    line.toggleAttribute('hidden', !connected);
+    arrow.toggleAttribute('hidden', !connected);
+    setDrop(null);
+  }
+  drag.addEventListener('pointerdown', (event) => {
+    if (event.button !== 0 || !connected) return;
+    event.preventDefault();
+    event.stopPropagation();
+    dragging = true;
+    popover.hidden = true;
+    drag.setPointerCapture(event.pointerId);
+    line.setAttribute('hidden', '');
+    arrow.setAttribute('hidden', '');
+    preview.removeAttribute('hidden');
+    status.textContent = '拖动至另一节点；松在空白处将还原。';
+  });
+  drag.addEventListener('pointermove', (event) => {
+    if (!dragging) return;
+    const board = canvas.getBoundingClientRect();
+    preview.setAttribute('d', path(point(source, 'right'), { x: event.clientX - board.left, y: event.clientY - board.top }));
+    setDrop(nodeAt(event));
+  });
+  drag.addEventListener('pointerup', (event) => {
+    if (!dragging) return;
+    const next = nodeAt(event);
+    cancelDrag();
+    if (!next || next === target) {
+      status.textContent = '目标未改变；原连接保持不变。';
+      return;
+    }
+    target = next;
+    draw();
+    status.textContent = '模拟改挂完成；实际应用须以后端快照为准。';
+  });
+  drag.addEventListener('pointercancel', cancelDrag);
+  document.getElementById('cancel-disconnect').addEventListener('click', () => {
+    dialog.close();
+    status.textContent = '已取消断开；原连接保持不变。';
+  });
+  dialog.addEventListener('cancel', () => { status.textContent = '已取消断开；原连接保持不变。'; });
+  document.getElementById('confirm-disconnect').addEventListener('click', () => {
+    connected = false;
+    dialog.close();
+    draw();
+    firstChain.textContent = '脚本（未连接）';
+    status.textContent = '模拟断开；实际应用须以后端快照为准。';
+  });
+  function showRelation() {
+    const a = point(source, 'right');
+    const b = point(target, 'left');
+    popover.style.left = `${Math.max(8, Math.min(canvas.clientWidth - 238, (a.x + b.x) / 2 - 115))}px`;
+    popover.style.top = `${Math.max(85, Math.min(canvas.clientHeight - 160, (a.y + b.y) / 2 + 16))}px`;
+    popover.hidden = !popover.hidden;
+  }
+  hit.addEventListener('click', showRelation);
+  hit.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); showRelation(); } });
+  document.getElementById('version-select').addEventListener('change', (event) => {
+    const version = event.currentTarget.value;
+    status.textContent = version === '0' ? '模拟清除固定版本；未绑定边不能作为运行输入。' : `模拟将这条连接固定到 v${version}。`;
+  });
+  document.getElementById('disconnect').addEventListener('click', () => {
+    popover.hidden = true;
+    confirmMessage.textContent = `断开 脚本 → ${nodeName(target)}。`;
+    dialog.showModal();
+  });
+  function updateDock() {
+    const open = !dismissed && (hovered || focused || pinned);
+    list.hidden = !open;
+    tab.setAttribute('aria-expanded', String(open));
+  }
+  dock.addEventListener('pointerenter', () => { hovered = true; dismissed = false; updateDock(); });
+  dock.addEventListener('pointerleave', () => { hovered = false; updateDock(); });
+  dock.addEventListener('focusin', () => { focused = true; dismissed = false; updateDock(); });
+  dock.addEventListener('focusout', (event) => { if (!dock.contains(event.relatedTarget)) { focused = false; updateDock(); } });
+  tab.addEventListener('click', () => { pinned = !pinned; dismissed = !pinned; updateDock(); });
+  document.addEventListener('pointerdown', (event) => {
+    if (dock.contains(event.target)) return;
+    pinned = false;
+    dismissed = true;
+    updateDock();
+  });
+  dock.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape') return;
+    event.preventDefault();
+    pinned = false;
+    tab.focus();
+    dismissed = true;
+    updateDock();
+  });
+  for (const button of [firstChain, secondChain]) {
+    button.addEventListener('click', () => {
+      firstChain.setAttribute('aria-pressed', String(button === firstChain));
+      secondChain.setAttribute('aria-pressed', String(button === secondChain));
+      pinned = false;
+      dismissed = true;
+      updateDock();
+      status.textContent = '模拟切换链路；实际切换不修改工程图。';
+    });
+  }
+  document.getElementById('reset').addEventListener('click', () => {
+    target = agentA;
+    connected = true;
+    popover.hidden = true;
+    cancelDrag();
+    firstChain.setAttribute('aria-pressed', 'true');
+    secondChain.setAttribute('aria-pressed', 'false');
+    document.getElementById('version-select').value = '1';
+    draw();
+    status.textContent = '已重置演示；不会读写工程。';
+  });
+  window.addEventListener('resize', draw);
+  draw();
+})();
+</script>
+</body>
+</html>

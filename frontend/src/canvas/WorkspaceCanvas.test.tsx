@@ -400,18 +400,6 @@ describe('WorkspaceCanvas', () => {
     expect(flowMocks.fitView).not.toHaveBeenCalled()
   })
 
-  it('routes the QuickBar creation entry through the same two-level menu', async () => {
-    const api = makeAPI()
-    render(<WorkspaceCanvas snapshot={makeSnapshot()} onSelectNode={vi.fn().mockResolvedValue(undefined)} api={api} />)
-
-    fireEvent.click(screen.getByRole('button', { name: '＋ 新建节点' }))
-    fireEvent.click(await screen.findByRole('menuitem', { name: '新增节点' }))
-    fireEvent.click(await screen.findByRole('menuitem', { name: 'Agent' }))
-
-    await waitFor(() => expect(api.addNode).toHaveBeenCalledOnce())
-    expect(api.addNode).toHaveBeenCalledWith(expect.objectContaining({ type: 'agent', parent: '' }))
-  })
-
   it('opens the submenu with the keyboard and returns focus one level at a time', async () => {
     const api = makeAPI()
     const { container } = render(<WorkspaceCanvas snapshot={makeSnapshot()} onSelectNode={vi.fn().mockResolvedValue(undefined)} api={api} />)
@@ -491,7 +479,8 @@ describe('WorkspaceCanvas', () => {
     expect(api.addNode).toHaveBeenCalledOnce()
 
     resolveAddNode({ projectId: 'p_test', projectRevision: 3, nodeId: 'n_created' })
-    await waitFor(() => expect(screen.getByRole('button', { name: '＋ 新建节点' })).toBeEnabled())
+    await waitFor(() => expect(api.addNode).toHaveBeenCalledOnce())
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 
   it.each([
@@ -587,13 +576,16 @@ describe('WorkspaceCanvas', () => {
     await createFromCanvasMenu('选题')
     await waitFor(() => expect(api.addNode).toHaveBeenCalledOnce())
     await waitFor(() => expect(onGraphMutation).toHaveBeenCalledOnce())
-    const disabledWhileSyncing = screen.getByRole('button', { name: '＋ 新建节点' }).hasAttribute('disabled')
+    fireEvent.contextMenu(screen.getByTestId('mock-flow-pane'), { clientX: 400, clientY: 300 })
+    fireEvent.click(await screen.findByRole('menuitem', { name: '新增节点' }))
+    const itemWhileSyncing = await screen.findByRole('menuitem', { name: '选题' })
+    const disabledWhileSyncing = itemWhileSyncing.hasAttribute('disabled')
 
     rerender(<WorkspaceCanvas snapshot={refreshed} onSelectNode={vi.fn().mockResolvedValue(undefined)} onGraphMutation={onGraphMutation} api={api} />)
     expect(await screen.findByRole('button', { name: 'n_created' })).toBeInTheDocument()
     resolveSync()
 
-    await waitFor(() => expect(screen.getByRole('button', { name: '＋ 新建节点' })).not.toBeDisabled())
+    await waitFor(() => expect(screen.getByRole('menuitem', { name: '选题' })).toBeEnabled())
     expect(disabledWhileSyncing).toBe(true)
     expect(screen.queryByText('选题节点已提交，正在同步工程图。')).not.toBeInTheDocument()
     expect(screen.queryByText('选题节点已同步。')).not.toBeInTheDocument()
@@ -610,7 +602,10 @@ describe('WorkspaceCanvas', () => {
     expect(container.querySelector('.canvas-flow-root')?.contains(syncError)).toBe(true)
     expect(api.addNode).toHaveBeenCalledOnce()
     fireEvent.click(screen.getByRole('button', { name: '仅重试快照同步' }))
-    await waitFor(() => expect(screen.getByRole('button', { name: '＋ 新建节点' })).not.toBeDisabled())
+    await waitFor(() => expect(onGraphMutation).toHaveBeenCalledTimes(2))
+    fireEvent.contextMenu(screen.getByTestId('mock-flow-pane'), { clientX: 400, clientY: 300 })
+    fireEvent.click(await screen.findByRole('menuitem', { name: '新增节点' }))
+    expect(screen.getByRole('menuitem', { name: '选题' })).toBeEnabled()
     expect(api.addNode).toHaveBeenCalledOnce()
     expect(screen.queryByText('选题节点已同步。')).not.toBeInTheDocument()
   })
@@ -697,7 +692,9 @@ describe('WorkspaceCanvas', () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: '选择叶子链 测试链，空闲' }))
+    const quickbar = screen.getByRole('navigation', { name: '链路选择' })
+    fireEvent.pointerEnter(quickbar)
+    fireEvent.click(screen.getByRole('button', { name: /选择链路 测试链/ }))
     await waitFor(() => expect(onSelectNode).toHaveBeenCalledWith('n_agent'))
     expect(onGraphMutation).not.toHaveBeenCalled()
     expect(onStartRun).not.toHaveBeenCalled()

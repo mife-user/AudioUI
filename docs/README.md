@@ -34,6 +34,7 @@
 - U14 连线与运行过渡：[单文件交互演示](design/u14-dag-transition-demo.html)（已于 2026-11-12 通过用户验收；不连接工程或 Agent）。
 - U11 Agent 收起小窗拖动：[单文件交互演示](design/u11-agent-rail-demo.html)（模拟数据，不连接 Agent、不访问工程或网络；不代表产品实现或验收证据）。
 - U17～U20 后续界面优化：[单文件交互示意](design/u17-u20-workbench-polish-demo.html)（设计已评审；U17 已通过用户验收，U18 已于 2026-11-14 通过用户验收，U19 已于 2026-11-14 通过用户验收；U20 已于 2026-11-14 通过用户验收。模拟数据，不连接 Agent、不访问工程或网络，不代表产品实现或验收证据）。
+- U21～U24 链路收纳与目标端拖拽：[单文件交互示意](design/u21-u24-chain-reconnect-demo.html)（U21 已于 2026-11-14 通过用户验收；U22～U24 草案待评审；模拟数据，不访问工程、Agent 或网络，不代表实现或验收证据）。
 - 既有阶段自检与验收记录按编号存放在 [`dev/evidence/`](dev/evidence/m2.md)；M2-13 汇总见 [M2 集成证据](dev/evidence/m2.md)。
 - 其它历史原型、诊断示意按主题存放于 `design/`，历史验收截图与记录存放于 `dev/evidence/`。
 
