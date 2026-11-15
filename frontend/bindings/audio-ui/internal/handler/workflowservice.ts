@@ -53,6 +53,10 @@ export function MoveNode(id: string, x: number, y: number, projectID: string): $
     return $Call.ByID(634824434, id, x, y, projectID);
 }
 
+export function ReconnectTarget(request: $models.ReconnectTargetRequest): $CancellablePromise<entity$0.GraphMutationReceipt> {
+    return $Call.ByID(648893789, request);
+}
+
 export function ReplaceConnection(edgeID: string, sourceID: string, projectID: string): $CancellablePromise<entity$0.GraphMutationReceipt> {
     return $Call.ByID(482570597, edgeID, sourceID, projectID);
 }

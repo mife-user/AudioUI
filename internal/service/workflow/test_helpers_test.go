@@ -173,6 +173,53 @@ func baseProject() entity.Project {
 	return project
 }
 
+func asProjectV5(project entity.Project) entity.Project {
+	project.Version = valueobject.ProjectFileVersion
+	for i := range project.Nodes {
+		node := &project.Nodes[i]
+		if node.Type == valueobject.NodeTypeTopic {
+			for j := range node.Rounds {
+				if node.Rounds[j].RunID == "" {
+					node.Rounds[j].RunID = "r_" + node.ID
+				}
+			}
+		}
+	}
+	for i := range project.Nodes {
+		node := &project.Nodes[i]
+		if node.CandidateSource == nil {
+			continue
+		}
+		source := *node.CandidateSource
+		for _, topic := range project.Nodes {
+			if topic.ID != source.TopicNodeID {
+				continue
+			}
+			for _, round := range topic.Rounds {
+				if round.Kind == valueobject.OutputKindTopics && round.ArtifactID == source.ArtifactID {
+					source.Round = round.N
+					source.RunID = round.RunID
+					break
+				}
+			}
+			break
+		}
+		node.CandidateSource = &source
+	}
+	return project
+}
+
+func edgeByID(t *testing.T, project entity.Project, edgeID string) entity.Edge {
+	t.Helper()
+	for _, edge := range project.Edges {
+		if edge.ID == edgeID {
+			return edge
+		}
+	}
+	t.Fatalf("edge %s not found", edgeID)
+	return entity.Edge{}
+}
+
 func projectWithSecondTree() entity.Project {
 	project := baseProject()
 	artifactID := "sha256:" + strings.Repeat("1", 64)

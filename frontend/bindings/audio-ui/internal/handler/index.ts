@@ -23,5 +23,6 @@ export type {
     EnvironmentDTO,
     LayoutDTO,
     LogEntryDTO,
+    ReconnectTargetRequest,
     WebView2StatusDTO
 } from "./models.js";

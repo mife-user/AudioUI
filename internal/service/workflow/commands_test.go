@@ -3,6 +3,7 @@ package workflow
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"reflect"
 	"slices"
@@ -427,6 +428,258 @@ func TestReplaceConnectionFailures(t *testing.T) {
 			t.Fatalf("error = %v, want RUNNING_CHAIN_LOCKED", err)
 		}
 	})
+}
+
+func TestReconnectTargetPreservesEdgeAndStalesAffectedSubgraphs(t *testing.T) {
+	project := asProjectV5(baseProject())
+	project.Nodes = append(project.Nodes,
+		entity.Node{ID: "n_b_child", Type: valueobject.NodeTypePrompt, WorkspaceRootID: "n_topic", Size: entity.DefaultNodeSize(valueobject.NodeTypePrompt), Params: entity.NodeParams{Instruction: "旧分支"}, Rounds: []entity.Round{}},
+		entity.Node{ID: "n_c_child", Type: valueobject.NodeTypePrompt, WorkspaceRootID: "n_topic", Size: entity.DefaultNodeSize(valueobject.NodeTypePrompt), Params: entity.NodeParams{Instruction: "新分支"}, Rounds: []entity.Round{}},
+		entity.Node{ID: "n_shared", Type: valueobject.NodeTypeAgent, WorkspaceRootID: "n_topic", Size: entity.DefaultNodeSize(valueobject.NodeTypeAgent), Rounds: []entity.Round{}},
+	)
+	attachEdge(&project, "n_b", "n_b_child")
+	attachEdge(&project, "n_c", "n_c_child")
+	attachEdge(&project, "n_b_child", "n_shared")
+	project.Edges = append(project.Edges, entity.Edge{ID: "e_shared_from_c", SourceNodeID: "n_c_child", TargetNodeID: "n_shared", Kind: entity.EdgeKindConnection})
+	h := newHarness(t, project)
+	before := h.session.project.Clone()
+	expected := edgeByID(t, before, "e_n_b")
+
+	updated, err := h.service.ReconnectTarget(context.Background(), expected, "n_c", before.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Revision != before.Revision+1 || h.session.saveCount != 1 {
+		t.Fatalf("revision=%d saves=%d", updated.Revision, h.session.saveCount)
+	}
+	wantEdges := append([]entity.Edge(nil), before.Edges...)
+	for i := range wantEdges {
+		if wantEdges[i].ID == expected.ID {
+			wantEdges[i].TargetNodeID = "n_c"
+		}
+	}
+	if !reflect.DeepEqual(updated.Edges, wantEdges) {
+		t.Fatalf("edges = %+v, want %+v", updated.Edges, wantEdges)
+	}
+	for id, stale := range map[string]bool{
+		"n_b": true, "n_b_child": true, "n_c": true, "n_c_child": true, "n_shared": true,
+		"n_a": false, "n_draft": false,
+	} {
+		if h.node(t, id).Stale != stale {
+			t.Fatalf("node %s stale=%t, want %t", id, h.node(t, id).Stale, stale)
+		}
+	}
+	for _, node := range before.Nodes {
+		if h.node(t, node.ID).WorkspaceRootID != node.WorkspaceRootID {
+			t.Fatalf("node %s workspace root changed from %q to %q", node.ID, node.WorkspaceRootID, h.node(t, node.ID).WorkspaceRootID)
+		}
+	}
+	if len(h.mover.calls) != 0 || len(*h.changes) != 1 || (*h.changes)[0].revision != updated.Revision || (*h.changes)[0].reason != ChangeReasonGraph {
+		t.Fatalf("mover calls=%+v changes=%+v", h.mover.calls, *h.changes)
+	}
+}
+
+func TestReconnectTargetNoopAndStaleIdentity(t *testing.T) {
+	project := asProjectV5(baseProject())
+	h := newHarness(t, project)
+	expected := edgeByID(t, project, "e_n_b")
+	unchanged, err := h.service.ReconnectTarget(context.Background(), expected, expected.TargetNodeID, project.ID)
+	if err != nil || unchanged.Revision != project.Revision || h.session.saveCount != 0 || len(*h.changes) != 0 {
+		t.Fatalf("same-target reconnect err=%v revision=%d saves=%d changes=%+v", err, unchanged.Revision, h.session.saveCount, *h.changes)
+	}
+	candidateSource := edgeByID(t, project, "e_n_candidate")
+	unchanged, err = h.service.ReconnectTarget(context.Background(), candidateSource, candidateSource.TargetNodeID, project.ID)
+	if err != nil || unchanged.Revision != project.Revision || h.session.saveCount != 0 || len(*h.changes) != 0 {
+		t.Fatalf("same-target protected edge err=%v revision=%d saves=%d changes=%+v", err, unchanged.Revision, h.session.saveCount, *h.changes)
+	}
+
+	stale := expected
+	stale.TargetNodeID = "n_c"
+	before := h.session.project.Clone()
+	if _, err := h.service.ReconnectTarget(context.Background(), stale, "n_c", project.ID); !errors.Is(err, ErrEdgeConflict) {
+		t.Fatalf("stale edge error = %v, want EDGE_CONFLICT", err)
+	}
+	if h.session.saveCount != 0 || !reflect.DeepEqual(h.session.project.Clone(), before) || len(*h.changes) != 0 {
+		t.Fatal("stale edge identity changed the project")
+	}
+}
+
+func TestReconnectTargetRejectsChangedEdgeIdentityFields(t *testing.T) {
+	project := asProjectV5(baseProject())
+	expected := edgeByID(t, project, "e_n_b")
+	cases := map[string]func(*entity.Edge){
+		"source":         func(edge *entity.Edge) { edge.SourceNodeID = "n_c" },
+		"target":         func(edge *entity.Edge) { edge.TargetNodeID = "n_c" },
+		"kind":           func(edge *entity.Edge) { edge.Kind = entity.EdgeKindCandidateSource },
+		"script version": func(edge *entity.Edge) { edge.ScriptVersion = 1 },
+	}
+	for name, mutate := range cases {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t, project.Clone())
+			stale := expected
+			mutate(&stale)
+			before := h.session.project.Clone()
+			if _, err := h.service.ReconnectTarget(context.Background(), stale, "n_c", project.ID); !errors.Is(err, ErrEdgeConflict) {
+				t.Fatalf("changed edge identity error = %v, want EDGE_CONFLICT", err)
+			}
+			if h.session.saveCount != 0 || !reflect.DeepEqual(h.session.project.Clone(), before) || len(*h.changes) != 0 {
+				t.Fatal("changed edge identity modified the project")
+			}
+		})
+	}
+}
+
+func TestReconnectTargetPreservesScriptVersion(t *testing.T) {
+	for _, version := range []int{0, 1} {
+		t.Run(fmt.Sprintf("version_%d", version), func(t *testing.T) {
+			project := asProjectV5(baseProject())
+			project.Nodes = append(project.Nodes, entity.Node{
+				ID: "n_script", Type: valueobject.NodeTypeScript, Title: "脚本", WorkspaceRootID: "n_topic",
+				ScriptVersions: []entity.ScriptVersion{
+					{N: 1, ArtifactID: "sha256:script-v1", RunID: "r_script_v1"},
+					{N: 2, ArtifactID: "sha256:script-v2", RunID: "r_script_v2"},
+				},
+			})
+			for i := range project.Edges {
+				if project.Edges[i].ID == "e_n_c" {
+					project.Edges[i].SourceNodeID = "n_script"
+					project.Edges[i].ScriptVersion = version
+				}
+			}
+			h := newHarness(t, project)
+			expected := edgeByID(t, project, "e_n_c")
+			updated, err := h.service.ReconnectTarget(context.Background(), expected, "n_b", project.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			actual := edgeByID(t, updated, expected.ID)
+			if actual.SourceNodeID != expected.SourceNodeID || actual.TargetNodeID != "n_b" || actual.ScriptVersion != version {
+				t.Fatalf("reconnected edge = %+v, want source %s, target n_b, version %d", actual, expected.SourceNodeID, version)
+			}
+
+			stale := expected
+			stale.ScriptVersion = 1 - version
+			before := h.session.project.Clone()
+			if _, err := h.service.ReconnectTarget(context.Background(), stale, "n_b", project.ID); !errors.Is(err, ErrEdgeConflict) {
+				t.Fatalf("changed Script version error = %v, want EDGE_CONFLICT", err)
+			}
+			if h.session.saveCount != 1 || !reflect.DeepEqual(h.session.project.Clone(), before) {
+				t.Fatal("stale Script version identity changed the project")
+			}
+		})
+	}
+}
+
+func TestReconnectTargetRejectsInvalidRequests(t *testing.T) {
+	project := asProjectV5(baseProject())
+	expected := edgeByID(t, project, "e_n_b")
+	assertRejected := func(t *testing.T, current entity.Project, edge entity.Edge, targetID, projectID string, want error) {
+		t.Helper()
+		h := newHarness(t, current)
+		before := h.session.project.Clone()
+		if _, err := h.service.ReconnectTarget(context.Background(), edge, targetID, projectID); !errors.Is(err, want) {
+			t.Fatalf("reconnect error = %v, want %v", err, want)
+		}
+		if h.session.saveCount != 0 || !reflect.DeepEqual(h.session.project.Clone(), before) || len(*h.changes) != 0 {
+			t.Fatal("rejected reconnect changed the project")
+		}
+	}
+	t.Run("self connection", func(t *testing.T) {
+		assertRejected(t, project, expected, expected.SourceNodeID, project.ID, ErrSelfConnect)
+	})
+	t.Run("cycle", func(t *testing.T) { assertRejected(t, project, expected, "n_candidate", project.ID, ErrCycleDetected) })
+	t.Run("missing target", func(t *testing.T) { assertRejected(t, project, expected, "n_missing", project.ID, ErrNodeNotFound) })
+	t.Run("missing edge", func(t *testing.T) {
+		missing := expected
+		missing.ID = "e_missing"
+		assertRejected(t, project, missing, "n_c", project.ID, ErrEdgeNotFound)
+	})
+	t.Run("candidate source", func(t *testing.T) {
+		candidateSource := edgeByID(t, project, "e_n_candidate")
+		assertRejected(t, project, candidateSource, "n_c", project.ID, ErrProtectedEdge)
+	})
+	t.Run("project changed", func(t *testing.T) { assertRejected(t, project, expected, "n_c", "p_other", ErrProjectChanged) })
+	t.Run("duplicate source and target", func(t *testing.T) {
+		withDuplicate := project.Clone()
+		withDuplicate.Edges = append(withDuplicate.Edges, entity.Edge{
+			ID: "e_existing_ac", SourceNodeID: expected.SourceNodeID, TargetNodeID: "n_c", Kind: entity.EdgeKindConnection,
+		})
+		assertRejected(t, withDuplicate, expected, "n_c", project.ID, ErrEdgeConflict)
+	})
+}
+
+func TestReconnectTargetChecksLocksOnSourceAndBothSubgraphs(t *testing.T) {
+	project := asProjectV5(baseProject())
+	project.Nodes = append(project.Nodes,
+		entity.Node{ID: "n_b_child", Type: valueobject.NodeTypePrompt, WorkspaceRootID: "n_topic", Size: entity.DefaultNodeSize(valueobject.NodeTypePrompt), Params: entity.NodeParams{Instruction: "旧分支"}, Rounds: []entity.Round{}},
+		entity.Node{ID: "n_c_child", Type: valueobject.NodeTypePrompt, WorkspaceRootID: "n_topic", Size: entity.DefaultNodeSize(valueobject.NodeTypePrompt), Params: entity.NodeParams{Instruction: "新分支"}, Rounds: []entity.Round{}},
+		entity.Node{ID: "n_shared", Type: valueobject.NodeTypeAgent, WorkspaceRootID: "n_topic", Size: entity.DefaultNodeSize(valueobject.NodeTypeAgent), Rounds: []entity.Round{}},
+	)
+	attachEdge(&project, "n_b", "n_b_child")
+	attachEdge(&project, "n_c", "n_c_child")
+	attachEdge(&project, "n_b_child", "n_shared")
+	project.Edges = append(project.Edges, entity.Edge{ID: "e_shared_from_c", SourceNodeID: "n_c_child", TargetNodeID: "n_shared", Kind: entity.EdgeKindConnection})
+	for _, nodeID := range []string{"n_a", "n_b", "n_b_child", "n_c", "n_c_child", "n_shared"} {
+		t.Run(nodeID, func(t *testing.T) {
+			h := newHarness(t, project.Clone())
+			h.service.locks = map[string]runLock{"r_locked": {Members: map[string]struct{}{nodeID: {}}}}
+			expected := edgeByID(t, h.session.project, "e_n_b")
+			before := h.session.project.Clone()
+			if _, err := h.service.ReconnectTarget(context.Background(), expected, "n_c", project.ID); !errors.Is(err, ErrRunningChainLocked) {
+				t.Fatalf("reconnect error = %v, want RUNNING_CHAIN_LOCKED", err)
+			}
+			if h.session.saveCount != 0 || !reflect.DeepEqual(h.session.project.Clone(), before) {
+				t.Fatal("locked reconnect changed the project")
+			}
+		})
+	}
+}
+
+func TestReconnectTargetKeepsWorkspaceIdentityAndBlocksMismatchedOutput(t *testing.T) {
+	project := asProjectV5(projectWithSecondTree())
+	project.Nodes = append(project.Nodes,
+		entity.Node{ID: "n_old_script", Type: valueobject.NodeTypeScript, Title: "旧脚本", WorkspaceRootID: "n_topic", Rounds: []entity.Round{}},
+		entity.Node{ID: "n_new_script", Type: valueobject.NodeTypeScript, Title: "新脚本", WorkspaceRootID: "n_topic2", Rounds: []entity.Round{}},
+	)
+	attachEdge(&project, "n_b", "n_old_script")
+	graph, err := entity.NewGraph(&project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := graph.SnapshotForRun("n_b"); err != nil {
+		t.Fatalf("baseline output should be runnable: %v", err)
+	}
+
+	h := newHarness(t, project)
+	expected := edgeByID(t, project, "e_n_old_script")
+	updated, err := h.service.ReconnectTarget(context.Background(), expected, "n_new_script", project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h.node(t, "n_old_script").WorkspaceRootID != "n_topic" || h.node(t, "n_new_script").WorkspaceRootID != "n_topic2" || len(h.mover.calls) != 0 {
+		t.Fatalf("workspace roots changed or mover used: old=%s new=%s moves=%+v", h.node(t, "n_old_script").WorkspaceRootID, h.node(t, "n_new_script").WorkspaceRootID, h.mover.calls)
+	}
+	graph, err = entity.NewGraph(&updated)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := graph.SnapshotForRun("n_b"); !errors.Is(err, entity.ErrRunGraphUnsupported) {
+		t.Fatalf("mismatched workspace output error = %v, want RUN_GRAPH_UNSUPPORTED", err)
+	}
+}
+
+func TestReconnectTargetSaveFailureLeavesGraphUnchanged(t *testing.T) {
+	project := asProjectV5(baseProject())
+	h := newHarness(t, project)
+	h.session.saveErr = errors.New("disk full")
+	before := h.session.project.Clone()
+	expected := edgeByID(t, project, "e_n_b")
+	if _, err := h.service.ReconnectTarget(context.Background(), expected, "n_c", project.ID); err == nil {
+		t.Fatal("save error was ignored")
+	}
+	if h.session.saveCount != 0 || !reflect.DeepEqual(h.session.project.Clone(), before) || len(*h.changes) != 0 || len(h.mover.calls) != 0 {
+		t.Fatalf("failed save changed state: saves=%d changes=%+v moves=%+v", h.session.saveCount, *h.changes, h.mover.calls)
+	}
 }
 
 func TestMoveNode(t *testing.T) {

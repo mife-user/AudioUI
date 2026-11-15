@@ -29,6 +29,12 @@ type AddNodeRequest struct {
 	Params          entity.NodeParams `json:"params"`
 }
 
+type ReconnectTargetRequest struct {
+	ProjectID    string      `json:"projectId"`
+	ExpectedEdge entity.Edge `json:"expectedEdge"`
+	TargetNodeID string      `json:"targetNodeId"`
+}
+
 func (h *WorkflowService) AddNode(request AddNodeRequest) (entity.GraphMutationReceipt, error) {
 	request.ProjectID = strings.TrimSpace(request.ProjectID)
 	if request.ProjectID == "" {
@@ -107,6 +113,26 @@ func (h *WorkflowService) ReplaceConnection(edgeID, sourceID, projectID string) 
 		}
 	}
 	return entity.GraphMutationReceipt{}, errors.New("EDGE_RECEIPT_MISSING_EDGE")
+}
+
+func (h *WorkflowService) ReconnectTarget(request ReconnectTargetRequest) (entity.GraphMutationReceipt, error) {
+	request.ProjectID = strings.TrimSpace(request.ProjectID)
+	request.TargetNodeID = strings.TrimSpace(request.TargetNodeID)
+	request.ExpectedEdge.ID = strings.TrimSpace(request.ExpectedEdge.ID)
+	request.ExpectedEdge.SourceNodeID = strings.TrimSpace(request.ExpectedEdge.SourceNodeID)
+	request.ExpectedEdge.TargetNodeID = strings.TrimSpace(request.ExpectedEdge.TargetNodeID)
+	request.ExpectedEdge.Kind = strings.TrimSpace(request.ExpectedEdge.Kind)
+	if request.ProjectID == "" || request.TargetNodeID == "" || request.ExpectedEdge.ID == "" ||
+		request.ExpectedEdge.SourceNodeID == "" || request.ExpectedEdge.TargetNodeID == "" || request.ExpectedEdge.Kind == "" {
+		return entity.GraphMutationReceipt{}, errors.New("连接身份、目标与工程 ID 不能为空")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	projectValue, err := h.service.ReconnectTarget(ctx, request.ExpectedEdge, request.TargetNodeID, request.ProjectID)
+	if err != nil {
+		return entity.GraphMutationReceipt{}, err
+	}
+	return mutationReceipt(projectValue, request.TargetNodeID), nil
 }
 
 func (h *WorkflowService) SetEdgeScriptVersion(edgeID string, version int, projectID string) (entity.GraphMutationReceipt, error) {

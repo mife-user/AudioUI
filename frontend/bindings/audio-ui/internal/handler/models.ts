@@ -54,6 +54,12 @@ export interface LogEntryDTO {
     "message": string;
 }
 
+export interface ReconnectTargetRequest {
+    "projectId": string;
+    "expectedEdge": entity$0.Edge;
+    "targetNodeId": string;
+}
+
 export interface WebView2StatusDTO {
     "installed": boolean;
     "path": string;

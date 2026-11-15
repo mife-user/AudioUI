@@ -334,6 +334,87 @@ func (s *Service) ReplaceConnection(ctx context.Context, edgeID, sourceID string
 	return saved, nil
 }
 
+func (s *Service) ReconnectTarget(ctx context.Context, expectedEdge entity.Edge, newTargetID string, expectedProjectID ...string) (entity.Project, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return entity.Project{}, err
+	}
+	project, graph, err := s.loadCurrentForProject(ctx, firstExpectedProjectID(expectedProjectID))
+	if err != nil {
+		return entity.Project{}, err
+	}
+	edge, ok := graph.Edge(expectedEdge.ID)
+	if !ok {
+		return entity.Project{}, fmt.Errorf("%w: %s", ErrEdgeNotFound, expectedEdge.ID)
+	}
+	if edge != expectedEdge {
+		return entity.Project{}, fmt.Errorf("%w: edge %s changed", ErrEdgeConflict, edge.ID)
+	}
+	if newTargetID == edge.TargetNodeID {
+		return project, nil
+	}
+	if edge.Kind == entity.EdgeKindCandidateSource {
+		return entity.Project{}, fmt.Errorf("%w: 候选生成来源不能改接", ErrProtectedEdge)
+	}
+	if _, err := requireNode(graph, newTargetID, "target"); err != nil {
+		return entity.Project{}, err
+	}
+	if newTargetID == edge.SourceNodeID {
+		return entity.Project{}, fmt.Errorf("%w: %s", ErrSelfConnect, newTargetID)
+	}
+	if _, exists := graph.EdgeBetween(edge.SourceNodeID, newTargetID); exists {
+		return entity.Project{}, fmt.Errorf("%w: 目标已连接该上游", ErrEdgeConflict)
+	}
+	if graph.IsAncestor(newTargetID, edge.SourceNodeID) {
+		return entity.Project{}, fmt.Errorf("%w: %s → %s", ErrCycleDetected, edge.SourceNodeID, newTargetID)
+	}
+	oldAffected, err := graph.Subtree(edge.TargetNodeID)
+	if err != nil {
+		return entity.Project{}, err
+	}
+	newAffected, err := graph.Subtree(newTargetID)
+	if err != nil {
+		return entity.Project{}, err
+	}
+	affected := make([]string, 0, len(oldAffected)+len(newAffected))
+	seen := make(map[string]struct{}, cap(affected))
+	addAffected := func(ids []string) {
+		for _, id := range ids {
+			if _, exists := seen[id]; exists {
+				continue
+			}
+			seen[id] = struct{}{}
+			affected = append(affected, id)
+		}
+	}
+	addAffected(oldAffected)
+	addAffected(newAffected)
+	if err := s.ensureEditable(append(affected, edge.SourceNodeID)...); err != nil {
+		return entity.Project{}, err
+	}
+	for i := range project.Edges {
+		if project.Edges[i].ID == edge.ID {
+			project.Edges[i].TargetNodeID = newTargetID
+			break
+		}
+	}
+	markSubtreeStale(&project, affected)
+	if err := bindUnassignedWorkspaces(&project); err != nil {
+		return entity.Project{}, err
+	}
+	if err := validateFinalGraph(&project); err != nil {
+		return entity.Project{}, fmt.Errorf("图校验失败: %w", err)
+	}
+	project.Revision++
+	saved, err := s.opts.Project.Save(ctx, project)
+	if err != nil {
+		return entity.Project{}, err
+	}
+	s.changed(saved.ID, saved.Revision)
+	return saved, nil
+}
+
 func scriptVersionAtConnection(projectVersion int, source *entity.Node) int {
 	if projectVersion < valueobject.ProjectFileVersion || source.Type != valueobject.NodeTypeScript || len(source.ScriptVersions) == 0 {
 		return 0
