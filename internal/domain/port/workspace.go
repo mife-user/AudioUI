@@ -7,17 +7,6 @@ import (
 	"audio-ui/internal/domain/entity"
 )
 
-// WorkspaceMove represents a completed subtree step move that can be undone
-// if the graph save fails.
-type WorkspaceMove interface {
-	Rollback(ctx context.Context) error
-}
-
-// WorkspaceMover moves a prompt subtree's steps between two topic trees.
-type WorkspaceMover interface {
-	MoveSubtree(ctx context.Context, projectID, sourceRootID, targetRootID string, nodeIDs []string) (WorkspaceMove, error)
-}
-
 // WorkspaceRead is a bounded file read from the logical path overlay.
 type WorkspaceRead struct {
 	Path      string

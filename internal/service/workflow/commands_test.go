@@ -199,8 +199,8 @@ func TestConnectAddsInputAndKeepsExistingEdges(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if project.Revision != 2 || len(h.mover.calls) != 0 {
-		t.Fatalf("revision=%d moves=%+v", project.Revision, h.mover.calls)
+	if project.Revision != 2 {
+		t.Fatalf("revision=%d", project.Revision)
 	}
 	if parents := h.parents(t, "n_b"); len(parents) != 2 || parents[0] != "n_a" || parents[1] != "n_candidate2" {
 		t.Fatalf("parents = %+v", parents)
@@ -288,7 +288,7 @@ func TestConnectValidation(t *testing.T) {
 	}
 }
 
-func TestDisconnectAndReplaceProtectSourceEdges(t *testing.T) {
+func TestDisconnectProtectsSourceEdges(t *testing.T) {
 	h := newHarness(t, baseProject())
 	sourceEdge := ""
 	for _, edge := range h.session.project.Edges {
@@ -298,9 +298,6 @@ func TestDisconnectAndReplaceProtectSourceEdges(t *testing.T) {
 	}
 	if _, _, err := h.service.Disconnect(context.Background(), sourceEdge); !errors.Is(err, ErrProtectedEdge) {
 		t.Fatalf("disconnect source error = %v, want PROTECTED_EDGE", err)
-	}
-	if _, err := h.service.ReplaceConnection(context.Background(), sourceEdge, "n_c"); !errors.Is(err, ErrProtectedEdge) {
-		t.Fatalf("replace source error = %v, want PROTECTED_EDGE", err)
 	}
 	if h.session.saveCount != 0 {
 		t.Fatal("protected edge command saved")
@@ -325,109 +322,6 @@ func TestDisconnectAndReplaceProtectSourceEdges(t *testing.T) {
 	if _, err := h.service.Connect(context.Background(), "n_candidate2", "n_b"); err != nil {
 		t.Fatalf("reconnect after disconnect failed: %v", err)
 	}
-}
-
-func TestReplaceConnectionMovesStepsAndWorkspaceRoot(t *testing.T) {
-	h := newHarness(t, projectWithSecondTree())
-	edgeID := ""
-	for _, edge := range h.session.project.Edges {
-		if edge.TargetNodeID == "n_a" {
-			edgeID = edge.ID
-		}
-	}
-	project, err := h.service.ReplaceConnection(context.Background(), edgeID, "n_x")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(h.mover.calls) != 1 {
-		t.Fatalf("mover calls = %+v", h.mover.calls)
-	}
-	call := h.mover.calls[0]
-	if call.sourceRootID != "n_topic" || call.targetRootID != "n_topic2" {
-		t.Fatalf("move = %+v", call)
-	}
-	if len(call.nodeIDs) != 2 || call.nodeIDs[0] != "n_a" || call.nodeIDs[1] != "n_b" {
-		t.Fatalf("move nodes = %+v", call.nodeIDs)
-	}
-	if parentOf(project, "n_a") != "n_x" || !h.node(t, "n_a").Stale || !h.node(t, "n_b").Stale {
-		t.Fatalf("replace wrong: %+v", project.Edges)
-	}
-	if h.node(t, "n_a").WorkspaceRootID != "n_topic2" || h.node(t, "n_b").WorkspaceRootID != "n_topic2" {
-		t.Fatalf("workspace roots = %s %s", h.node(t, "n_a").WorkspaceRootID, h.node(t, "n_b").WorkspaceRootID)
-	}
-}
-
-func TestReplaceConnectionFailures(t *testing.T) {
-	edgeA := func(h *harness) string {
-		for _, edge := range h.session.project.Edges {
-			if edge.TargetNodeID == "n_a" {
-				return edge.ID
-			}
-		}
-		return ""
-	}
-	t.Run("move failure", func(t *testing.T) {
-		h := newHarness(t, projectWithSecondTree())
-		h.mover.err = errors.New("disk full")
-		_, err := h.service.ReplaceConnection(context.Background(), edgeA(h), "n_x")
-		if !errors.Is(err, ErrWorkspaceMoveFailed) {
-			t.Fatalf("error = %v, want WORKSPACE_MOVE_FAILED", err)
-		}
-		if h.session.saveCount != 0 || parentOf(h.session.project, "n_a") != "n_candidate" {
-			t.Fatal("graph changed after move failure")
-		}
-	})
-	t.Run("save failure rolls back movement", func(t *testing.T) {
-		h := newHarness(t, projectWithSecondTree())
-		h.session.saveErr = errors.New("save failed")
-		_, err := h.service.ReplaceConnection(context.Background(), edgeA(h), "n_x")
-		if err == nil {
-			t.Fatal("error = nil")
-		}
-		if h.mover.rollbacks != 1 {
-			t.Fatalf("rollbacks = %d", h.mover.rollbacks)
-		}
-		if parentOf(h.session.project, "n_a") != "n_candidate" {
-			t.Fatal("graph changed after save failure")
-		}
-	})
-	t.Run("shared descendant is refused", func(t *testing.T) {
-		project := projectWithSecondTree()
-		project.Edges = append(project.Edges, entity.Edge{
-			ID: "e_shared_input", SourceNodeID: "n_candidate2", TargetNodeID: "n_b", Kind: entity.EdgeKindConnection,
-		})
-		h := newHarness(t, project)
-		_, err := h.service.ReplaceConnection(context.Background(), edgeA(h), "n_x")
-		if !errors.Is(err, ErrWorkspaceMigrationUnsafe) {
-			t.Fatalf("error = %v, want WORKSPACE_MIGRATION_UNSAFE", err)
-		}
-		if len(h.mover.calls) != 0 {
-			t.Fatal("steps moved while the subtree had a shared descendant")
-		}
-	})
-	t.Run("locked target source", func(t *testing.T) {
-		h := newHarness(t, projectWithSecondTree())
-		if err := h.service.AcquireRunLock(context.Background(), "r_two", "n_topic2", "n_x", []string{"n_topic2", "n_x"}); err != nil {
-			t.Fatal(err)
-		}
-		_, err := h.service.ReplaceConnection(context.Background(), edgeA(h), "n_x")
-		if !errors.Is(err, ErrRunningChainLocked) {
-			t.Fatalf("error = %v, want RUNNING_CHAIN_LOCKED", err)
-		}
-		if len(h.mover.calls) != 0 {
-			t.Fatal("steps moved while target was locked")
-		}
-	})
-	t.Run("locked subtree", func(t *testing.T) {
-		h := newHarness(t, projectWithSecondTree())
-		if err := h.service.AcquireRunLock(context.Background(), "r_a", "n_topic", "n_a", []string{"n_topic", "n_candidate", "n_a"}); err != nil {
-			t.Fatal(err)
-		}
-		_, err := h.service.ReplaceConnection(context.Background(), edgeA(h), "n_x")
-		if !errors.Is(err, ErrRunningChainLocked) {
-			t.Fatalf("error = %v, want RUNNING_CHAIN_LOCKED", err)
-		}
-	})
 }
 
 func TestReconnectTargetPreservesEdgeAndStalesAffectedSubgraphs(t *testing.T) {
@@ -474,8 +368,8 @@ func TestReconnectTargetPreservesEdgeAndStalesAffectedSubgraphs(t *testing.T) {
 			t.Fatalf("node %s workspace root changed from %q to %q", node.ID, node.WorkspaceRootID, h.node(t, node.ID).WorkspaceRootID)
 		}
 	}
-	if len(h.mover.calls) != 0 || len(*h.changes) != 1 || (*h.changes)[0].revision != updated.Revision || (*h.changes)[0].reason != ChangeReasonGraph {
-		t.Fatalf("mover calls=%+v changes=%+v", h.mover.calls, *h.changes)
+	if len(*h.changes) != 1 || (*h.changes)[0].revision != updated.Revision || (*h.changes)[0].reason != ChangeReasonGraph {
+		t.Fatalf("changes=%+v", *h.changes)
 	}
 }
 
@@ -656,8 +550,8 @@ func TestReconnectTargetKeepsWorkspaceIdentityAndBlocksMismatchedOutput(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	if h.node(t, "n_old_script").WorkspaceRootID != "n_topic" || h.node(t, "n_new_script").WorkspaceRootID != "n_topic2" || len(h.mover.calls) != 0 {
-		t.Fatalf("workspace roots changed or mover used: old=%s new=%s moves=%+v", h.node(t, "n_old_script").WorkspaceRootID, h.node(t, "n_new_script").WorkspaceRootID, h.mover.calls)
+	if h.node(t, "n_old_script").WorkspaceRootID != "n_topic" || h.node(t, "n_new_script").WorkspaceRootID != "n_topic2" {
+		t.Fatalf("workspace roots changed: old=%s new=%s", h.node(t, "n_old_script").WorkspaceRootID, h.node(t, "n_new_script").WorkspaceRootID)
 	}
 	graph, err = entity.NewGraph(&updated)
 	if err != nil {
@@ -677,8 +571,8 @@ func TestReconnectTargetSaveFailureLeavesGraphUnchanged(t *testing.T) {
 	if _, err := h.service.ReconnectTarget(context.Background(), expected, "n_c", project.ID); err == nil {
 		t.Fatal("save error was ignored")
 	}
-	if h.session.saveCount != 0 || !reflect.DeepEqual(h.session.project.Clone(), before) || len(*h.changes) != 0 || len(h.mover.calls) != 0 {
-		t.Fatalf("failed save changed state: saves=%d changes=%+v moves=%+v", h.session.saveCount, *h.changes, h.mover.calls)
+	if h.session.saveCount != 0 || !reflect.DeepEqual(h.session.project.Clone(), before) || len(*h.changes) != 0 {
+		t.Fatalf("failed save changed state: saves=%d changes=%+v", h.session.saveCount, *h.changes)
 	}
 }
 

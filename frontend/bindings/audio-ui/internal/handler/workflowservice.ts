@@ -57,10 +57,6 @@ export function ReconnectTarget(request: $models.ReconnectTargetRequest): $Cance
     return $Call.ByID(648893789, request);
 }
 
-export function ReplaceConnection(edgeID: string, sourceID: string, projectID: string): $CancellablePromise<entity$0.GraphMutationReceipt> {
-    return $Call.ByID(482570597, edgeID, sourceID, projectID);
-}
-
 export function SelectNode(id: string, projectID: string): $CancellablePromise<entity$0.GraphMutationReceipt> {
     return $Call.ByID(2386440799, id, projectID);
 }

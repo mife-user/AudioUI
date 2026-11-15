@@ -94,27 +94,6 @@ func (h *WorkflowService) Disconnect(edgeID, projectID string) (entity.GraphMuta
 	return mutationReceipt(projectValue, targetID), nil
 }
 
-func (h *WorkflowService) ReplaceConnection(edgeID, sourceID, projectID string) (entity.GraphMutationReceipt, error) {
-	edgeID = strings.TrimSpace(edgeID)
-	sourceID = strings.TrimSpace(sourceID)
-	projectID = strings.TrimSpace(projectID)
-	if edgeID == "" || sourceID == "" || projectID == "" {
-		return entity.GraphMutationReceipt{}, errors.New("连接 ID、起点与工程 ID 不能为空")
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	projectValue, err := h.service.ReplaceConnection(ctx, edgeID, sourceID, projectID)
-	if err != nil {
-		return entity.GraphMutationReceipt{}, err
-	}
-	for _, edge := range projectValue.Edges {
-		if edge.ID == edgeID {
-			return mutationReceipt(projectValue, edge.TargetNodeID), nil
-		}
-	}
-	return entity.GraphMutationReceipt{}, errors.New("EDGE_RECEIPT_MISSING_EDGE")
-}
-
 func (h *WorkflowService) ReconnectTarget(request ReconnectTargetRequest) (entity.GraphMutationReceipt, error) {
 	request.ProjectID = strings.TrimSpace(request.ProjectID)
 	request.TargetNodeID = strings.TrimSpace(request.TargetNodeID)

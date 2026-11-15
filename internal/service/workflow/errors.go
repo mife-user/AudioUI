@@ -12,7 +12,6 @@ var (
 	ErrEdgeNotFound             = errors.New("EDGE_NOT_FOUND")
 	ErrProtectedEdge            = errors.New("PROTECTED_EDGE")
 	ErrEdgeConflict             = errors.New("EDGE_CONFLICT")
-	ErrWorkspaceMigrationUnsafe = errors.New("WORKSPACE_MIGRATION_UNSAFE")
 	ErrNodeConnectionInvalid    = entity.ErrNodeConnectionInvalid
 	ErrOutputBindingConflict    = entity.ErrOutputBindingConflict
 	ErrRunEntryUnavailable      = errors.New("RUN_ENTRY_UNAVAILABLE")
@@ -25,7 +24,6 @@ var (
 	ErrScriptVersionNotFound    = errors.New("SCRIPT_VERSION_NOT_FOUND")
 	ErrScriptVersionCorrupt     = errors.New("SCRIPT_VERSION_CORRUPT")
 	ErrUnknownNodeType          = errors.New("UNKNOWN_NODE_TYPE")
-	ErrWorkspaceMoveFailed      = errors.New("WORKSPACE_MOVE_FAILED")
 	ErrInvalidPosition          = errors.New("INVALID_POSITION")
 	ErrInvalidNodeSize          = errors.New("INVALID_NODE_SIZE")
 	ErrInvalidInput             = errors.New("INVALID_INPUT")

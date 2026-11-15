@@ -658,12 +658,16 @@ func TestLocalScriptClosureWithControlledAgentDriver(t *testing.T) {
 		t.Fatalf("specified empty Script versions = %+v", emptyOutput.ScriptVersions)
 	}
 
-	reparentSource, err := projects.service.Current(context.Background())
+	beforeReconnect, err := projects.service.Current(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := workflowSetup.handler.ReplaceConnection(topicClosureEdgeID(t, reparentSource, candidateIDs[0], promptA), candidateIDs[1], project.ID); err != nil {
-		t.Fatalf("replace Prompt A input from candidate A to B: %v", err)
+	previousInputEdge := topicClosureEdgeID(t, beforeReconnect, candidateIDs[0], promptA)
+	if _, err := workflowSetup.handler.Disconnect(previousInputEdge, project.ID); err != nil {
+		t.Fatalf("disconnect Prompt A input from candidate A: %v", err)
+	}
+	if _, err := workflowSetup.handler.Connect(candidateIDs[1], promptA, project.ID); err != nil {
+		t.Fatalf("connect Prompt A input to candidate B: %v", err)
 	}
 	driver.queueReply(agentA, scriptClosureReply{
 		kind: valueobject.OutputKindScript, payload: []byte(validScriptBClosureFixture), requestID: "script-a-second",
@@ -677,7 +681,7 @@ func TestLocalScriptClosureWithControlledAgentDriver(t *testing.T) {
 	if !bytes.Contains([]byte(secondPrompt), []byte("旧唱片店")) || bytes.Contains([]byte(secondPrompt), []byte("凌晨面包房")) ||
 		!bytes.Contains([]byte(secondPrompt), []byte(promptParams.Instruction)) || !bytes.Contains([]byte(secondPrompt), []byte("待确认结果")) ||
 		!bytes.Contains([]byte(secondPrompt), []byte("追加新版本")) {
-		t.Fatalf("reparented Agent context did not use candidate B and preserve the prompt: %s", secondPrompt)
+		t.Fatalf("reconnected Agent context did not use candidate B and preserve the prompt: %s", secondPrompt)
 	}
 	if !slices.Contains(firstAgentRun.ExecutionSnapshot.ScopeNodeIDs(), candidateIDs[0]) ||
 		!slices.Contains(secondAgentRun.ExecutionSnapshot.ScopeNodeIDs(), candidateIDs[1]) {

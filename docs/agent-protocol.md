@@ -11,7 +11,7 @@
 
 U16 已通过用户验收：工程 v5 的每条 Script 来源边显式固定版本；预览不修改绑定，未绑定边不得自动选择最新版本。Agent 启动前冻结唯一输出目标；多个现有输出时必须明确选择，新建并行 Script 先在快照中预留 ID、仅于合法 reply 事务提交时创建。Topic 首批仍自动提交；重跑使用已锁定参数，合法结果进入待确认，应用后以独立批次生成 Candidate。相同 Topic 存在未决重跑 pending 时拒绝再次运行；Candidate 的来源冻结 round、artifact 与 run ID。细节见 [ADR-030](decisions.md#adr-030-多上游无环图与版本引用草案)。
 
-**U22～U24 已评审边界**：U22 工程作用域目标端后端命令已实现并通过用户验收，绑定生成及离线构建门禁通过；U23 的目标端拖拽 UI 与关系浮层已实现，并于 2026-11-15 通过用户页面验收；U24 的旧入口与关系栏收口尚未实施。协议层无变化：目标端改接保留边的 Script 固定版本，并确保旧运行快照/结果不随图变化；任何后续运行仍按当时权威图和已选输入冻结授权。无需新增或放宽 Agent/MCP 图写工具、权限或 `reply` 协议；详见 [ADR-031](decisions.md#adr-031-箭头目标端原子重连已评审)。
+**U22～U24 已评审并通过用户验收**：U22 工程作用域目标端后端命令已实现并通过用户验收，绑定生成及离线构建门禁通过；U23 的目标端拖拽 UI 与关系浮层已实现，并于 2026-11-15 通过用户页面验收；U24 的旧入口与关系栏收口已于 2026-11-15 通过 AC-U-63～65 页面验收。协议层无变化：目标端改接保留边的 Script 固定版本，并确保旧运行快照/结果不随图变化；任何后续运行仍按当时权威图和已选输入冻结授权。无需新增或放宽 Agent/MCP 图写工具、权限或 `reply` 协议；详见 [ADR-031](decisions.md#adr-031-箭头目标端原子重连已评审)。
 
 v3 `ExecutionSnapshot` 保留 U15 行为；v4 快照在冻结工程 revision、所选普通边、祖先节点/边、任务顺序与工作区身份的基础上，逐边记录 Script 版本/artifact，并固定唯一输出目标。run-scoped MCP 只授权该冻结子图和列明的 artifact；本地 Read/Glob/Grep 仅授权被选输入祖先 steps 与 exe 同级只读 `runtime/`，写入只限运行目标工作区。U16 不改变已验收的 `reply` Schema、事务幂等和权限确认语义；原单路径及 U15 行为需要回归。视频工具/产物也尚未接入。
 
@@ -409,9 +409,7 @@ run:request_resolved { v, seq, runId, projectId, treeId, chainId, nodeId, chainP
 | `NODE_NOT_FOUND` | 节点不存在或已删除 |
 | `NODE_LOCKED` | 节点已锁定；参数编辑或再次执行被拒绝 |
 | `NODE_KIND_MISMATCH` | kind 与节点类型不匹配 |
-| `REPARENT_CONFIRM_REQUIRED` | 目标已有不同父或同一父不同候选，需确认改挂 |
 | `RUNNING_CHAIN_LOCKED` | 运行/排队路径上的节点只读 |
-| `WORKSPACE_MOVE_FAILED` | 跨树改挂时 steps 迁移失败，已回滚 |
 | `SELF_CONNECT` | 节点连接到自身 |
 | `CANDIDATE_INVALID` | 父为 topic 但候选序号无效 |
 | `TOPIC_ROOT_PARENT` | 试图给 topic 根设置父节点 |

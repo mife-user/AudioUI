@@ -214,7 +214,6 @@ function makeAPI(): GraphAPI {
     addNode: vi.fn().mockResolvedValue({ projectId: 'p_test', projectRevision: 3, nodeId: 'n_created' }),
     connect: vi.fn().mockResolvedValue({ projectId: 'p_test', projectRevision: 3, nodeId: 'n_prompt' }),
     disconnect: vi.fn().mockResolvedValue({ projectId: 'p_test', projectRevision: 3, nodeId: 'n_prompt' }),
-    replaceConnection: vi.fn().mockResolvedValue({ projectId: 'p_test', projectRevision: 3, nodeId: 'n_prompt' }),
     reconnectTarget: vi.fn().mockResolvedValue({ projectId: 'p_test', projectRevision: 3, nodeId: 'n_prompt' }),
     moveNode: vi.fn().mockResolvedValue({ projectId: 'p_test', projectRevision: 3, nodeId: 'n_prompt' }),
     setNodeLayout: vi.fn().mockResolvedValue({ projectId: 'p_test', projectRevision: 3, nodeId: 'n_prompt' }),
@@ -286,71 +285,29 @@ describe('WorkspaceCanvas', () => {
     expect(screen.getByTestId('edge-count')).toHaveTextContent('4')
   })
 
-  it('explicitly selects and confirms one edge to reparent', async () => {
-    const api = makeAPI()
+  it('keeps the canvas viewport structure stable as an Agent is selected and its inputs change', () => {
     const snapshot = makeSnapshot()
-    snapshot.project = { ...snapshot.project!, activeNodeId: 'n_prompt' }
-    render(<WorkspaceCanvas snapshot={snapshot} onSelectNode={vi.fn().mockResolvedValue(undefined)} api={api} />)
-
-    fireEvent.click(screen.getByText('n_prompt 的输入关系 · 1'))
-    fireEvent.change(screen.getByRole('combobox', { name: '为 n_candidate_b 到 n_prompt 选择新上游' }), { target: { value: 'n_candidate_a' } })
-    fireEvent.click(screen.getByRole('button', { name: '改挂 n_candidate_b 到 n_prompt' }))
-    expect(screen.getByRole('dialog', { name: '确认改挂连接' })).toBeInTheDocument()
-    expect(api.replaceConnection).not.toHaveBeenCalled()
-    fireEvent.click(screen.getByRole('button', { name: '确认改挂' }))
-    await waitFor(() => expect(api.replaceConnection).toHaveBeenCalledWith('e_prompt', 'n_candidate_a', 'p_test'))
-    expect(screen.getByTestId('edge-count')).toHaveTextContent('4')
-  })
-
-  it('cancels or confirms a selected ordinary edge disconnect', async () => {
-    const api = makeAPI()
-    const snapshot = makeSnapshot()
-    snapshot.project = { ...snapshot.project!, activeNodeId: 'n_prompt' }
-    render(<WorkspaceCanvas snapshot={snapshot} onSelectNode={vi.fn().mockResolvedValue(undefined)} api={api} />)
-
-    fireEvent.click(screen.getByText('n_prompt 的输入关系 · 1'))
-    fireEvent.click(screen.getByRole('button', { name: '断开 n_candidate_b 到 n_prompt' }))
-    expect(screen.getByRole('dialog', { name: '确认断开连接' })).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: '取消' }))
-    expect(api.disconnect).not.toHaveBeenCalled()
-    fireEvent.click(screen.getByRole('button', { name: '断开 n_candidate_b 到 n_prompt' }))
-    fireEvent.click(screen.getByRole('button', { name: '确认断开' }))
-    await waitFor(() => expect(api.disconnect).toHaveBeenCalledWith('e_prompt', 'p_test'))
-    expect(screen.getByTestId('edge-count')).toHaveTextContent('4')
-  })
-
-  it('binds a fixed Script version to the selected input edge', async () => {
-    const api = makeAPI()
-    const snapshot = makeSnapshot()
-    const script = makeNode('n_script_input', 'script', '', {
-      scriptVersions: [
-        { n: 1, artifactId: 'sha256:script-v1', runId: 'r_script_1' },
-        { n: 2, artifactId: 'sha256:script-v2', runId: 'r_script_2' },
-      ],
-    })
-    snapshot.nodes = [...(snapshot.nodes ?? []), script]
-    snapshot.edges = [...(snapshot.edges ?? []), {
-      id: 'e_script_agent', sourceNodeId: script.id, targetNodeId: 'n_agent', kind: 'connection', scriptVersion: 0,
-    }]
     snapshot.project = { ...snapshot.project!, activeNodeId: 'n_agent' }
-    render(<WorkspaceCanvas snapshot={snapshot} onSelectNode={vi.fn().mockResolvedValue(undefined)} api={api} />)
+    const { container, rerender } = render(<WorkspaceCanvas snapshot={snapshot} onSelectNode={vi.fn().mockResolvedValue(undefined)} api={makeAPI()} />)
+    const toolbar = container.querySelector('.canvas-toolbar')
+    const flowRoot = container.querySelector('.canvas-flow-root')
 
-    fireEvent.click(screen.getByText('n_agent 的输入关系 · 2'))
-    const version = screen.getByRole('combobox', { name: '为 n_script_input → n_agent 固定 Script 版本' })
-    expect(version).toHaveValue('0')
-    fireEvent.change(version, { target: { value: '2' } })
-    await waitFor(() => expect(api.setEdgeScriptVersion).toHaveBeenCalledWith('e_script_agent', 2, 'p_test'))
-  })
+    expect(toolbar?.nextElementSibling).toBe(flowRoot)
+    expect(container.querySelector('.canvas-keyboard-connect')).toBeNull()
+    expect(container.querySelector('.canvas-input-relations')).toBeNull()
+    expect(screen.queryByText('新增连接')).not.toBeInTheDocument()
+    expect(screen.queryByText('将目标连接到选中节点')).not.toBeInTheDocument()
 
-  it('shows the Candidate generation source without disconnect or replace controls', () => {
-    const api = makeAPI()
-    const snapshot = makeSnapshot()
-    snapshot.project = { ...snapshot.project!, activeNodeId: 'n_candidate_a' }
-    render(<WorkspaceCanvas snapshot={snapshot} onSelectNode={vi.fn().mockResolvedValue(undefined)} api={api} />)
-    fireEvent.click(screen.getByText('n_candidate_a 的输入关系 · 1'))
-    expect(screen.getByText('候选生成来源 · 不可更改')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '断开 n_topic_a 到 n_candidate_a' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '改挂 n_topic_a 到 n_candidate_a' })).not.toBeInTheDocument()
+    const nextSnapshot = {
+      ...snapshot,
+      edges: [...(snapshot.edges ?? []), {
+        id: 'e_candidate_agent', sourceNodeId: 'n_candidate_a', targetNodeId: 'n_agent', kind: 'connection', scriptVersion: 0,
+      }],
+    }
+    rerender(<WorkspaceCanvas snapshot={nextSnapshot} onSelectNode={vi.fn().mockResolvedValue(undefined)} api={makeAPI()} />)
+
+    expect(toolbar?.nextElementSibling).toBe(flowRoot)
+    expect(container.querySelector('.canvas-input-relations')).toBeNull()
   })
 
   it('delegates same-type and self connection legality to the backend', async () => {
@@ -638,17 +595,6 @@ describe('WorkspaceCanvas', () => {
     expect(flowMocks.fitView).toHaveBeenCalledWith({ padding: 0.28, duration: 180 })
     fireEvent.click(screen.getByRole('button', { name: 'simulate-double-click' }))
     expect(flowMocks.fitView).toHaveBeenLastCalledWith({ nodes: [{ id: 'n_agent' }], padding: 0.35, duration: 180 })
-  })
-
-  it('offers keyboard connection controls for selected source and all existing targets', async () => {
-    const api = makeAPI()
-    const snapshot = makeSnapshot()
-    snapshot.project = { ...snapshot.project!, activeNodeId: 'n_candidate_a' }
-    render(<WorkspaceCanvas snapshot={snapshot} onSelectNode={vi.fn().mockResolvedValue(undefined)} api={api} />)
-
-    fireEvent.change(screen.getByRole('combobox', { name: '新增连接' }), { target: { value: 'n_draft' } })
-    fireEvent.click(screen.getByRole('button', { name: '将目标连接到选中节点' }))
-    await waitFor(() => expect(api.connect).toHaveBeenCalledWith('n_candidate_a', 'n_draft', 'p_test'))
   })
 
   it('debounces position persistence and reports failure without changing the graph edges', async () => {

@@ -17,7 +17,7 @@ import type { Edge as ProjectEdge, GraphMutationReceipt, Node, NodeParams, RunSt
 import { startRun as startRunAPI } from '../api/runs'
 import { graphAPI, type GraphAPI, type TopicCandidateFixture } from './graphApi'
 import { allocateNodePosition, NODE_LAYOUT_GAP } from './nodePosition'
-import { COLLAPSED_NODE_HEIGHT, buildFlowEdges, buildFlowModel, inputHandleId, nodeMap, outputHandleId, type CanvasFlowNode, type ChildNodeType } from './flowModel'
+import { COLLAPSED_NODE_HEIGHT, buildFlowEdges, buildFlowModel, inputHandleId, nodeMap, type CanvasFlowNode, type ChildNodeType } from './flowModel'
 import { preserveCanvasNodeViewState } from './nodeState'
 import { type NodeLocator } from '../hooks/runRequests'
 import { CanvasEdge } from './CanvasEdge'
@@ -108,12 +108,12 @@ type RegisteredFlush = {
   flush: () => Promise<boolean>
 }
 
-type ConnectionEditIntent = {
+type DisconnectIntent = {
   projectId: string
   edgeId: string
   sourceId: string
   targetId: string
-} & ({ mode: 'disconnect' } | { mode: 'replace'; nextSourceId: string })
+}
 
 type RelationPopoverState = {
   projectId: string
@@ -251,13 +251,11 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFl
   }
   const paramsSaveQueue = useRef(Promise.resolve())
   const [pendingFocusNodeId, setPendingFocusNodeId] = useState('')
-  const [confirmIntent, setConfirmIntent] = useState<ConnectionEditIntent | null>(null)
+  const [confirmIntent, setConfirmIntent] = useState<DisconnectIntent | null>(null)
   const [relationPopover, setRelationPopover] = useState<RelationPopoverState | null>(null)
   const [reconnectDropTarget, setReconnectDropTarget] = useState<{ nodeId: string; valid: boolean } | null>(null)
   const relationPopoverRef = useRef<HTMLDivElement>(null)
   const relationCloseRef = useRef<HTMLButtonElement>(null)
-  const [replacementSources, setReplacementSources] = useState<Record<string, string>>({})
-  const [connectionTarget, setConnectionTarget] = useState('')
   const [createMenu, setCreateMenu] = useState<CreateMenuState | null>(null)
   const createInFlight = useRef(false)
   const connectInFlight = useRef(false)
@@ -902,8 +900,6 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFl
     connectInFlight.current = false
     initialFit.current = { projectId, shouldFit: Boolean(projectId && snapshotNodeCount.current), done: false }
     if (projectId) void flowRef.current.setViewport({ x: 0, y: 0, zoom: 1 }, { duration: 0 })
-    setConnectionTarget('')
-    setReplacementSources({})
     setCreateMenu(null)
     resizingNodeIds.current.clear()
     for (const [key, timer] of moveTimers.current) {
@@ -1030,7 +1026,6 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFl
     }
   }, [nodes, onSelectNode, projectId, saveNodeLayout, schedulePositionSave, snapshot.project?.activeNodeId])
 
-  const selectedNode = nodes.find((node) => node.selected)?.data.node
   const selectChain = useCallback((tailNodeId: string) => {
     setError('')
     if (snapshot.project?.activeNodeId === tailNodeId) return
@@ -1039,8 +1034,6 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFl
     })
   }, [onSelectNode, snapshot.project?.activeNodeId])
   const byId = useMemo(() => nodeMap(graphNodes), [graphNodes])
-  const connectionTargets = graphNodes.filter((node) => inputHandleId(node) && node.id !== selectedNode?.id)
-  const incomingEdges = (snapshot.edges ?? []).filter((edge) => edge.targetNodeId === selectedNode?.id)
   const handleEdgeClick = useCallback((event: ReactMouseEvent, edge: Edge) => {
     setError('')
     openEdgeRelationAt(edge.id, event.clientX, event.clientY, event.currentTarget)
@@ -1153,7 +1146,7 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFl
     }
   }
 
-  function requestConnectionEdit(intent: ConnectionEditIntent) {
+  function requestConnectionEdit(intent: DisconnectIntent) {
     if (mutationBlockedRef.current) return
     confirmReturnFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
     setConfirmIntent(intent)
@@ -1166,12 +1159,10 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFl
     setConnectSubmitting(true)
     setError('')
     try {
-      const receipt = intent.mode === 'disconnect'
-        ? await api.disconnect(intent.edgeId, intent.projectId)
-        : await api.replaceConnection(intent.edgeId, intent.nextSourceId, intent.projectId)
+      const receipt = await api.disconnect(intent.edgeId, intent.projectId)
       if (currentProjectId.current !== intent.projectId || receipt.projectId !== intent.projectId) return
       dismissConfirmation(true)
-      await syncMutation(receipt, intent.mode === 'disconnect' ? '断开连接' : '改挂连接')
+      await syncMutation(receipt, '断开连接')
     } catch (failure) {
       if (currentProjectId.current !== intent.projectId) return
       dismissConfirmation(true)
@@ -1194,29 +1185,6 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFl
     setError('')
   }
 
-  async function connectSelectedTarget() {
-    if (mutationBlocked || !selectedNode || !connectionTarget) return
-    const selectedFlowNode = nodes.find((node) => node.id === selectedNode.id)
-    if (!selectedFlowNode || selectedFlowNode.data.runningLocked) return
-    const target = byId.get(connectionTarget)
-    const sourceHandle = outputHandleId(selectedNode)
-    const targetHandle = target ? inputHandleId(target) : null
-    if (!sourceHandle || !targetHandle || !validConnection({
-      source: selectedNode.id,
-      sourceHandle,
-      target: connectionTarget,
-      targetHandle,
-    })) {
-      setError('连接目标不合法或位于运行锁路径中，工程图未修改。')
-      return
-    }
-    await submitConnection(selectedNode.id, connectionTarget)
-  }
-
-  const selectedCanParent = selectedNode
-    && Boolean(outputHandleId(selectedNode))
-    && !model.nodes.find((node) => node.id === selectedNode.id)?.data.runningLocked
-
   return (
     <section
       className="workspace-canvas"
@@ -1230,100 +1198,11 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFl
           <span className="workspace-kicker">工作台 / 节点图</span>
           <strong>{snapshot.project?.name}</strong>
         </div>
-        {selectedCanParent && connectionTargets.length ? (
-          <div className="canvas-keyboard-connect">
-            <label htmlFor="connection-target">新增连接</label>
-            <select id="connection-target" value={connectionTarget} onChange={(event) => setConnectionTarget(event.currentTarget.value)}>
-              <option value="">选择节点目标</option>
-              {connectionTargets.map((target) => (
-                <option key={target.id} value={target.id} disabled={(snapshot.lockedNodeIds ?? []).includes(target.id)}>
-                  {target.title}
-                </option>
-              ))}
-            </select>
-            <button type="button" className="canvas-toolbar-btn" onClick={() => void connectSelectedTarget()} disabled={mutationBlocked || !connectionTarget}>
-              将目标连接到选中节点
-            </button>
-          </div>
-        ) : null}
         <span className="canvas-toolbar-spacer" />
         <button type="button" className="canvas-toolbar-btn canvas-reset-btn" onClick={() => void flow.fitView({ padding: 0.28, duration: 180 })}>
           重置视图
         </button>
       </div>
-
-      {selectedNode && incomingEdges.length ? (
-        <details className="canvas-input-relations" key={`${projectId}:${selectedNode.id}`}>
-          <summary>{selectedNode.title} 的输入关系 · {incomingEdges.length}</summary>
-          <ul aria-label={`${selectedNode.title} 的输入关系`}>
-            {incomingEdges.map((edge) => {
-              const source = byId.get(edge.sourceNodeId)
-              const sourceTitle = source?.title ?? edge.sourceNodeId
-              const targetLocked = model.nodes.find((node) => node.id === selectedNode.id)?.data.runningLocked
-              const sourceLocked = model.nodes.find((node) => node.id === edge.sourceNodeId)?.data.runningLocked
-              const disabled = mutationBlocked || targetLocked || sourceLocked
-              const versionSaving = scriptVersionSavingEdgeIDs.has(edge.id)
-              const replacement = replacementSources[edge.id] ?? ''
-              return (
-                <li key={edge.id}>
-                  <span className="canvas-input-source">{sourceTitle} → {selectedNode.title}</span>
-                  {edge.kind === 'candidate_source' ? (
-                    <span className="canvas-input-protected">候选生成来源 · 不可更改</span>
-                  ) : (
-                    <div className="canvas-input-actions">
-                      {source?.type === 'script' ? (
-                        <label>
-                          固定版本
-                          <select
-                            aria-label={`为 ${sourceTitle} → ${selectedNode.title} 固定 Script 版本`}
-                            value={edge.scriptVersion ?? 0}
-                            disabled={disabled || versionSaving}
-                            onChange={(event) => void updateEdgeScriptVersion(edge, Number(event.currentTarget.value))}
-                          >
-                            <option value={0}>未绑定</option>
-                            {source.scriptVersions?.map((version) => <option key={version.n} value={version.n}>v{version.n}</option>)}
-                          </select>
-                        </label>
-                      ) : null}
-                      <label>
-                        新上游
-                        <select
-                          aria-label={`为 ${sourceTitle} 到 ${selectedNode.title} 选择新上游`}
-                          value={replacement}
-                          disabled={disabled}
-                          onChange={(event) => {
-                            const value = event.currentTarget.value
-                            setReplacementSources((current) => ({ ...current, [edge.id]: value }))
-                          }}
-                        >
-                          <option value="">选择节点</option>
-                          {graphNodes.filter((node) => node.id !== selectedNode.id && node.id !== edge.sourceNodeId).map((node) => (
-                            <option key={node.id} value={node.id} disabled={(snapshot.lockedNodeIds ?? []).includes(node.id)}>{node.title}</option>
-                          ))}
-                        </select>
-                      </label>
-                      <button
-                        type="button"
-                        className="canvas-toolbar-btn"
-                        disabled={disabled || !replacement}
-                        aria-label={`改挂 ${sourceTitle} 到 ${selectedNode.title}`}
-                        onClick={() => requestConnectionEdit({ projectId, edgeId: edge.id, sourceId: edge.sourceNodeId, targetId: edge.targetNodeId, mode: 'replace', nextSourceId: replacement })}
-                      >改挂</button>
-                      <button
-                        type="button"
-                        className="canvas-toolbar-btn"
-                        disabled={disabled}
-                        aria-label={`断开 ${sourceTitle} 到 ${selectedNode.title}`}
-                        onClick={() => requestConnectionEdit({ projectId, edgeId: edge.id, sourceId: edge.sourceNodeId, targetId: edge.targetNodeId, mode: 'disconnect' })}
-                      >断开</button>
-                    </div>
-                  )}
-                </li>
-              )
-            })}
-          </ul>
-        </details>
-      ) : null}
 
       <div
         className="canvas-flow-root"
@@ -1441,7 +1320,6 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFl
                       edgeId: relationEdge.id,
                       sourceId: relationEdge.sourceNodeId,
                       targetId: relationEdge.targetNodeId,
-                      mode: 'disconnect',
                     })}
                   >断开连接</button>
                 </div>
@@ -1485,18 +1363,12 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFl
               first.focus()
             }
           }}>
-            <h2 id="connection-edit-title">{confirmIntent.mode === 'disconnect' ? '确认断开连接' : '确认改挂连接'}</h2>
+            <h2 id="connection-edit-title">确认断开连接</h2>
             <p>
-              {confirmIntent.mode === 'disconnect' ? '断开' : '改挂'} <strong>{byId.get(confirmIntent.sourceId)?.title ?? confirmIntent.sourceId}</strong> → <strong>{byId.get(confirmIntent.targetId)?.title ?? confirmIntent.targetId}</strong>
-              {confirmIntent.mode === 'replace' ? <>，将上游改为 <strong>{byId.get(confirmIntent.nextSourceId)?.title ?? confirmIntent.nextSourceId}</strong></> : null}。
+              断开 <strong>{byId.get(confirmIntent.sourceId)?.title ?? confirmIntent.sourceId}</strong> → <strong>{byId.get(confirmIntent.targetId)?.title ?? confirmIntent.targetId}</strong>。
             </p>
             <ul>
-              <li>只修改所选普通连接，其他输入与候选生成来源不变，不自动重跑。</li>
-              {confirmIntent.mode === 'disconnect' ? (
-                <li>断开不移动或删除工作区文件；工作区与当前路径不匹配时不能运行。</li>
-              ) : (
-                <li>工作区迁移、运行锁与图约束由服务端校验；不满足安全条件时不会改挂。</li>
-              )}
+              <li>断开不移动或删除工作区文件；工作区与当前路径不匹配时不能运行。</li>
             </ul>
             <div className="canvas-confirm-actions">
               <button ref={confirmCancelRef} type="button" className="canvas-toolbar-btn" disabled={connectSubmitting} onClick={() => dismissConfirmation()}>取消</button>
@@ -1506,7 +1378,7 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFl
                 disabled={confirmIntent.projectId !== projectId || connectSubmitting || Boolean(pendingSync)}
                 onClick={() => void submitConnectionEdit()}
               >
-                {connectSubmitting ? '提交中…' : confirmIntent.mode === 'disconnect' ? '确认断开' : '确认改挂'}
+                {connectSubmitting ? '提交中…' : '确认断开'}
               </button>
             </div>
           </section>

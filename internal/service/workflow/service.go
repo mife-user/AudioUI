@@ -2,7 +2,6 @@ package workflow
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -25,7 +24,6 @@ const (
 type Options struct {
 	Project         port.ProjectSession
 	CandidateReader TopicCandidateReader
-	Workspace       port.WorkspaceMover
 	Pending         port.PendingStoreProvider
 	Artifacts       port.ArtifactStoreProvider
 	ContextHasher   port.ContextHasher
@@ -237,101 +235,6 @@ func (s *Service) Disconnect(ctx context.Context, edgeID string, expectedProject
 	}
 	s.changed(saved.ID, saved.Revision)
 	return saved, edge.TargetNodeID, nil
-}
-
-func (s *Service) ReplaceConnection(ctx context.Context, edgeID, sourceID string, expectedProjectID ...string) (entity.Project, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if err := ctx.Err(); err != nil {
-		return entity.Project{}, err
-	}
-	project, graph, err := s.loadCurrentForProject(ctx, firstExpectedProjectID(expectedProjectID))
-	if err != nil {
-		return entity.Project{}, err
-	}
-	edge, ok := graph.Edge(edgeID)
-	if !ok {
-		return entity.Project{}, fmt.Errorf("%w: %s", ErrEdgeNotFound, edgeID)
-	}
-	if edge.Kind == entity.EdgeKindCandidateSource {
-		return entity.Project{}, fmt.Errorf("%w: 候选生成来源不能改挂", ErrProtectedEdge)
-	}
-	source, err := requireNode(graph, sourceID, "source")
-	if err != nil {
-		return entity.Project{}, err
-	}
-	if sourceID == edge.TargetNodeID {
-		return entity.Project{}, fmt.Errorf("%w: %s", ErrSelfConnect, sourceID)
-	}
-	if sourceID == edge.SourceNodeID {
-		return project, nil
-	}
-	if _, exists := graph.EdgeBetween(sourceID, edge.TargetNodeID); exists {
-		return entity.Project{}, fmt.Errorf("%w: 目标已连接该上游", ErrEdgeConflict)
-	}
-	if graph.IsAncestor(edge.TargetNodeID, sourceID) {
-		return entity.Project{}, fmt.Errorf("%w: %s → %s", ErrCycleDetected, sourceID, edge.TargetNodeID)
-	}
-	descendants, err := graph.Subtree(edge.TargetNodeID)
-	if err != nil {
-		return entity.Project{}, err
-	}
-	if err := s.ensureEditable(append(descendants, edge.SourceNodeID, sourceID)...); err != nil {
-		return entity.Project{}, err
-	}
-	oldRoot := compatibleTopicRoot(graph, edge.TargetNodeID)
-	for i := range project.Edges {
-		if project.Edges[i].ID == edgeID {
-			project.Edges[i].SourceNodeID = sourceID
-			project.Edges[i].ScriptVersion = scriptVersionAtConnection(project.Version, source)
-			break
-		}
-	}
-	nextGraph, err := entity.NewGraph(&project)
-	if err != nil {
-		return entity.Project{}, err
-	}
-	if err := nextGraph.Validate(); err != nil {
-		return entity.Project{}, fmt.Errorf("图校验失败: %w", err)
-	}
-	newRoot := compatibleTopicRoot(nextGraph, edge.TargetNodeID)
-	var move port.WorkspaceMove
-	if oldRoot != "" && newRoot != "" && oldRoot != newRoot {
-		for _, id := range descendants {
-			node, _ := graph.Node(id)
-			if compatibleTopicRoot(graph, id) != oldRoot || compatibleTopicRoot(nextGraph, id) != newRoot ||
-				(node.WorkspaceRootID != "" && node.WorkspaceRootID != oldRoot) {
-				return entity.Project{}, fmt.Errorf("%w: 共享后代或工作区来源不明确", ErrWorkspaceMigrationUnsafe)
-			}
-		}
-		if s.opts.Workspace == nil {
-			return entity.Project{}, fmt.Errorf("%w: workspace mover unavailable", ErrWorkspaceMoveFailed)
-		}
-		move, err = s.opts.Workspace.MoveSubtree(ctx, project.ID, oldRoot, newRoot, descendants)
-		if err != nil {
-			return entity.Project{}, fmt.Errorf("%w: %v", ErrWorkspaceMoveFailed, err)
-		}
-		for _, id := range descendants {
-			node, _ := nextGraph.Node(id)
-			if node.WorkspaceRootID == oldRoot {
-				node.WorkspaceRootID = newRoot
-			}
-		}
-	}
-	markSubtreeStale(&project, descendants)
-	if err := bindUnassignedWorkspaces(&project); err != nil {
-		return entity.Project{}, errors.Join(err, rollbackMove(move))
-	}
-	if err := validateFinalGraph(&project); err != nil {
-		return entity.Project{}, errors.Join(fmt.Errorf("图校验失败: %w", err), rollbackMove(move))
-	}
-	project.Revision++
-	saved, err := s.opts.Project.Save(ctx, project)
-	if err != nil {
-		return entity.Project{}, errors.Join(err, rollbackMove(move))
-	}
-	s.changed(saved.ID, saved.Revision)
-	return saved, nil
 }
 
 func (s *Service) ReconnectTarget(ctx context.Context, expectedEdge entity.Edge, newTargetID string, expectedProjectID ...string) (entity.Project, error) {
@@ -688,14 +591,4 @@ func (s *Service) changedForProject(projectID string, revision int64, reason str
 	if s.opts.OnChange != nil {
 		s.opts.OnChange(projectID, revision, reason)
 	}
-}
-
-func rollbackMove(move port.WorkspaceMove) error {
-	if move == nil {
-		return nil
-	}
-	if err := move.Rollback(context.Background()); err != nil {
-		return fmt.Errorf("steps 回滚失败: %w", err)
-	}
-	return nil
 }

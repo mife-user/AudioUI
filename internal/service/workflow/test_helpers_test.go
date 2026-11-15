@@ -42,46 +42,6 @@ func (s *fakeSession) WithExclusive(ctx context.Context, fn func(port.ProjectAcc
 	return fn(s)
 }
 
-type moveCall struct {
-	projectID    string
-	sourceRootID string
-	targetRootID string
-	nodeIDs      []string
-}
-
-type fakeMove struct {
-	mover *fakeMover
-}
-
-func (m *fakeMove) Rollback(ctx context.Context) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	m.mover.rollbacks++
-	return m.mover.rollbackErr
-}
-
-type fakeMover struct {
-	calls       []moveCall
-	err         error
-	rollbackErr error
-	rollbacks   int
-}
-
-func (m *fakeMover) MoveSubtree(ctx context.Context, projectID, sourceRootID, targetRootID string, nodeIDs []string) (port.WorkspaceMove, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	m.calls = append(m.calls, moveCall{
-		projectID: projectID, sourceRootID: sourceRootID, targetRootID: targetRootID,
-		nodeIDs: append([]string(nil), nodeIDs...),
-	})
-	if m.err != nil {
-		return nil, m.err
-	}
-	return &fakeMove{mover: m}, nil
-}
-
 type changeCall struct {
 	projectID string
 	revision  int64
@@ -248,23 +208,20 @@ func projectWithSecondTree() entity.Project {
 type harness struct {
 	service *Service
 	session *fakeSession
-	mover   *fakeMover
 	changes *[]changeCall
 }
 
 func newHarness(t *testing.T, project entity.Project) *harness {
 	t.Helper()
 	session := &fakeSession{project: project}
-	mover := &fakeMover{}
 	changes := &[]changeCall{}
 	service := New(Options{
-		Project:   session,
-		Workspace: mover,
+		Project: session,
 		OnChange: func(projectID string, revision int64, reason string) {
 			*changes = append(*changes, changeCall{projectID: projectID, revision: revision, reason: reason})
 		},
 	})
-	return &harness{service: service, session: session, mover: mover, changes: changes}
+	return &harness{service: service, session: session, changes: changes}
 }
 
 func (h *harness) parents(t *testing.T, id string) []string {

@@ -432,79 +432,6 @@
   flex: 1;
 }
 
-.canvas-keyboard-connect {
-  display: flex;
-  align-items: center;
-  gap: var(--s1);
-  padding-left: var(--s2);
-  border-left: 1px solid var(--border);
-  color: var(--muted);
-  font-size: 10px;
-}
-
-.canvas-keyboard-connect select {
-  max-width: 180px;
-  min-height: 30px;
-  padding: 0 7px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--panel-2);
-  color: var(--text-dim);
-  font: inherit;
-}
-
-.canvas-input-relations {
-  padding: var(--s1) var(--s2);
-  border-bottom: 1px solid var(--border);
-  background: var(--panel);
-  color: var(--text-dim);
-  font-size: 10.5px;
-}
-
-.canvas-input-relations summary {
-  cursor: pointer;
-  width: fit-content;
-}
-
-.canvas-input-relations summary:focus-visible,
-.canvas-input-actions select:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-
-.canvas-input-relations ul {
-  display: grid;
-  gap: var(--s1);
-  max-height: 180px;
-  overflow-y: auto;
-  margin: var(--s2) 0 0;
-  padding: 0;
-  list-style: none;
-}
-
-.canvas-input-relations li,
-.canvas-input-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--s2);
-}
-
-.canvas-input-relations li {
-  padding: var(--s1);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-}
-
-.canvas-input-source {
-  min-width: 120px;
-  overflow-wrap: anywhere;
-}
-
-.canvas-input-protected {
-  color: var(--muted);
-}
-
 .canvas-edge-relation-popover {
   position: absolute;
   z-index: 12;
@@ -558,23 +485,6 @@
 .canvas-edge-relation-popover :focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
-}
-
-.canvas-input-actions label {
-  display: flex;
-  align-items: center;
-  gap: var(--s1);
-}
-
-.canvas-input-actions select {
-  max-width: 180px;
-  min-height: 30px;
-  padding: 0 var(--s2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--panel-2);
-  color: var(--text-dim);
-  font: inherit;
 }
 
 .canvas-message {
@@ -2893,12 +2803,6 @@
 
   .canvas-toolbar-spacer {
     display: none;
-  }
-
-  .canvas-keyboard-connect {
-    flex-wrap: wrap;
-    padding-left: 0;
-    border-left: 0;
   }
 
   .canvas-legend {

@@ -52,25 +52,6 @@ func requireNode(graph *entity.Graph, id, what string) (*entity.Node, error) {
 	return node, nil
 }
 
-func compatibleTopicRoot(graph *entity.Graph, nodeID string) string {
-	path, err := graph.PathToRoot(nodeID)
-	if err != nil {
-		return ""
-	}
-	root, ok := graph.Node(path[0])
-	if !ok || root.Type != valueobject.NodeTypeTopic {
-		return ""
-	}
-	for i := 1; i < len(path); i++ {
-		parent, _ := graph.Node(path[i-1])
-		child, _ := graph.Node(path[i])
-		if entity.ValidateNodeConnection(*parent, *child) != nil {
-			return ""
-		}
-	}
-	return root.ID
-}
-
 func bindUnassignedWorkspaces(project *entity.Project) error {
 	graph, err := entity.NewGraph(project)
 	if err != nil {

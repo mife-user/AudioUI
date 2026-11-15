@@ -7,7 +7,6 @@ import (
 	"audio-ui/internal/domain/valueobject"
 	"audio-ui/internal/handler"
 	"audio-ui/internal/infra/persistence"
-	"audio-ui/internal/infra/workspace"
 	contextservice "audio-ui/internal/service/context"
 	"audio-ui/internal/service/project"
 	"audio-ui/internal/service/workflow"
@@ -29,7 +28,6 @@ func newWorkflowSetup(layout valueobject.Layout, projectService *project.Service
 	service := workflow.New(workflow.Options{
 		Project:         projectService,
 		CandidateReader: candidates,
-		Workspace:       workspace.NewMover(layout),
 		Pending:         persistence.NewPendingStoreProvider(layout),
 		Artifacts:       artifactStores,
 		ContextHasher:   workflowContextHasher{builder: contextBuilder},

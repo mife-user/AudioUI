@@ -2,7 +2,7 @@
 
 > 本文面向开发。产品概念与流程见 [product.md](product.md)；Agent 细节见 [agent-protocol.md](agent-protocol.md)。
 
-> **U21～U23 已验收**：U21 底部链路收纳与快捷栏新建入口清理已于 2026-11-14 通过用户验收；U22 的工程作用域目标端原子重连命令已于 2026-11-15 通过用户验收，Go 自检、绑定生成、类型检查、前端生产构建及离线 Wails 构建通过。实现保持来源、边 ID 和 Script 固定版本；运行锁、双侧影响、工作区身份、历史快照和失败回滚由 Go 校验。该操作不同于当前固定目标、替换来源的 `ReplaceConnection`；详见 [ADR-031](decisions.md#adr-031-箭头目标端原子重连已评审)。U23 箭头拖拽 UI 与按需关系浮层已于 2026-11-15 通过用户页面验收；U24 的旧入口清理尚未实施。
+> **U21～U24 状态**：U21 底部链路收纳、U22 工程作用域目标端原子重连、U23 箭头拖拽与关系浮层均已通过用户验收。U24 已移除旧来源替换 API/实现及顶部连接入口和自动输入关系栏；Go/前端全量测试、类型检查、lint、令牌检查及离线 Wails 构建通过，用户于 2026-11-15 确认 AC-U-63～65 页面验收通过。当前普通新增边只新增输入，已有边只通过目标端重连改接；断开及 Script 固定版本由线身浮层提供，不迁移工作区。
 
 ## U15/U16 多上游无环图运行与版本引用（U15、U16 已验收）
 
@@ -10,7 +10,7 @@
 
 U15 保留旧有效 Topic 单路径的 v2 快照；无 Topic 或 DAG 汇合使用 v3 输入快照，冻结选中边、顺序/角色、必要祖先子图、产物版本和输出绑定。U16 的 v4 快照按来源边冻结 Script 版本与 artifact，并将输出目标（既有 Script 或预留的新 Script ID）固定到运行；已有结果确认后追加，显式并行目标仅在合法结果提交事务中创建。工作区输入来源按根与节点隔离只读，目标工作区为唯一写入位置，无 Topic 工程使用独立 `workspace/`。
 
-**U14 过渡方案（已通过用户验收）**：以显式边和稳定边 ID 取代单父拓扑；现有有效单路径保留运行，其余尚无安全执行设计的拓扑先明确拒绝运行，不删边、不扩大工作区授权。候选来源独立保护；新增连接和显式断开不迁移工作区，显式改挂仅在迁移范围可确定时执行。细节和门禁见 [ADR-030](decisions.md#u14-实施与运行过渡方案已通过用户验收)。
+**U14 过渡方案（历史基线，已通过用户验收）**：以显式边和稳定边 ID 取代单父拓扑；现有有效单路径保留运行，其余尚无安全执行设计的拓扑先明确拒绝运行，不删边、不扩大工作区授权。候选来源独立保护；U14 当时允许的来源替换与跨树迁移已由 U24 从当前实现移除。当前连接规则见 U21～U24 与 [ADR-031](decisions.md#adr-031-箭头目标端原子重连已评审)。
 
 **U15 运行扩展（已通过用户验收）**：单路径仍使用既有 v2 快照；无 Topic 或 DAG 汇合使用 v3 输入快照，完整冻结被选输入边、顺序/角色、祖先子图、不可变产物版本与输出绑定。全部直接输入默认纳入候选，运行前允许取消可选输入及重排；所有选定边及其必要祖先参与校验，不兼容输入显式拒绝。共享祖先按节点 ID 去重但保留来源关系。目标节点原工作区为写入位置；各输入根只读并按 `inputs/<rootId>/<nodeId>/` 隔离；无 Topic 工程使用独立工程工作区。细节见 [ADR-030 U15 实施决策](decisions.md#adr-030-多上游无环图与版本引用草案)。
 
@@ -133,13 +133,13 @@ infra         json / claudecli / edgetts / renderer-bridge
 | `domain/entity` | Project、Graph、Node、Round、Run、Pending、Artifact；Chain 为派生视图，不持久化 |
 | `domain/valueobject` | NodeType、Hash、OutputKind、CandidateIndex、ChainPath、ContextVersion、TokenBudget、SceneDSL、Theme、EnvironmentInfo、LogEntry |
 | `domain/event` | 领域事件 |
-| `domain/port` | ProjectStore、ProjectSession/ProjectAccess、RunStore/Provider、PendingStore/Provider、ArtifactStore/Provider、ContextHasher/RunContextBuilder、ConfigStore、M1Migrator、WorkspaceMover、WorkspaceReader/RunWorkspace/Provider、GraphReader、ArtifactReader、ReplySink、RunLifecycle/PendingObserver、RunEventPublisher、AgentDriver、RunToolServerFactory、RunPermissionFactory、RunConfigPaths、ScopedPathResolver、EventBus、PermissionGate、QuestionGate、Media、CLIProbe、WebView2Probe、LogTailer |
+| `domain/port` | ProjectStore、ProjectSession/ProjectAccess、RunStore/Provider、PendingStore/Provider、ArtifactStore/Provider、ContextHasher/RunContextBuilder、ConfigStore、M1Migrator、WorkspaceReader/RunWorkspace/Provider、GraphReader、ArtifactReader、ReplySink、RunLifecycle/PendingObserver、RunEventPublisher、AgentDriver、RunToolServerFactory、RunPermissionFactory、RunConfigPaths、ScopedPathResolver、EventBus、PermissionGate、QuestionGate、Media、CLIProbe、WebView2Probe、LogTailer |
 | `service/project` | 工程生命周期、迁移、自动保存 |
 | `service/system` | M0 环境自检、最近日志聚合 |
 | `service/run` | 运行生命周期、一次性 Agent 会话、TurnGate、每运行 MCP/token、transcript |
 | `service/context` | 路径上下文、候选解析、token 估算与预算、哈希、工作区清单 |
 | `service/permission` | 三档权限、120s 超时、allow-run、审计 |
-| `service/workflow` | 图命令、自由改挂、树校验、运行锁、pending 与受限运行结果提交/确认；提供 run-scope 图/节点/产物读取 |
+| `service/workflow` | 图连接、断开与目标端重连、图校验、运行锁、pending 与受限运行结果提交/确认；提供 run-scope 图/节点/产物读取 |
 | `service/render` | 渲染任务、轮次、缓存 |
 | `service/media` | TTS、音频探测、导出 |
 | `infra/media/edgetts` | TTS 适配器 |
@@ -165,7 +165,7 @@ infra         json / claudecli / edgetts / renderer-bridge
 - M2 全局同一时间只允许一个在途运行；M5 并发上限 3，按在途运行计数，队列全局 FIFO，可取消、停止、调整顺序。
 - 同一节点同一时间只允许一个运行；运行/排队路径（topic 根 → 运行节点）与共享祖先只读，路径外分支可编辑。
 - 链 = topic 根到末端节点的派生路径；分支产生多条共享前缀的链。
-- 跨树改挂移动子树 `steps` 并同时检查源/目标树运行锁；迁移失败回滚。`service/workflow` 只调用 `WorkspaceMover`，实际目录移动与回滚在 `infra/workspace`；图保存失败也会回滚已移动的 steps。
+- 新增连接、断开和目标端重连不迁移已有 `steps`；保留已绑定的 `workspaceRootId`，需要运行但身份不匹配时明确拒绝。历史 U14 来源替换与跨树迁移已由 U24 移除，不作为当前可调用能力。
 - 渲染任务串行或按资源上限并发；导出排队。
 
 ## 6. 数据流

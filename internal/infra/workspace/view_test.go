@@ -20,7 +20,7 @@ import (
 
 func viewFixture(t *testing.T) (layout valueobject.Layout, layoutProjectID string, view *View) {
 	t.Helper()
-	layout, project := moverFixtures(t)
+	layout, project := workspaceFixtures(t)
 	layout.RuntimeDir = filepath.Join(layout.Root, "runtime")
 
 	writeStep(t, project, "n_root", "n_root", "root.txt", "VISIBLE root")
@@ -113,7 +113,7 @@ func TestViewListMergesDirectoriesAndShadowsNames(t *testing.T) {
 }
 
 func TestSnapshotRunViewSeparatesSameNamedFilesAcrossWorkspaceRoots(t *testing.T) {
-	layout, projectPaths := moverFixtures(t)
+	layout, projectPaths := workspaceFixtures(t)
 	layout.RuntimeDir = filepath.Join(layout.Root, "runtime")
 	writeFile(t, filepath.Join(layout.RuntimeDir, "runtime.txt"), "runtime")
 	project := entity.Project{
@@ -204,7 +204,7 @@ func TestSnapshotRunViewSeparatesSameNamedFilesAcrossWorkspaceRoots(t *testing.T
 }
 
 func TestSnapshotRunViewUsesProjectWorkspaceWithoutTopic(t *testing.T) {
-	layout, projectPaths := moverFixtures(t)
+	layout, projectPaths := workspaceFixtures(t)
 	layout.RuntimeDir = filepath.Join(layout.Root, "runtime")
 	project := entity.Project{
 		Version: valueobject.ProjectFileVersion, ID: "p_test", Name: "无 Topic", Revision: 1,
@@ -330,7 +330,7 @@ func TestViewGrepSkipsBinaryFiles(t *testing.T) {
 }
 
 func TestViewCreatesTopicTreeAndPathStepDirectories(t *testing.T) {
-	layout, _ := moverFixtures(t)
+	layout, _ := workspaceFixtures(t)
 	view, err := NewRunView(layout, "p_test", "n_root", "n_current", []string{"n_root", "n_parent", "n_current"})
 	if err != nil {
 		t.Fatal(err)
@@ -399,7 +399,7 @@ func TestViewGrepUsesMergedLogicalFiles(t *testing.T) {
 }
 
 func TestViewRejectsMissingActiveNode(t *testing.T) {
-	layout, project := moverFixtures(t)
+	layout, project := workspaceFixtures(t)
 	if err := os.MkdirAll(filepath.Join(project.TreesDir, "n_root"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -408,45 +408,26 @@ func TestViewRejectsMissingActiveNode(t *testing.T) {
 	}
 }
 
-func TestViewFollowsCrossTreeStepMove(t *testing.T) {
-	layout, project := moverFixtures(t)
-	layout.RuntimeDir = filepath.Join(layout.Root, "runtime")
-	writeStep(t, project, "n_src", "n_src", "root.txt", "source root")
-	writeStep(t, project, "n_src", "n_child", "moved.txt", "moved")
-	if err := os.MkdirAll(filepath.Join(project.TreesDir, "n_dst", "steps", "n_dst"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	move, err := NewMover(layout).MoveSubtree(context.Background(), "p_test", "n_src", "n_dst", []string{"n_child"})
+func TestViewDoesNotReadFilesFromAnotherWorkspaceRoot(t *testing.T) {
+	layout, project := workspaceFixtures(t)
+	writeStep(t, project, "n_src", "n_child", "private.txt", "source workspace")
+	writeStep(t, project, "n_dst", "n_dst", "public.txt", "target workspace")
+
+	source, err := NewRunView(layout, "p_test", "n_src", "n_child", []string{"n_src", "n_child"})
 	if err != nil {
 		t.Fatal(err)
+	}
+	read, err := source.ReadFile(context.Background(), "private.txt", 0)
+	if err != nil || string(read.Data) != "source workspace" {
+		t.Fatalf("source read = %q err=%v", read.Data, err)
 	}
 
-	source, err := NewRunView(layout, "p_test", "n_src", "n_src", []string{"n_src"})
+	target, err := NewRunView(layout, "p_test", "n_dst", "n_dst", []string{"n_dst"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := source.ReadFile(context.Background(), "moved.txt", 0); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("source view read error = %v, want not exist", err)
-	}
-	target, err := NewRunView(layout, "p_test", "n_dst", "n_child", []string{"n_dst", "n_child"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	read, err := target.ReadFile(context.Background(), "moved.txt", 0)
-	if err != nil || string(read.Data) != "moved" {
-		t.Fatalf("target read = %q err=%v", read.Data, err)
-	}
-
-	if err := move.Rollback(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	restored, err := NewRunView(layout, "p_test", "n_src", "n_child", []string{"n_src", "n_child"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	read, err = restored.ReadFile(context.Background(), "moved.txt", 0)
-	if err != nil || string(read.Data) != "moved" {
-		t.Fatalf("restored read = %q err=%v", read.Data, err)
+	if _, err := target.ReadFile(context.Background(), "private.txt", 0); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("target view read error = %v, want not exist", err)
 	}
 }
 
