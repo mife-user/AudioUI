@@ -115,6 +115,14 @@ type ConnectionEditIntent = {
   targetId: string
 } & ({ mode: 'disconnect' } | { mode: 'replace'; nextSourceId: string })
 
+type RelationPopoverState = {
+  projectId: string
+  edgeId: string
+  x: number
+  y: number
+  returnFocus: Element
+}
+
 type CreateMenuState = {
   screenPosition: { x: number; y: number }
   flowPosition: { x: number; y: number }
@@ -125,6 +133,14 @@ function errorMessage(error: unknown): string {
   if (typeof error === 'string') return error
   if (error && typeof error === 'object' && 'message' in error) return String((error as { message: unknown }).message)
   return String(error)
+}
+
+function sameEdgeIdentity(left: ProjectEdge, right: ProjectEdge): boolean {
+  return left.id === right.id
+    && left.sourceNodeId === right.sourceNodeId
+    && left.targetNodeId === right.targetNodeId
+    && left.kind === right.kind
+    && (left.scriptVersion ?? 0) === (right.scriptVersion ?? 0)
 }
 
 function candidateQueryKey(nodes: Node[] | undefined): string {
@@ -236,6 +252,10 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFl
   const paramsSaveQueue = useRef(Promise.resolve())
   const [pendingFocusNodeId, setPendingFocusNodeId] = useState('')
   const [confirmIntent, setConfirmIntent] = useState<ConnectionEditIntent | null>(null)
+  const [relationPopover, setRelationPopover] = useState<RelationPopoverState | null>(null)
+  const [reconnectDropTarget, setReconnectDropTarget] = useState<{ nodeId: string; valid: boolean } | null>(null)
+  const relationPopoverRef = useRef<HTMLDivElement>(null)
+  const relationCloseRef = useRef<HTMLButtonElement>(null)
   const [replacementSources, setReplacementSources] = useState<Record<string, string>>({})
   const [connectionTarget, setConnectionTarget] = useState('')
   const [createMenu, setCreateMenu] = useState<CreateMenuState | null>(null)
@@ -267,6 +287,48 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFl
     void flowRef.current.fitView({ nodes: [{ id: nodeId }], padding: 0.35, duration: 180 })
     return true
   }, [onSelectNode, projectId])
+  const openEdgeRelationAt = useCallback((edgeId: string, clientX: number, clientY: number, returnFocus: Element) => {
+    const bounds = flowRoot.current?.getBoundingClientRect()
+    if (!bounds) return
+    const width = 296
+    const height = 190
+    setRelationPopover({
+      projectId,
+      edgeId,
+      x: Math.max(8, Math.min(bounds.width - width - 8, clientX - bounds.left + 8)),
+      y: Math.max(8, Math.min(bounds.height - height - 8, clientY - bounds.top + 8)),
+      returnFocus,
+    })
+  }, [projectId])
+  const openEdgeRelationFromKeyboard = useCallback((edgeId: string, anchor: Element) => {
+    const bounds = anchor.getBoundingClientRect()
+    openEdgeRelationAt(edgeId, bounds.left + bounds.width / 2, bounds.top + bounds.height / 2, anchor)
+  }, [openEdgeRelationAt])
+  const closeEdgeRelation = useCallback((returnFocus = false) => {
+    const anchor = relationPopover?.returnFocus as (Element & { focus?: () => void }) | undefined
+    setRelationPopover(null)
+    if (returnFocus && anchor?.focus) scheduleFrame(() => anchor.focus?.())
+  }, [relationPopover])
+
+  useEffect(() => {
+    if (!relationPopover) return
+    const onPointerDown = (event: PointerEvent) => {
+      if (!(event.target instanceof Element) || !relationPopoverRef.current?.contains(event.target)) closeEdgeRelation()
+    }
+    document.addEventListener('pointerdown', onPointerDown)
+    return () => document.removeEventListener('pointerdown', onPointerDown)
+  }, [closeEdgeRelation, relationPopover])
+
+  useEffect(() => {
+    if (!relationPopover) return
+    if (relationPopover.projectId !== projectId || !(snapshot.edges ?? []).some((edge) => edge.id === relationPopover.edgeId)) {
+      closeEdgeRelation()
+    }
+  }, [closeEdgeRelation, projectId, relationPopover, snapshot.edges])
+
+  useEffect(() => {
+    if (relationPopover) relationCloseRef.current?.focus()
+  }, [relationPopover])
 
   useEffect(() => onRegisterNodeLocator?.(locateNode), [locateNode, onRegisterNodeLocator])
 
@@ -647,6 +709,51 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFl
     }
   }, [api, projectId, syncMutation])
 
+  const handleReconnectHoverTarget = useCallback((nodeId: string | null, valid: boolean) => {
+    setReconnectDropTarget((current) => {
+      if (!nodeId) return current === null ? current : null
+      if (current?.nodeId === nodeId && current.valid === valid) return current
+      return { nodeId, valid }
+    })
+  }, [])
+
+  const reconnectTarget = useCallback(async (expectedProjectId: string, expectedEdge: ProjectEdge, targetNodeId: string) => {
+    const ownerProjectId = expectedProjectId
+    if (ownerProjectId !== projectId || currentProjectId.current !== ownerProjectId || mutationBlockedRef.current || runStartInFlight.current
+      || connectInFlight.current || scriptVersionInFlight.current.has(expectedEdge.id)) return
+    const current = snapshotRef.current
+    const liveEdge = (current.edges ?? []).find((edge) => edge.id === expectedEdge.id)
+    if (!liveEdge || !sameEdgeIdentity(liveEdge, expectedEdge)) {
+      setError('连接已发生变化，原连接保持不变。请按当前画布重试。')
+      return
+    }
+    if (liveEdge.kind !== 'connection' || targetNodeId === liveEdge.targetNodeId) return
+    const target = (current.nodes ?? []).find((node) => node.id === targetNodeId)
+    const locked = new Set(current.lockedNodeIds ?? [])
+    if (!target || !inputHandleId(target) || locked.has(liveEdge.sourceNodeId) || locked.has(liveEdge.targetNodeId) || locked.has(targetNodeId)) {
+      setError('连接目标不存在或处于运行锁中，原连接保持不变。')
+      return
+    }
+
+    connectInFlight.current = true
+    setConnectSubmitting(true)
+    setError('')
+    try {
+      const receipt = await api.reconnectTarget({
+        projectId: ownerProjectId,
+        expectedEdge: { ...liveEdge },
+        targetNodeId,
+      })
+      if (currentProjectId.current !== ownerProjectId || receipt.projectId !== ownerProjectId) return
+      await syncMutation(receipt, '改接连接')
+    } catch (failure) {
+      if (currentProjectId.current === ownerProjectId) setError(errorMessage(failure))
+    } finally {
+      connectInFlight.current = false
+      setConnectSubmitting(false)
+    }
+  }, [api, projectId, syncMutation])
+
   const startNodeRun = useCallback(async (nodeId: string, ownerProjectId: string, options?: RunStartOptions): Promise<RunStartResult> => {
     if (currentProjectId.current !== ownerProjectId) {
       return { error: { code: 'PROJECT_CHANGED', message: '工程已切换，未启动运行。' } }
@@ -717,8 +824,9 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFl
       onSetNodeLayout: applyNodeLayout,
       onSetNodeCollapsed: applyNodeCollapsed,
       onLocateNode: locateNode,
+      reconnectDropTarget: reconnectDropTarget ?? undefined,
     }),
-    [snapshot, addChild, candidateMap, candidateErrors, candidateLoading, mutationBlocked, paramsEditingDisabled, runSubmittingNodeId, runSubmittingInputNodeIDs, saveNodeParams, startNodeRun, api.getScriptVersion, registerPromptFlush, registerTopicFlush, onNodeHandlesMeasured, applyNodeLayout, applyNodeCollapsed, locateNode],
+    [snapshot, addChild, candidateMap, candidateErrors, candidateLoading, mutationBlocked, paramsEditingDisabled, runSubmittingNodeId, runSubmittingInputNodeIDs, saveNodeParams, startNodeRun, api.getScriptVersion, registerPromptFlush, registerTopicFlush, onNodeHandlesMeasured, applyNodeLayout, applyNodeCollapsed, locateNode, reconnectDropTarget],
   )
 
   useEffect(() => {
@@ -776,6 +884,8 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFl
   useEffect(() => {
     setConfirmIntent(null)
     confirmReturnFocus.current = null
+    setRelationPopover(null)
+    setReconnectDropTarget(null)
     setError('')
     pendingSyncRef.current = null
     paramsSaveQueue.current = Promise.resolve()
@@ -931,7 +1041,29 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFl
   const byId = useMemo(() => nodeMap(graphNodes), [graphNodes])
   const connectionTargets = graphNodes.filter((node) => inputHandleId(node) && node.id !== selectedNode?.id)
   const incomingEdges = (snapshot.edges ?? []).filter((edge) => edge.targetNodeId === selectedNode?.id)
-  const edges = useMemo(() => buildFlowEdges(nodes, snapshot.edges ?? [], measuredHandleLayouts), [nodes, snapshot.edges, measuredHandleLayouts])
+  const handleEdgeClick = useCallback((event: ReactMouseEvent, edge: Edge) => {
+    setError('')
+    openEdgeRelationAt(edge.id, event.clientX, event.clientY, event.currentTarget)
+  }, [openEdgeRelationAt])
+  const edges = useMemo(() => buildFlowEdges(nodes, snapshot.edges ?? [], measuredHandleLayouts, {
+    projectId,
+    mutationsDisabled: mutationBlocked,
+    scriptVersionSavingEdgeIDs,
+    onReconnectTarget: reconnectTarget,
+    onReconnectHoverTarget: handleReconnectHoverTarget,
+    onOpenRelation: openEdgeRelationFromKeyboard,
+  }), [nodes, snapshot.edges, measuredHandleLayouts, projectId, mutationBlocked, scriptVersionSavingEdgeIDs, reconnectTarget, handleReconnectHoverTarget, openEdgeRelationFromKeyboard])
+  const relationEdge = relationPopover?.projectId === projectId
+    ? (snapshot.edges ?? []).find((edge) => edge.id === relationPopover.edgeId)
+    : undefined
+  const relationSource = relationEdge ? byId.get(relationEdge.sourceNodeId) : undefined
+  const relationTarget = relationEdge ? byId.get(relationEdge.targetNodeId) : undefined
+  const relationLocked = Boolean(relationEdge && (
+    (snapshot.lockedNodeIds ?? []).includes(relationEdge.sourceNodeId)
+    || (snapshot.lockedNodeIds ?? []).includes(relationEdge.targetNodeId)
+  ))
+  const relationDisabled = mutationBlocked || relationLocked
+  const relationVersionSaving = relationEdge ? scriptVersionSavingEdgeIDs.has(relationEdge.id) : false
 
   useEffect(() => {
     if (confirmIntent) confirmCancelRef.current?.focus()
@@ -1226,6 +1358,7 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFl
           onPaneContextMenu={handlePaneContextMenu}
           isValidConnection={validConnection}
           onNodeClick={onNodeClick}
+          onEdgeClick={handleEdgeClick}
           onNodeDoubleClick={(_event, node) => void flow.fitView({ nodes: [{ id: node.id }], padding: 0.35, duration: 180 })}
           onError={(code, message) => setError(`画布渲染错误 ${code}：${message}`)}
           minZoom={0.6}
@@ -1259,6 +1392,63 @@ function CanvasBody({ snapshot, onSelectNode, onGraphMutation, onRegisterDraftFl
             />
           </Panel>
         </ReactFlow>
+        {relationPopover && relationEdge && relationSource && relationTarget ? (
+          <section
+            ref={relationPopoverRef}
+            className="canvas-edge-relation-popover"
+            role="dialog"
+            aria-labelledby="canvas-edge-relation-title"
+            style={{ left: relationPopover.x, top: relationPopover.y }}
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={(event) => event.stopPropagation()}
+            onKeyDown={(event) => {
+              if (event.key !== 'Escape') return
+              event.preventDefault()
+              closeEdgeRelation(true)
+            }}
+          >
+            <div className="canvas-edge-relation-head">
+              <strong id="canvas-edge-relation-title">{relationSource.title} → {relationTarget.title}</strong>
+              <button ref={relationCloseRef} type="button" className="canvas-toolbar-btn" aria-label="关闭连接操作" onClick={() => closeEdgeRelation(true)}>×</button>
+            </div>
+            {relationEdge.kind === 'candidate_source' ? (
+              <p>候选生成来源 · 不可断开或改接。</p>
+            ) : (
+              <>
+                {relationSource.type === 'script' ? (
+                  <label>
+                    固定版本
+                    <select
+                      aria-label={`为 ${relationSource.title} → ${relationTarget.title} 固定 Script 版本`}
+                      value={relationEdge.scriptVersion ?? 0}
+                      disabled={relationDisabled || relationVersionSaving}
+                      onChange={(event) => void updateEdgeScriptVersion(relationEdge, Number(event.currentTarget.value))}
+                    >
+                      <option value={0}>未绑定</option>
+                      {relationSource.scriptVersions?.map((version) => <option key={version.n} value={version.n}>v{version.n}</option>)}
+                    </select>
+                  </label>
+                ) : null}
+                <div className="canvas-edge-relation-actions">
+                  {relationLocked ? <span>运行锁定中</span> : null}
+                  <button
+                    type="button"
+                    className="canvas-toolbar-btn"
+                    disabled={relationDisabled}
+                    aria-label={`断开 ${relationSource.title} 到 ${relationTarget.title}`}
+                    onClick={() => requestConnectionEdit({
+                      projectId,
+                      edgeId: relationEdge.id,
+                      sourceId: relationEdge.sourceNodeId,
+                      targetId: relationEdge.targetNodeId,
+                      mode: 'disconnect',
+                    })}
+                  >断开连接</button>
+                </div>
+              </>
+            )}
+          </section>
+        ) : null}
       </div>
       {createMenu ? (
         <CanvasContextMenu

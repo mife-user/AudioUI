@@ -505,6 +505,61 @@
   color: var(--muted);
 }
 
+.canvas-edge-relation-popover {
+  position: absolute;
+  z-index: 12;
+  width: min(280px, calc(100% - 16px));
+  max-height: calc(100% - 16px);
+  overflow: auto;
+  padding: var(--s2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-elev);
+  color: var(--text-dim);
+  box-shadow: var(--shadow);
+  font-size: 10.5px;
+}
+
+.canvas-edge-relation-head,
+.canvas-edge-relation-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s2);
+}
+
+.canvas-edge-relation-head strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.canvas-edge-relation-popover p {
+  margin: var(--s1) 0;
+  color: var(--muted);
+}
+
+.canvas-edge-relation-popover label {
+  display: flex;
+  align-items: center;
+  gap: var(--s1);
+  margin: var(--s2) 0;
+}
+
+.canvas-edge-relation-popover select {
+  min-height: 28px;
+  padding: 0 var(--s2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+  color: var(--text);
+  font: inherit;
+}
+
+.canvas-edge-relation-popover :focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .canvas-input-actions label {
   display: flex;
   align-items: center;
@@ -778,6 +833,48 @@
   stroke: var(--warn);
   stroke-width: 2.2;
   stroke-dasharray: 5 4;
+}
+
+.workspace-edge-reconnectable .react-flow__edge-path {
+  cursor: pointer;
+}
+
+.react-flow__edge-path.workspace-edge-reconnect-hovered {
+  stroke: var(--accent);
+  stroke-width: 2.8;
+}
+
+.canvas-edge-reconnect-grip {
+  fill: transparent;
+  stroke: transparent;
+  cursor: grab;
+  pointer-events: all;
+}
+
+.canvas-edge-reconnect-grip:active {
+  cursor: grabbing;
+}
+
+.canvas-edge-reconnect-preview {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-dasharray: 5 4;
+  pointer-events: none;
+}
+
+.canvas-edge-reconnect-preview.is-invalid {
+  stroke: var(--danger);
+}
+
+.react-flow__node.canvas-reconnect-drop-valid .canvas-node {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft), var(--shadow);
+}
+
+.react-flow__node.canvas-reconnect-drop-invalid .canvas-node {
+  border-color: var(--danger);
+  box-shadow: 0 0 0 2px var(--danger-soft), var(--shadow);
 }
 
 .canvas-flow-root .react-flow__connection-path {

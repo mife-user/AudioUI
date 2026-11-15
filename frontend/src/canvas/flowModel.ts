@@ -1,3 +1,4 @@
+import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { MarkerType, type Edge, type Node as FlowNode } from '@xyflow/react'
 import type { CandidateSource, Edge as ProjectEdge, Node, NodeParams, PendingSummary, RunStartOptions, RunStartResult, ScriptVersionDetail, WorkspaceSnapshot } from '../../bindings/audio-ui/internal/domain/entity'
 import { OutputKind, PendingStatus } from '../../bindings/audio-ui/internal/domain/valueobject'
@@ -90,6 +91,7 @@ type CanvasCallbacks = {
   onSetNodeLayout?: CanvasNodeData['onSetNodeLayout']
   onSetNodeCollapsed?: CanvasNodeData['onSetNodeCollapsed']
   onLocateNode?: CanvasNodeData['onLocateNode']
+  reconnectDropTarget?: { nodeId: string; valid: boolean }
 }
 
 export function candidateForNode(candidates: TopicCandidateFixture[] | undefined, nodeId: string | undefined): TopicCandidateFixture | undefined {
@@ -170,13 +172,44 @@ export function nodeHandleLayoutKey(type: CanvasFlowNode['type'], data: CanvasNo
   return JSON.stringify({ type, collapsed: Boolean(data.node.collapsed) })
 }
 
+type CanvasEdgeActions = {
+  projectId: string
+  mutationsDisabled: boolean
+  scriptVersionSavingEdgeIDs: ReadonlySet<string>
+  onReconnectTarget: (projectId: string, edge: ProjectEdge, targetNodeId: string) => void
+  onReconnectHoverTarget: (targetNodeId: string | null, valid: boolean) => void
+  onOpenRelation: (edgeId: string, anchor: Element) => void
+}
+
 export function buildFlowEdges(
   nodes: CanvasFlowNode[],
   projectEdges: ProjectEdge[],
   measuredHandleLayouts?: Record<string, string>,
+  actions?: CanvasEdgeActions,
 ): Edge<CanvasEdgeData, 'workspace'>[] {
   const byId = new Map(nodes.map((node) => [node.id, node]))
   const obstacles = canvasNodeRects(nodes)
+  const reconnectSlots = new Map<string, number>()
+  if (actions && !actions.mutationsDisabled) {
+    const incoming = new Map<string, ProjectEdge[]>()
+    for (const edge of projectEdges) {
+      if (edge.kind !== 'connection' || actions.scriptVersionSavingEdgeIDs.has(edge.id)) continue
+      const source = byId.get(edge.sourceNodeId)
+      const target = byId.get(edge.targetNodeId)
+      if (!source || !target || source.data.runningLocked || target.data.runningLocked) continue
+      const edges = incoming.get(edge.targetNodeId) ?? []
+      edges.push(edge)
+      incoming.set(edge.targetNodeId, edges)
+    }
+    for (const edges of incoming.values()) {
+      edges.sort((left, right) => left.id.localeCompare(right.id))
+      edges.forEach((edge, index) => reconnectSlots.set(edge.id, index - (edges.length - 1) / 2))
+    }
+  }
+  const reconnectableTargetIds = (edge: ProjectEdge) => nodes
+    .filter((node) => node.id !== edge.sourceNodeId && node.id !== edge.targetNodeId
+      && !node.data.runningLocked && !node.data.mutationsDisabled)
+    .map((node) => node.id)
   return projectEdges.flatMap((edge) => {
     const parentFlowNode = byId.get(edge.sourceNodeId)
     const childFlowNode = byId.get(edge.targetNodeId)
@@ -191,11 +224,19 @@ export function buildFlowEdges(
     )) return []
     const highlightedEdge = parentFlowNode.data.pathHighlighted && childFlowNode.data.pathHighlighted
     const runningLockedEdge = parentFlowNode.data.runningLocked && childFlowNode.data.runningLocked
+    const reconnectSlot = reconnectSlots.get(edge.id)
+    const reconnectable = reconnectSlot !== undefined
     const className = [
       'workspace-edge',
       highlightedEdge && 'workspace-edge-highlighted',
       runningLockedEdge && 'workspace-edge-running-locked',
+      reconnectable && 'workspace-edge-reconnectable',
     ].filter(Boolean).join(' ')
+    const onKeyDown = actions ? (event: ReactKeyboardEvent<SVGGElement>) => {
+      if (event.key !== 'Enter' && event.key !== ' ') return
+      event.preventDefault()
+      actions.onOpenRelation(edge.id, event.currentTarget)
+    } : undefined
     return [{
       id: edge.id,
       source: parentFlowNode.id,
@@ -204,15 +245,29 @@ export function buildFlowEdges(
       targetHandle,
       type: 'workspace',
       selectable: false,
-      focusable: false,
+      focusable: true,
+      ariaRole: 'button',
+      ariaLabel: `查看连接操作：${parentFlowNode.data.node.title} 到 ${child.title}`,
+      domAttributes: onKeyDown ? { onKeyDown } : undefined,
       interactionWidth: 20,
       className,
       markerEnd: {
         type: MarkerType.ArrowClosed,
         color: runningLockedEdge ? 'var(--warn)' : highlightedEdge ? 'var(--accent)' : 'var(--edge)',
       },
-      data: { sourceNodeId: parentFlowNode.id, targetNodeId: childFlowNode.id, obstacles },
-      ariaLabel: `${parentFlowNode.data.node.title} 到 ${child.title}`,
+      data: {
+        sourceNodeId: parentFlowNode.id,
+        targetNodeId: childFlowNode.id,
+        obstacles,
+        projectId: actions?.projectId ?? '',
+        edge: { ...edge },
+        reconnectable,
+        reconnectSlot: reconnectSlot ?? 0,
+        reconnectableTargetIds: reconnectable ? reconnectableTargetIds(edge) : [],
+        onReconnectTarget: actions?.onReconnectTarget,
+        onReconnectHoverTarget: actions?.onReconnectHoverTarget,
+        onOpenRelation: actions?.onOpenRelation,
+      },
     }]
   })
 }
@@ -317,6 +372,9 @@ export function buildFlowModel(
     return {
       id: node.id,
       type: node.type as CanvasFlowNode['type'],
+      className: callbacks.reconnectDropTarget?.nodeId === node.id
+        ? callbacks.reconnectDropTarget.valid ? 'canvas-reconnect-drop-valid' : 'canvas-reconnect-drop-invalid'
+        : undefined,
       dragHandle: '.canvas-node-head',
       position: { x: node.position.x, y: node.position.y },
       style: { width: node.size.width, height: node.collapsed ? COLLAPSED_NODE_HEIGHT : node.size.height },

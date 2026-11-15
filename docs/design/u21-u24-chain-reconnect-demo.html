@@ -51,8 +51,8 @@
   .node-body { padding: 10px 11px; color: var(--muted); font-size: 11px; }
   .node-body p { margin: 0; }
   .node.is-drop { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-bg), 0 10px 26px var(--shadow); }
-  .node::before, .node::after { position: absolute; top: calc(50% - 4px); width: 8px; height: 8px; border: 1px solid var(--accent); border-radius: 50%; background: var(--canvas); content: ""; }
-  .node::before { left: -5px; }
+  .input-port, .node::after { position: absolute; top: calc(50% - 4px); width: 8px; height: 8px; border: 1px solid var(--accent); border-radius: 50%; background: var(--canvas); content: ""; }
+  .input-port { left: -5px; }
   .node::after { right: -5px; }
   .prompt { left: 10%; top: 35%; }
   .agent-a { left: 46%; top: 28%; }
@@ -91,11 +91,11 @@
 </style>
 </head>
 <body>
-<header class="top"><span class="brand">AUDIOUI</span><span class="project">本地工作台</span><span class="draft">U21～U22 已验收 · U23～U24 方案已评审</span><span class="top-end">模拟数据 · 不连接工程、Agent 或网络</span></header>
+<header class="top"><span class="brand">AUDIOUI</span><span class="project">本地工作台</span><span class="draft">U21～U23 已验收 · U24 方案已评审</span><span class="top-end">模拟数据 · 不连接工程、Agent 或网络</span></header>
 <div class="toolbar"><strong>工作台 / 节点图</strong><small>上方不再出现连接下拉或自动占位的输入关系</small><button id="reset" type="button">重置演示</button></div>
 <main class="canvas" id="canvas" aria-label="链路与拖动改挂交互示意">
   <div class="dots" aria-hidden="true"></div>
-  <div class="guide"><span>CHAIN &amp; RECONNECT / PROPOSAL</span><strong>底边一枚按钮，按需查看节点链路</strong><p>将鼠标移到底部箭头上；拖动连线末端箭头到另一张 Agent 卡片，松开直接改接。点击线身可查看断开操作。实际产品以输入端口为落点，并由后端校验。</p></div>
+  <div class="guide"><span>CHAIN &amp; RECONNECT / PROPOSAL</span><strong>底边一枚按钮，按需查看节点链路</strong><p>将鼠标移到底部箭头上；拖动连线末端三角箭头到另一节点左侧输入端口，松在端口后直接改接。节点卡片空白处不是落点。点击线身可查看断开操作。实际应用会校验该端口和工程图。</p></div>
   <svg class="edges" id="edges" aria-label="模拟连接">
     <path id="edge-line" class="edge-line"></path>
     <path id="edge-hit" class="edge-hit" tabindex="0" role="button" aria-label="查看模拟连接的操作"></path>
@@ -103,9 +103,9 @@
     <polygon id="edge-arrow" class="edge-arrow"></polygon>
     <circle id="edge-drag" class="edge-drag" r="13" aria-label="用鼠标拖动箭头到其他节点"></circle>
   </svg>
-  <article class="node prompt" id="source"><div class="node-head"><span class="kind">SCRIPT</span><strong>脚本</strong></div><div class="node-body"><p>模拟 Script 结果，可按连接固定版本。</p><p>节点输出 →</p></div></article>
-  <article class="node agent-a" id="agent-a"><div class="node-head"><span class="kind">AGENT</span><strong>策划 Agent</strong></div><div class="node-body"><p>原连接目标</p><p>运行前校验输入与输出</p></div></article>
-  <article class="node agent-b" id="agent-b"><div class="node-head"><span class="kind">AGENT</span><strong>写作 Agent</strong></div><div class="node-body"><p>将连线箭头拖到此处</p><p>模拟其他可连接节点</p></div></article>
+  <article class="node prompt" id="source"><span class="input-port" aria-hidden="true"></span><div class="node-head"><span class="kind">SCRIPT</span><strong>脚本</strong></div><div class="node-body"><p>模拟 Script 结果，可按连接固定版本。</p><p>节点输出 →</p></div></article>
+  <article class="node agent-a" id="agent-a"><span class="input-port" aria-hidden="true"></span><div class="node-head"><span class="kind">AGENT</span><strong>策划 Agent</strong></div><div class="node-body"><p>原连接目标</p><p>运行前校验输入与输出</p></div></article>
+  <article class="node agent-b" id="agent-b"><span class="input-port" aria-hidden="true"></span><div class="node-head"><span class="kind">AGENT</span><strong>写作 Agent</strong></div><div class="node-body"><p>将箭头拖到此输入端口</p><p>模拟其他可连接节点</p></div></article>
   <div class="relation-popover" id="relation-popover" hidden><strong id="relation-title"></strong><p>主动点击连线才显示操作，不自动占用画布高度。</p><label>固定版本 <select id="version-select" aria-label="模拟设置这条 Script 连线的固定版本"><option value="0">未绑定</option><option value="1" selected>v1</option><option value="2">v2</option></select></label><button type="button" id="disconnect">断开连接</button></div>
   <nav class="chain-dock" id="chain-dock" aria-label="链路选择">
     <div class="chain-list" id="chain-list" hidden>
@@ -177,9 +177,10 @@
   function setDrop(node) {
     for (const candidate of [agentA, agentB]) candidate.classList.toggle('is-drop', candidate === node);
   }
-  function nodeAt(event) {
+  function inputAt(event) {
     return [agentA, agentB].find((node) => {
-      const r = node.getBoundingClientRect();
+      const port = node.querySelector('.input-port');
+      const r = port.getBoundingClientRect();
       return event.clientX >= r.left && event.clientX <= r.right && event.clientY >= r.top && event.clientY <= r.bottom;
     }) || null;
   }
@@ -206,11 +207,11 @@
     if (!dragging) return;
     const board = canvas.getBoundingClientRect();
     preview.setAttribute('d', path(point(source, 'right'), { x: event.clientX - board.left, y: event.clientY - board.top }));
-    setDrop(nodeAt(event));
+    setDrop(inputAt(event));
   });
   drag.addEventListener('pointerup', (event) => {
     if (!dragging) return;
-    const next = nodeAt(event);
+    const next = inputAt(event);
     cancelDrag();
     if (!next || next === target) {
       status.textContent = '目标未改变；原连接保持不变。';

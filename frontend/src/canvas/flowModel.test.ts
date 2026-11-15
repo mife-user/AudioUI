@@ -183,6 +183,37 @@ describe('flowModel', () => {
     })
   })
 
+  it('assigns stable reconnect grips only to unlocked ordinary edges', () => {
+    const topic = makeNode('n_topic', 'topic')
+    const candidate = makeNode('n_candidate', 'candidate', topic.id, {
+      candidateSource: { topicNodeId: topic.id, round: 1, artifactId: 'sha256:topics', index: 0, runId: 'r_topics' },
+    })
+    const prompt = makeNode('n_prompt', 'prompt')
+    const agent = makeNode('n_agent', 'agent')
+    const script = makeNode('n_script', 'script')
+    const graph = snapshot([topic, candidate, prompt, agent, script], agent.id)
+    graph.lockedNodeIds = []
+    graph.edges = [
+      { id: 'e_candidate', sourceNodeId: topic.id, targetNodeId: candidate.id, kind: 'candidate_source', scriptVersion: 0 },
+      { id: 'z_prompt_agent', sourceNodeId: prompt.id, targetNodeId: agent.id, kind: 'connection', scriptVersion: 0 },
+      { id: 'a_topic_agent', sourceNodeId: topic.id, targetNodeId: agent.id, kind: 'connection', scriptVersion: 0 },
+    ]
+    const model = buildFlowModel(graph, vi.fn())
+    const edges = buildFlowEdges(model.nodes, graph.edges, undefined, {
+      projectId: 'p_test',
+      mutationsDisabled: false,
+      scriptVersionSavingEdgeIDs: new Set(),
+      onReconnectTarget: vi.fn(),
+      onReconnectHoverTarget: vi.fn(),
+      onOpenRelation: vi.fn(),
+    })
+
+    expect(edges.find((edge) => edge.id === 'a_topic_agent')?.data).toMatchObject({ reconnectable: true, reconnectSlot: -0.5 })
+    expect(edges.find((edge) => edge.id === 'z_prompt_agent')?.data).toMatchObject({ reconnectable: true, reconnectSlot: 0.5 })
+    expect(edges.find((edge) => edge.id === 'e_candidate')?.data).toMatchObject({ reconnectable: false, reconnectSlot: 0 })
+    expect(edges.find((edge) => edge.id === 'a_topic_agent')?.data?.reconnectableTargetIds).toContain(script.id)
+  })
+
   it('uses live measurements before saved dimensions while a node is resizing', () => {
     const topic = makeNode('n_topic', 'topic')
     const candidate = makeNode('n_candidate', 'candidate', topic.id, {

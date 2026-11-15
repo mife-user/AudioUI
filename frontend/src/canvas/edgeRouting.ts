@@ -6,10 +6,20 @@ export type CanvasNodeRect = {
   height: number
 }
 
+import type { Edge as ProjectEdge } from '../../bindings/audio-ui/internal/domain/entity'
+
 export type CanvasEdgeData = {
   sourceNodeId: string
   targetNodeId: string
   obstacles: CanvasNodeRect[]
+  projectId: string
+  edge: ProjectEdge
+  reconnectable: boolean
+  reconnectSlot: number
+  reconnectableTargetIds: string[]
+  onReconnectTarget?: (projectId: string, edge: ProjectEdge, targetNodeId: string) => void
+  onReconnectHoverTarget?: (targetNodeId: string | null, valid: boolean) => void
+  onOpenRelation?: (edgeId: string, anchor: Element) => void
 }
 
 type Point = { x: number; y: number }

@@ -6,6 +6,9 @@ import type { Node, RunStartResult, WorkspaceSnapshot } from '../../bindings/aud
 import type { GraphAPI } from './graphApi'
 import { WorkspaceCanvas } from './WorkspaceCanvas'
 
+const initialElementFromPoint = Object.getOwnPropertyDescriptor(document, 'elementFromPoint')
+const initialSetPointerCapture = Object.getOwnPropertyDescriptor(SVGElement.prototype, 'setPointerCapture')
+
 function rect(left: number, top: number, width: number, height: number): DOMRect {
   return {
     x: left,
@@ -117,9 +120,15 @@ function makeAPI(): GraphAPI {
   }
 }
 
+function setPointerTarget(target: Element | null): void {
+  Object.defineProperty(document, 'elementFromPoint', { configurable: true, value: () => target })
+}
+
 describe('WorkspaceCanvas with real React Flow', () => {
   beforeEach(() => {
     vi.stubGlobal('ResizeObserver', LayoutResizeObserver)
+    Object.defineProperty(SVGElement.prototype, 'setPointerCapture', { configurable: true, value: vi.fn() })
+    Object.defineProperty(document, 'elementFromPoint', { configurable: true, value: () => null })
     vi.stubGlobal('DOMMatrixReadOnly', LayoutDOMMatrixReadOnly)
     vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockImplementation(function (this: HTMLElement) {
       if (this.classList.contains('react-flow__node')) return 276
@@ -133,7 +142,11 @@ describe('WorkspaceCanvas with real React Flow', () => {
     })
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
       if (this.classList.contains('react-flow__node')) return rect(40, 60, 276, 180)
-      if (this.classList.contains('react-flow__handle')) return rect(312, 90, 8, 8)
+      if (this.classList.contains('react-flow__handle')) {
+        const nodeId = this.closest<HTMLElement>('.react-flow__node')?.dataset.id
+        if (nodeId === 'n_new_agent' || nodeId === 'n_new_prompt') return rect(300, 90, 10, 10)
+        return rect(312, 90, 8, 8)
+      }
       if (this.classList.contains('react-flow') || this.classList.contains('canvas-flow-root')) return rect(0, 0, 820, 640)
       return rect(0, 0, 820, 640)
     })
@@ -142,6 +155,10 @@ describe('WorkspaceCanvas with real React Flow', () => {
   afterEach(() => {
     vi.restoreAllMocks()
     vi.unstubAllGlobals()
+    if (initialElementFromPoint) Object.defineProperty(document, 'elementFromPoint', initialElementFromPoint)
+    else Reflect.deleteProperty(document, 'elementFromPoint')
+    if (initialSetPointerCapture) Object.defineProperty(SVGElement.prototype, 'setPointerCapture', initialSetPointerCapture)
+    else Reflect.deleteProperty(SVGElement.prototype, 'setPointerCapture')
   })
 
   it('renders measured handles and edges across Topic, Candidate, Prompt, Agent and Script', async () => {
@@ -790,5 +807,214 @@ describe('WorkspaceCanvas with real React Flow', () => {
     )
 
     await waitFor(() => expect(container.querySelector('.react-flow__node[data-id="n_agent"] .canvas-node-status')).toHaveTextContent('运行失败 · 待处理 1'))
+  })
+
+  it('offsets shared-target reconnect grips by edge identity and protects locked and Candidate edges', async () => {
+    const snapshot = makeSnapshot()
+    snapshot.edges = [...(snapshot.edges ?? []), {
+      id: 'e_topic_agent', sourceNodeId: 'n_topic', targetNodeId: 'n_agent', kind: 'connection', scriptVersion: 0,
+    }]
+    const view = render(<WorkspaceCanvas snapshot={snapshot} onSelectNode={vi.fn().mockResolvedValue(undefined)} api={makeAPI()} />)
+    const firstGrip = await waitFor(() => {
+      const current = view.container.querySelector<HTMLElement>('[data-testid="reconnect-grip-e_agent"]')
+      if (!current) throw new Error('first reconnect grip missing')
+      return current
+    })
+    const secondGrip = view.container.querySelector<HTMLElement>('[data-testid="reconnect-grip-e_topic_agent"]')
+
+    expect(view.container.querySelector('.canvas-edge-reconnect-grip-mark')).not.toBeInTheDocument()
+    expect(secondGrip).toBeInTheDocument()
+    expect(firstGrip.getAttribute('cy')).not.toBe(secondGrip?.getAttribute('cy'))
+    expect(view.container.querySelector('[data-testid="reconnect-grip-e_candidate"]')).not.toBeInTheDocument()
+
+    snapshot.lockedNodeIds = ['n_prompt']
+    view.rerender(<WorkspaceCanvas snapshot={snapshot} onSelectNode={vi.fn().mockResolvedValue(undefined)} api={makeAPI()} />)
+    await waitFor(() => expect(view.container.querySelector('[data-testid="reconnect-grip-e_agent"]')).not.toBeInTheDocument())
+    expect(view.container.querySelector('[data-testid="reconnect-grip-e_topic_agent"]')).toBeInTheDocument()
+  })
+
+  it('submits the selected edge only after dropping on a real input handle', async () => {
+    const api = makeAPI()
+    const { container } = render(<WorkspaceCanvas snapshot={makeSnapshot()} onSelectNode={vi.fn().mockResolvedValue(undefined)} api={api} />)
+    const grip = await waitFor(() => {
+      const current = container.querySelector<HTMLElement>('[data-testid="reconnect-grip-e_agent"]')
+      if (!current) throw new Error('reconnect grip missing')
+      return current
+    })
+    const targetHandle = container.querySelector<HTMLElement>('[data-id="n_script"] .node-input-handle')
+    if (!targetHandle) throw new Error('target input handle missing from fixture')
+    setPointerTarget(targetHandle)
+
+    fireEvent.pointerDown(grip, { button: 0, pointerId: 1, clientX: 120, clientY: 160 })
+    fireEvent.pointerMove(grip, { pointerId: 1, clientX: 260, clientY: 220 })
+    await waitFor(() => expect(container.querySelector('.canvas-edge-reconnect-preview')).toHaveClass('is-valid'))
+    expect(targetHandle.closest('.react-flow__node')).toHaveClass('canvas-reconnect-drop-valid')
+    fireEvent.pointerUp(grip, { button: 0, pointerId: 1, clientX: 260, clientY: 220 })
+
+    await waitFor(() => expect(api.reconnectTarget).toHaveBeenCalledWith({
+      projectId: 'p_real_flow',
+      expectedEdge: { id: 'e_agent', sourceNodeId: 'n_prompt', targetNodeId: 'n_agent', kind: 'connection', scriptVersion: 0 },
+      targetNodeId: 'n_script',
+    }))
+    expect(container.querySelectorAll('.react-flow__edge-path')).toHaveLength(4)
+  })
+
+  it.each([
+    ['Agent', 'agent', 'n_new_agent'],
+    ['提示词', 'prompt', 'n_new_prompt'],
+  ] as const)('reconnects to a new %s through its pointer-transparent input handle', async (_label, type, targetNodeId) => {
+    const snapshot = makeSnapshot()
+    snapshot.nodes = [...(snapshot.nodes ?? []), makeNode(targetNodeId, type)]
+    const api = makeAPI()
+    const { container } = render(<WorkspaceCanvas snapshot={snapshot} onSelectNode={vi.fn().mockResolvedValue(undefined)} api={api} />)
+    const grip = await waitFor(() => {
+      const current = container.querySelector<HTMLElement>('[data-testid="reconnect-grip-e_agent"]')
+      if (!current) throw new Error('reconnect grip missing')
+      return current
+    })
+    const targetNode = container.querySelector<HTMLElement>(`.react-flow__node[data-id="${targetNodeId}"]`)
+    const targetHandle = targetNode?.querySelector<HTMLElement>('.react-flow__handle.target')
+    const pane = container.querySelector<HTMLElement>('.react-flow__pane')
+    if (!targetNode || !targetHandle || !pane) throw new Error('new target input handle missing from fixture')
+    setPointerTarget(pane)
+
+    fireEvent.pointerDown(grip, { button: 0, pointerId: 1, clientX: 120, clientY: 160 })
+    fireEvent.pointerMove(grip, { pointerId: 1, clientX: 305, clientY: 95 })
+    await waitFor(() => expect(container.querySelector('.canvas-edge-reconnect-preview')).toHaveClass('is-valid'))
+    fireEvent.pointerUp(grip, { button: 0, pointerId: 1, clientX: 305, clientY: 95 })
+
+    await waitFor(() => expect(api.reconnectTarget).toHaveBeenCalledWith({
+      projectId: 'p_real_flow',
+      expectedEdge: { id: 'e_agent', sourceNodeId: 'n_prompt', targetNodeId: 'n_agent', kind: 'connection', scriptVersion: 0 },
+      targetNodeId,
+    }))
+  })
+
+  it('leaves the original edge unchanged on empty drops, cancellation, and backend rejection', async () => {
+    const api = makeAPI()
+    const { container } = render(<WorkspaceCanvas snapshot={makeSnapshot()} onSelectNode={vi.fn().mockResolvedValue(undefined)} api={api} />)
+    const grip = await waitFor(() => {
+      const current = container.querySelector<HTMLElement>('[data-testid="reconnect-grip-e_agent"]')
+      if (!current) throw new Error('reconnect grip missing')
+      return current
+    })
+    setPointerTarget(null)
+    fireEvent.pointerDown(grip, { button: 0, pointerId: 1, clientX: 120, clientY: 160 })
+    fireEvent.pointerMove(grip, { pointerId: 1, clientX: 200, clientY: 180 })
+    expect(container.querySelector('.canvas-edge-reconnect-preview')).toHaveClass('is-invalid')
+    fireEvent.pointerUp(grip, { button: 0, pointerId: 1, clientX: 200, clientY: 180 })
+    expect(api.reconnectTarget).not.toHaveBeenCalled()
+    expect(container.querySelectorAll('.react-flow__edge-path')).toHaveLength(4)
+
+    const originalTargetHandle = container.querySelector<HTMLElement>('[data-id="n_agent"] .node-input-handle')
+    if (!originalTargetHandle) throw new Error('original input handle missing from fixture')
+    setPointerTarget(originalTargetHandle)
+    fireEvent.pointerDown(grip, { button: 0, pointerId: 2, clientX: 120, clientY: 160 })
+    fireEvent.pointerUp(grip, { button: 0, pointerId: 2, clientX: 220, clientY: 200 })
+    expect(api.reconnectTarget).not.toHaveBeenCalled()
+
+    const targetHandle = container.querySelector<HTMLElement>('[data-id="n_script"] .node-input-handle')
+    if (!targetHandle) throw new Error('target input handle missing from fixture')
+    setPointerTarget(targetHandle)
+    fireEvent.pointerDown(grip, { button: 0, pointerId: 3, clientX: 120, clientY: 160 })
+    fireEvent.pointerCancel(grip, { pointerId: 3 })
+    fireEvent.pointerDown(grip, { button: 0, pointerId: 4, clientX: 120, clientY: 160 })
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(api.reconnectTarget).not.toHaveBeenCalled()
+
+    vi.mocked(api.reconnectTarget).mockRejectedValueOnce(new Error('CYCLE_DETECTED'))
+    fireEvent.pointerDown(grip, { button: 0, pointerId: 5, clientX: 120, clientY: 160 })
+    fireEvent.pointerUp(grip, { button: 0, pointerId: 5, clientX: 260, clientY: 220 })
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('CYCLE_DETECTED'))
+    expect(container.querySelectorAll('.react-flow__edge-path')).toHaveLength(4)
+    expect(api.reconnectTarget).toHaveBeenCalledOnce()
+  })
+
+  it('rejects an edge identity that changes while its target is being dragged', async () => {
+    const api = makeAPI()
+    const initial = makeSnapshot()
+    const view = render(<WorkspaceCanvas snapshot={initial} onSelectNode={vi.fn().mockResolvedValue(undefined)} api={api} />)
+    const grip = await waitFor(() => {
+      const current = view.container.querySelector<SVGCircleElement>('[data-testid="reconnect-grip-e_agent"]')
+      if (!current) throw new Error('reconnect grip missing')
+      return current
+    })
+    const targetHandle = view.container.querySelector<HTMLElement>('[data-id="n_candidate"] .node-input-handle')
+    if (!targetHandle) throw new Error('target input handle missing from fixture')
+    setPointerTarget(targetHandle)
+    fireEvent.pointerDown(grip, { button: 0, pointerId: 1, clientX: 120, clientY: 160 })
+
+    const changed: WorkspaceSnapshot = {
+      ...initial,
+      project: { ...initial.project!, revision: 5 },
+      edges: (initial.edges ?? []).map((edge) => edge.id === 'e_agent' ? { ...edge, targetNodeId: 'n_script' } : edge),
+    }
+    view.rerender(<WorkspaceCanvas snapshot={changed} onSelectNode={vi.fn().mockResolvedValue(undefined)} api={api} />)
+    fireEvent.pointerUp(grip, { button: 0, pointerId: 1, clientX: 200, clientY: 200 })
+
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('连接已发生变化'))
+    expect(api.reconnectTarget).not.toHaveBeenCalled()
+    expect(view.container.querySelectorAll('.react-flow__edge-path')).toHaveLength(4)
+  })
+
+  it('cancels a reconnect gesture when the project changes', async () => {
+    const api = makeAPI()
+    const initial = makeSnapshot()
+    const view = render(<WorkspaceCanvas snapshot={initial} onSelectNode={vi.fn().mockResolvedValue(undefined)} api={api} />)
+    const grip = await waitFor(() => {
+      const current = view.container.querySelector<SVGCircleElement>('[data-testid="reconnect-grip-e_agent"]')
+      if (!current) throw new Error('reconnect grip missing')
+      return current
+    })
+    const targetHandle = view.container.querySelector<HTMLElement>('[data-id="n_script"] .node-input-handle')
+    if (!targetHandle) throw new Error('target input handle missing from fixture')
+    setPointerTarget(targetHandle)
+    fireEvent.pointerDown(grip, { button: 0, pointerId: 1, clientX: 120, clientY: 160 })
+    view.rerender(<WorkspaceCanvas snapshot={{
+      ...initial,
+      project: { ...initial.project!, id: 'p_next', name: '另一个工程' },
+    }} onSelectNode={vi.fn().mockResolvedValue(undefined)} api={api} />)
+    fireEvent.pointerUp(grip, { button: 0, pointerId: 1, clientX: 200, clientY: 200 })
+
+    expect(api.reconnectTarget).not.toHaveBeenCalled()
+    expect(view.container.querySelector('.workspace-canvas')).toHaveAttribute('data-project-id', 'p_next')
+  })
+
+  it('opens edge operations by click or keyboard and keeps Candidate sources protected', async () => {
+    const snapshot = makeSnapshot()
+    const script = snapshot.nodes?.find((node) => node.id === 'n_script')
+    if (!script) throw new Error('Script node missing from fixture')
+    script.scriptVersions = [
+      { n: 1, artifactId: 'sha256:script-v1', runId: 'r_script_1' },
+      { n: 2, artifactId: 'sha256:script-v2', runId: 'r_script_2' },
+    ]
+    const candidateSourceEdge = snapshot.edges?.find((edge) => edge.id === 'e_candidate')
+    if (!candidateSourceEdge) throw new Error('Candidate source edge missing from fixture')
+    snapshot.edges = [
+      candidateSourceEdge,
+      { id: 'e_script_prompt', sourceNodeId: 'n_script', targetNodeId: 'n_prompt', kind: 'connection', scriptVersion: 0 },
+    ]
+    const api = makeAPI()
+    const { container } = render(<WorkspaceCanvas snapshot={snapshot} onSelectNode={vi.fn().mockResolvedValue(undefined)} api={api} />)
+    const edge = await waitFor(() => {
+      const current = container.querySelector<SVGGElement>('.react-flow__edge[data-id="e_script_prompt"]')
+      if (!current) throw new Error('Script input edge missing from fixture')
+      return current
+    })
+    fireEvent.click(edge, { clientX: 150, clientY: 180 })
+
+    const version = await screen.findByRole('combobox', { name: '为 n_script → n_prompt 固定 Script 版本' })
+    fireEvent.change(version, { target: { value: '2' } })
+    await waitFor(() => expect(api.setEdgeScriptVersion).toHaveBeenCalledWith('e_script_prompt', 2, 'p_real_flow'))
+    fireEvent.click(screen.getByRole('button', { name: '断开 n_script 到 n_prompt' }))
+    fireEvent.click(screen.getByRole('button', { name: '确认断开' }))
+    await waitFor(() => expect(api.disconnect).toHaveBeenCalledWith('e_script_prompt', 'p_real_flow'))
+
+    const candidateEdge = container.querySelector<SVGGElement>('.react-flow__edge[data-id="e_candidate"]')
+    if (!candidateEdge) throw new Error('Candidate source edge missing from fixture')
+    fireEvent.keyDown(candidateEdge, { key: 'Enter' })
+    expect(await screen.findByText('候选生成来源 · 不可断开或改接。')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /断开 n_topic 到 n_candidate/ })).not.toBeInTheDocument()
+    expect(container.querySelector('[data-testid="reconnect-grip-e_candidate"]')).not.toBeInTheDocument()
   })
 })

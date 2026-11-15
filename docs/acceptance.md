@@ -145,9 +145,9 @@
 | AC-U-50 | Given 菜单靠近视口四边、画布已平移/缩放或用户通过键盘操作，When 打开两级菜单并选择类型或逐层取消，Then 菜单保持可见、焦点可回收，节点创建位置仍是最初触发时的画布坐标；输入框右键不被拦截。 |
 | AC-U-51 | Given 点阵画布及节点连线，When 平移/缩放、拖动节点或启用系统减少动效，Then 点阵低对比且与画布对齐、正常模式仅轻微动态，减少动效下保持静态；不遮挡内容、不拦截交互、不造成明显卡顿。 |
 
-#### U21～U22 已验收；U23～U24 已评审
+#### U21～U23 已验收；U24 已评审
 
-本组对应[任务卡](plans/active/canvas-workbench-optimization-plan.md)及[单文件交互示意](design/u21-u24-chain-reconnect-demo.html)。AC-U-52～54 已于 2026-11-14 通过用户页面验收；U22 的 AC-U-55～59 已于 2026-11-15 通过用户验收，绑定生成、类型检查、前端生产构建及离线 Wails 构建均通过；验收步骤/截图未归档。U23～U24 的 AC-U-60～65 仍为已评审的待实现标准。不倒改 U14/U16/U19 的历史验收。
+本组对应[任务卡](plans/active/canvas-workbench-optimization-plan.md)及[单文件交互示意](design/u21-u24-chain-reconnect-demo.html)。AC-U-52～62 已通过用户验收；U24 的 AC-U-63～65 仍为已评审的待实现标准。不倒改 U14/U16/U19 的历史验收。
 
 | 用例 | Given / When / Then |
 |---|---|
