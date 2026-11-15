@@ -1,6 +1,8 @@
 import { act, createEvent, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type { ReactElement } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import reactFlowStyles from '@xyflow/react/dist/style.css?inline'
+import workspaceStyles from '../styles/workspace.css?inline'
 import { OutputKind, PendingStatus, RunStatus } from '../../bindings/audio-ui/internal/domain/valueobject'
 import type { Node, RunStartResult, WorkspaceSnapshot } from '../../bindings/audio-ui/internal/domain/entity'
 import type { GraphAPI } from './graphApi'
@@ -272,18 +274,126 @@ describe('WorkspaceCanvas with real React Flow', () => {
     expect(screen.queryByRole('menu', { name: '选择节点类型' })).not.toBeInTheDocument()
   })
 
-  it('hides the resize outline while keeping edge and corner resize controls', async () => {
-    const { container } = render(
-      <WorkspaceCanvas snapshot={makeSnapshot()} onSelectNode={vi.fn().mockResolvedValue(undefined)} api={makeAPI()} />,
-    )
-    const topicWrapper = await waitFor(() => container.querySelector<HTMLElement>('.react-flow__node[data-id="n_topic"]')!)
-    const lines = [...topicWrapper.querySelectorAll<HTMLElement>('.react-flow__resize-control.line.canvas-node-resize-line')]
-    const handles = topicWrapper.querySelectorAll('.react-flow__resize-control.handle.canvas-node-resize-handle')
+  it.each(['n_topic', 'n_candidate', 'n_prompt', 'n_agent', 'n_script'])(
+    'keeps eight invisible resize controls and connection ports on selected %s',
+    async (nodeId) => {
+      const styles = document.createElement('style')
+      styles.textContent = `${reactFlowStyles}\n${workspaceStyles}`
+      document.head.append(styles)
+      try {
+        const snapshot = makeSnapshot()
+        snapshot.project = { ...snapshot.project!, activeNodeId: nodeId }
+        const { container } = render(
+          <WorkspaceCanvas snapshot={snapshot} onSelectNode={vi.fn().mockResolvedValue(undefined)} api={makeAPI()} />,
+        )
+        const wrapper = await waitFor(() => {
+          const node = container.querySelector<HTMLElement>(`.react-flow__node[data-id="${nodeId}"]`)
+          if (!node) throw new Error(`canvas node ${nodeId} missing from fixture`)
+          return node
+        })
+        expect(wrapper).toHaveClass('selected')
+        expect(wrapper.querySelector('.node-input-handle')).toBeInTheDocument()
+        expect(wrapper.querySelector('.node-output-handle')).toBeInTheDocument()
+        expect(wrapper.querySelectorAll('.react-flow__resize-control.line.canvas-node-resize-line')).toHaveLength(4)
+        expect(wrapper.querySelectorAll('.react-flow__resize-control.handle.canvas-node-resize-handle')).toHaveLength(4)
+        const transparentReference = document.createElement('span')
+        transparentReference.style.color = 'transparent'
+        document.body.append(transparentReference)
+        const transparentColor = getComputedStyle(transparentReference).color
+        transparentReference.remove()
+        expect(transparentColor).not.toBe('')
 
-    expect(lines).toHaveLength(4)
-    expect(handles).toHaveLength(4)
-    for (const line of lines) {
-      expect(line.style.borderColor).toBe('transparent')
+        for (const [position, cursor] of [
+          ['top.left', 'nwse-resize'],
+          ['top.right', 'nesw-resize'],
+          ['bottom.left', 'nesw-resize'],
+          ['bottom.right', 'nwse-resize'],
+        ]) {
+          const handle = wrapper.querySelector<HTMLElement>(`.react-flow__resize-control.handle.${position}`)
+          if (!handle) throw new Error(`resize handle ${position} missing`)
+          const computed = getComputedStyle(handle)
+          expect(computed.width).toBe('10px')
+          expect(computed.height).toBe('10px')
+          expect(computed.borderTopWidth).toBe('1px')
+          expect(computed.borderTopColor).toBe(transparentColor)
+          expect(computed.backgroundColor).toBe(transparentColor)
+          expect(computed.boxShadow).toBe('none')
+          expect(computed.cursor).toBe(cursor)
+          expect(computed.pointerEvents).not.toBe('none')
+          expect(computed.visibility).not.toBe('hidden')
+          expect(computed.display).not.toBe('none')
+        }
+
+        for (const [position, cursor, dimension] of [
+          ['left', 'ew-resize', 'width'],
+          ['right', 'ew-resize', 'width'],
+          ['top', 'ns-resize', 'height'],
+          ['bottom', 'ns-resize', 'height'],
+        ] as const) {
+          const line = wrapper.querySelector<HTMLElement>(`.react-flow__resize-control.line.${position}`)
+          if (!line) throw new Error(`resize line ${position} missing`)
+          const computed = getComputedStyle(line)
+          expect(line.style.borderColor).toBe('transparent')
+          expect(computed[dimension]).toBe('8px')
+          expect(computed.cursor).toBe(cursor)
+          expect(computed.pointerEvents).not.toBe('none')
+        }
+        expect(container.querySelectorAll('.react-flow__node:not(.selected) .react-flow__resize-control')).toHaveLength(0)
+      } finally {
+        styles.remove()
+      }
+    },
+  )
+
+  it.each([
+    { control: 'line.left', dx: -20, dy: 0, left: true, top: false },
+    { control: 'line.right', dx: 20, dy: 0, left: false, top: false },
+    { control: 'line.top', dx: 0, dy: -20, left: false, top: true },
+    { control: 'line.bottom', dx: 0, dy: 20, left: false, top: false },
+    { control: 'handle.top.left', dx: -20, dy: -20, left: true, top: true },
+    { control: 'handle.top.right', dx: 20, dy: -20, left: false, top: true },
+    { control: 'handle.bottom.left', dx: -20, dy: 20, left: true, top: false },
+    { control: 'handle.bottom.right', dx: 20, dy: 20, left: false, top: false },
+  ])('persists the correct anchored layout when resizing from $control', async ({ control, dx, dy, left, top }) => {
+    const api = makeAPI()
+    const { container } = render(
+      <WorkspaceCanvas snapshot={makeSnapshot()} onSelectNode={vi.fn().mockResolvedValue(undefined)} api={api} />,
+    )
+    await waitFor(() => expect(container.querySelectorAll('.react-flow__edge-path')).toHaveLength(4))
+    const handle = container.querySelector<HTMLElement>(`.react-flow__node[data-id="n_topic"] .react-flow__resize-control.${control}`)
+    if (!handle) throw new Error(`resize control ${control} missing`)
+
+    const view = handle.ownerDocument.defaultView!
+    // jsdom rejects the Window in MouseEventInit, while d3-drag needs event.view.
+    const down = createEvent.mouseDown(handle, { button: 0, buttons: 1, clientX: 100, clientY: 100 })
+    Object.defineProperty(down, 'view', { value: view })
+    fireEvent(handle, down)
+    fireEvent.mouseMove(view, { buttons: 1, clientX: 100 + dx, clientY: 100 + dy })
+    const up = createEvent.mouseUp(view, { button: 0, clientX: 100 + dx, clientY: 100 + dy })
+    Object.defineProperty(up, 'view', { value: view })
+    fireEvent(view, up)
+
+    await waitFor(() => expect(api.setNodeLayout).toHaveBeenCalledOnce())
+    const [id, x, y, width, height, projectId] = vi.mocked(api.setNodeLayout).mock.calls[0]
+    expect(id).toBe('n_topic')
+    expect(projectId).toBe('p_real_flow')
+    expect(api.moveNode).not.toHaveBeenCalled()
+    expect(api.connect).not.toHaveBeenCalled()
+    if (dx) {
+      expect(width).toBeGreaterThan(276)
+      if (left) expect(x + width).toBeCloseTo(40 + 276)
+      else expect(x).toBe(40)
+    } else {
+      expect(x).toBe(40)
+      expect(width).toBe(276)
+    }
+    if (dy) {
+      expect(height).toBeGreaterThan(180)
+      if (top) expect(y + height).toBeCloseTo(60 + 180)
+      else expect(y).toBe(60)
+    } else {
+      expect(y).toBe(60)
+      expect(height).toBe(180)
     }
   })
 

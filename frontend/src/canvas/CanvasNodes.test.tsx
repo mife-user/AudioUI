@@ -155,6 +155,20 @@ describe('M2-12A canvas nodes', () => {
     expect(onSetNodeLayout).toHaveBeenCalledWith('n_size', defaultSize.width, defaultSize.height)
   })
 
+  it.each(canvasNodeViews)('only enables resize controls for selected and editable $label nodes', ({ type, renderNode }) => {
+    const nodeValue = node('n_resize_visibility', type)
+    const editable = nodeData(nodeValue, { onSetNodeLayout: vi.fn() })
+    const { rerender } = render(renderNode(nodeValue, editable, false))
+
+    expect(screen.getByTestId('resize-n_resize_visibility')).toHaveAttribute('data-visible', 'false')
+    rerender(renderNode(nodeValue, { ...editable, mutationsDisabled: true }, true))
+    expect(screen.getByTestId('resize-n_resize_visibility')).toHaveAttribute('data-visible', 'false')
+    expect(screen.getByRole('button', { name: '调整 n_resize_visibility 卡片尺寸' })).toBeDisabled()
+    rerender(renderNode(nodeValue, editable, true))
+    expect(screen.getByTestId('resize-n_resize_visibility')).toHaveAttribute('data-visible', 'true')
+    expect(screen.getByRole('button', { name: '调整 n_resize_visibility 卡片尺寸' })).toBeEnabled()
+  })
+
   it.each(canvasNodeViews)('collapses the body but preserves the header and expanded size for $label nodes', ({ type, renderNode }) => {
     const nodeValue = node('n_fold', type)
     const onSetNodeCollapsed = vi.fn()
