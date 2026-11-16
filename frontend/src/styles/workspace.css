@@ -222,6 +222,77 @@
   margin: 8px 12px 0;
 }
 
+.u9-fixture-shell {
+  height: 100vh;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.u9-fixture-tools {
+  flex: 0 0 auto;
+  display: grid;
+  gap: var(--s2);
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elev);
+}
+
+.u9-fixture-tools-heading {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s3);
+  min-width: 0;
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.u9-fixture-tools-heading strong {
+  flex: 0 0 auto;
+  color: var(--text);
+}
+
+.u9-fixture-tools-heading span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.u9-fixture-tools-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s1);
+}
+
+.u9-fixture-layout {
+  height: auto;
+  flex: 1 1 0;
+}
+
+.u9-fixture-pending-preview {
+  position: absolute;
+  z-index: 8;
+  left: 16px;
+  bottom: 16px;
+  width: min(480px, calc(100vw - 32px));
+  max-height: min(70vh, 720px);
+  overflow: auto;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--glass);
+  box-shadow: var(--shadow);
+}
+
+.u9-fixture-pending-preview-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s2);
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
 .workspace-layout {
   position: relative;
   flex: 1 1 0px;

@@ -15,7 +15,8 @@ M2 图与提示词（M2-00～10 旧模型已验收；M2-11A 本地脚本目标�
 
 ### Added
 
-- U8 本地 Agent 搜索能力离线核对验收通过（2026-11-16）：记录锁定 SDK 的 `WithTools` 映射、本机 CLI 与安装包的能力声明、AudioUI 当前未开放 `WebSearch` 的事实及通用权限策略；本次范围未修改代码、未接入搜索、未创建 Agent 会话或访问外网，详见 `docs/dev/evidence/u8-agent-search-capability.md`。
+- U8 本地 Agent 搜索能力离线核对按用户确认的范围完成（2026-11-16）：记录锁定 SDK 的 `WithTools` 映射、本机 CLI 与安装包的能力声明、AudioUI 当前未开放 `WebSearch` 的事实及通用权限策略；未修改代码、未接入搜索、未创建 Agent 会话或访问外网。AC-U-18 未验收，详见 `docs/dev/evidence/u8-agent-search-capability.md`。
+- U9（用户已确认最终页面验收通过）：新增 Vite 开发模式专用离线集成 fixture，覆盖工作台图、运行事件、权限、待确认 Script 和失败恢复；fixture 使用内存替身，不连接真实 Wails 工程/运行 API、Agent、用户工程或网络。前端 25 个测试文件 / 263 项、Go vet/test、typecheck、lint、token 检查、绑定生成、前端生产构建与离线 Wails 构建通过；AC-U-18 仍未验收，详见 `docs/dev/evidence/u9-integration-fixture.md`。
 - U21（用户于 2026-11-14 确认验收通过）：底边上箭头按需浮出仅包含真实节点链路的紧凑列表；悬停/聚焦展开，点击固定或关闭、点击外部关闭、Escape 回焦；选择只调用 `SelectNode`。移除快捷栏新建入口、计数/状态摘要和折叠持久化，不影响画布右键/键盘、节点内及 Agent 结果创建。定向 75 项、前端全量 236 项测试，Go vet/test、类型检查、lint、令牌检查、前端构建和离线 Wails 构建通过；用户于 2026-11-14 确认页面验收通过，助手未启动界面，见 `docs/dev/evidence/u21-chain-quickbar.md`。
 - U22（用户于 2026-11-15 确认验收通过）：新增工程作用域 `ReconnectTarget` 后端原子重连命令及 GraphAPI 适配；按完整旧边身份拒绝过期意图，固定来源、边 ID 和 Script 版本，仅更新一次拓扑/revision，校验两侧影响与运行锁，去重标记 stale，且不迁移工作区。全量 Go vet/test、前端 236 项测试、类型检查、生产构建、离线 Wails 构建及令牌检查通过；lint 0 错误、2 条既存警告。验收步骤/截图未归档；自检与未覆盖项见 `docs/dev/evidence/u22-reconnect-target.md`。
 - U23（用户于 2026-11-15 确认 AC-U-60～62 页面验收通过）：普通边目标端保持原有三角箭头，使用不可见的 24px 命中区拖动；共享输入边按稳定 ID 错开命中区，依据真实输入 Handle 屏幕范围判定落点，解决新 Agent/提示词端口不被 `elementFromPoint()` 命中的问题。提交沿用 U22 `ReconnectTarget` 并冻结工程与旧边身份；拒绝、取消或同步失败不乐观改图、不重复提交。线身浮层提供普通边确认断开和 Script 逐边固定版本；候选来源只读，旧顶部入口暂留。前端全量 245 项测试、类型检查、token 检查、离线 Wails 构建通过；lint 0 错误、2 条既存警告。真实页面由用户验收，助手未启动界面；详见 `docs/dev/evidence/u23-edge-reconnect.md`。
