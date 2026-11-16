@@ -1,10 +1,10 @@
 # 文档导航
 
-> **先看这页，再按任务进入相应文档。** M2 已于 2026-11-08 通过用户整体验收，M2-11～13 本地脚本闭环亦已验收；当前进行的是 M2 后、M3 前的独立工作台交互优化批次。U16、U17 已通过用户验收，U18 已于 2026-11-14 通过用户验收，U19 已于 2026-11-14 通过用户验收；U20 已于 2026-11-14 通过用户验收；U21 已于 2026-11-14 通过用户验收；U22 已于 2026-11-15 通过用户验收，绑定生成和离线构建门禁通过；U23 已于 2026-11-15 通过 AC-U-60～62 页面验收；U24 已于 2026-11-15 通过 AC-U-63～65 页面验收；U25 已于 2026-11-15 通过 AC-U-66～67 页面验收；U8 已按离线能力核对范围完成（WebSearch 未接入，AC-U-18 未验收）；U9 fixture、代码自检、离线构建门禁及用户最终页面验收已完成；AC-U-18 未验收；M3 尚未开始，状态以[路线图](dev/roadmap.md)为准。
+> **先看这页，再按任务进入相应文档。** M2 已于 2026-11-08 通过用户整体验收；M2 后、M3 前的工作台交互优化 U1～U25 已完成各自已确认范围，U8 仅完成离线能力核对、WebSearch 未接入且 AC-U-18 未验收，U9 页面验收已完成。当前独立代码质量专项是 M3 启动前置：Q-0～Q-2 已通过用户验收，Q-3～Q-7 未开始；M3 尚未开始，状态以[路线图](dev/roadmap.md)为准。
 >
 > - [当前计划与阶段计划总览](plans/README.md)
 > - [当前工作计划：画布、节点与 Agent 交互优化](plans/active/canvas-workbench-optimization-plan.md)
-> - [已评审代码质量计划：前后端优化与精简函数注释](plans/active/code-quality-optimization-plan.md)（独立维护专项及 M3 启动前置；Q-0、Q-1 已通过用户验收；Q-2～Q-7 未开始）
+> - [已评审代码质量计划：前后端优化与精简函数注释](plans/active/code-quality-optimization-plan.md)（独立维护专项及 M3 启动前置；Q-0～Q-2 已通过用户验收；Q-3～Q-7 未开始）
 > - [M2 阶段任务手册](plans/stages/M2/m2-workplan.md)
 
 ## 按用途查找
@@ -45,6 +45,7 @@
 - U24 清理旧连接入口与关系栏：[实现、自检及页面验收记录](dev/evidence/u24-canvas-relation-cleanup.md)（用户于 2026-11-15 确认 AC-U-63～65 验收通过）。
 - 前后端代码质量专项 Q-0：[事务恢复风险核对](dev/evidence/q0-pending-recovery-risk.md)（多 Script 输出恢复缺陷已复现并修正，用户已验收）。
 - 前后端代码质量专项 Q-1：[事务恢复与 Candidate 构造收口](dev/evidence/q1-topic-candidate-transaction.md)（用户于 2026-11-16 验收通过）。
+- 前后端代码质量专项 Q-2：[图与上下文职责拆分自检记录](dev/evidence/q2-graph-context-responsibilities.md)（用户于 2026-11-16 验收通过）。
 - 既有阶段自检与验收记录按编号存放在 [`dev/evidence/`](dev/evidence/m2.md)；M2-13 汇总见 [M2 集成证据](dev/evidence/m2.md)。
 - 其它历史原型、诊断示意按主题存放于 `design/`，历史验收截图与记录存放于 `dev/evidence/`。
 

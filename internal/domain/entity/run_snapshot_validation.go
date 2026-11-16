@@ -1,0 +1,456 @@
+package entity
+
+import (
+	"fmt"
+	"strings"
+
+	"audio-ui/internal/domain/valueobject"
+)
+
+func (s RunExecutionSnapshot) Validate() error {
+	if s.Version == 3 || s.Version == 4 {
+		return s.validateDAGInputs()
+	}
+	if (s.Version != 1 && s.Version != 2) || s.ProjectID == "" || s.ProjectVersion <= 0 || s.TreeID == "" || s.NodeID == "" || len(s.ChainPath) == 0 || len(s.ChainPath) != len(s.PathNodes) {
+		return fmt.Errorf("%w: incomplete execution snapshot", ErrGraphInvalid)
+	}
+	if s.ProjectVersion >= valueobject.DAGProjectVersion {
+		if s.Version != 2 || len(s.PathEdges) != len(s.ChainPath)-1 {
+			return fmt.Errorf("%w: invalid snapshot edges", ErrGraphInvalid)
+		}
+	} else if s.Version != 1 || len(s.PathEdges) != 0 {
+		return fmt.Errorf("%w: invalid legacy snapshot", ErrGraphInvalid)
+	}
+	if err := valueobject.ValidateID(s.ProjectID); err != nil {
+		return err
+	}
+	if s.ChainPath[0] != s.TreeID || s.ChainPath[len(s.ChainPath)-1] != s.NodeID || s.PathNodes[0].Type != valueobject.NodeTypeTopic {
+		return fmt.Errorf("%w: invalid snapshot path", ErrGraphInvalid)
+	}
+	for i, node := range s.PathNodes {
+		if node.ID != s.ChainPath[i] {
+			return fmt.Errorf("%w: path node mismatch", ErrGraphInvalid)
+		}
+	}
+	project := Project{Version: s.ProjectVersion, ID: s.ProjectID, Revision: s.ProjectRevision, Nodes: s.PathNodes, Edges: s.PathEdges}
+	graph, err := NewGraph(&project)
+	if err != nil {
+		return err
+	}
+	if s.ProjectVersion >= 2 {
+		err = graph.Validate()
+	} else {
+		err = graph.ValidateForest()
+	}
+	if err != nil {
+		return err
+	}
+	path, err := graph.PathToRoot(s.NodeID)
+	if err != nil || len(path) != len(s.ChainPath) {
+		return fmt.Errorf("%w: invalid snapshot path", ErrGraphInvalid)
+	}
+	for i := range path {
+		if path[i] != s.ChainPath[i] {
+			return fmt.Errorf("%w: invalid snapshot path", ErrGraphInvalid)
+		}
+		if s.ProjectVersion >= valueobject.DAGProjectVersion {
+			if s.PathNodes[i].WorkspaceRootID != "" && s.PathNodes[i].WorkspaceRootID != s.TreeID {
+				return fmt.Errorf("%w: invalid snapshot workspace root", ErrGraphInvalid)
+			}
+			if i > 0 && ValidateNodeConnection(s.PathNodes[i-1], s.PathNodes[i]) != nil {
+				return fmt.Errorf("%w: invalid snapshot connection", ErrGraphInvalid)
+			}
+		}
+	}
+	target, _ := graph.Node(s.NodeID)
+	if target.Type == valueobject.NodeTypeTopic {
+		if s.OutputContract.Kind != valueobject.OutputKindTopics || s.OutputBinding.Bound || s.OutputBinding.Mode != "" || s.OutputNode != nil || s.OutputEdge != nil {
+			return fmt.Errorf("%w: invalid topic output contract", ErrGraphInvalid)
+		}
+		if s.ProjectVersion >= valueobject.ProjectFileVersion {
+			if s.TopicBatch == nil {
+				if target.Locked || len(target.Rounds) != 0 {
+					return fmt.Errorf("%w: locked topic requires a batch snapshot", ErrGraphInvalid)
+				}
+			} else {
+				if !target.Locked || s.TopicBatch.BaselineRound <= 0 || len(target.Rounds) != s.TopicBatch.BaselineRound {
+					return fmt.Errorf("%w: invalid topic batch baseline", ErrGraphInvalid)
+				}
+				baseline := target.Rounds[len(target.Rounds)-1]
+				if baseline.N != s.TopicBatch.BaselineRound || baseline.Kind != valueobject.OutputKindTopics {
+					return fmt.Errorf("%w: topic batch baseline does not match latest round", ErrGraphInvalid)
+				}
+			}
+		} else if s.TopicBatch != nil {
+			return fmt.Errorf("%w: legacy project cannot contain a topic batch snapshot", ErrGraphInvalid)
+		}
+	} else if target.Type == valueobject.NodeTypeAgent {
+		if s.TopicBatch != nil {
+			return fmt.Errorf("%w: Agent snapshot contains a topic batch", ErrGraphInvalid)
+		}
+		if s.OutputContract.Kind != valueobject.OutputKindScript {
+			return fmt.Errorf("%w: invalid agent output contract", ErrGraphInvalid)
+		}
+		if s.OutputBinding.Bound {
+			if valueobject.ValidateID(s.OutputBinding.NodeID) != nil || s.OutputBinding.NodeID == target.ID || s.OutputBinding.ParentNodeID != s.NodeID || s.OutputBinding.BaselineVersion < 0 {
+				return fmt.Errorf("%w: invalid output binding", ErrGraphInvalid)
+			}
+			if (s.OutputBinding.BaselineVersion == 0) != (s.OutputBinding.BaselineArtifactID == "") {
+				return fmt.Errorf("%w: invalid output binding baseline", ErrGraphInvalid)
+			}
+		} else if s.OutputBinding.NodeID != "" || s.OutputBinding.ParentNodeID != "" || s.OutputBinding.BaselineVersion != 0 || s.OutputBinding.BaselineArtifactID != "" {
+			return fmt.Errorf("%w: unbound output contains a target", ErrGraphInvalid)
+		}
+	} else {
+		return fmt.Errorf("%w: invalid run target", ErrGraphInvalid)
+	}
+	if s.OutputContract.SchemaVersion != 1 {
+		return fmt.Errorf("%w: unsupported output schema version", ErrGraphInvalid)
+	}
+	pathNodes := make(map[string]Node, len(s.ChainPath)-1)
+	for i, node := range s.PathNodes[:len(s.PathNodes)-1] {
+		pathNodes[s.ChainPath[i]] = node
+	}
+	seenArtifacts := make(map[string]struct{}, len(s.Artifacts))
+	for _, reference := range s.Artifacts {
+		node, ok := pathNodes[reference.NodeID]
+		if !ok || valueobject.ValidateID(reference.NodeID) != nil || reference.ArtifactID == "" {
+			return fmt.Errorf("%w: invalid artifact reference", ErrGraphInvalid)
+		}
+		if _, exists := seenArtifacts[reference.NodeID]; exists {
+			return fmt.Errorf("%w: duplicate artifact reference", ErrGraphInvalid)
+		}
+		seenArtifacts[reference.NodeID] = struct{}{}
+		if s.ProjectVersion >= 2 {
+			switch node.Type {
+			case valueobject.NodeTypeCandidate:
+				if node.CandidateSource == nil || reference.ArtifactID != node.CandidateSource.ArtifactID || reference.Kind != valueobject.OutputKindTopics || reference.CandidateIndex == nil || *reference.CandidateIndex != node.CandidateSource.Index || reference.Version != 0 {
+					return fmt.Errorf("%w: candidate artifact does not match snapshot source", ErrGraphInvalid)
+				}
+			case valueobject.NodeTypeScript:
+				if len(node.ScriptVersions) == 0 {
+					return fmt.Errorf("%w: script artifact has no version", ErrGraphInvalid)
+				}
+				latest := node.ScriptVersions[len(node.ScriptVersions)-1]
+				if reference.ArtifactID != latest.ArtifactID || reference.Kind != valueobject.OutputKindScript || reference.CandidateIndex != nil || reference.Version != latest.N {
+					return fmt.Errorf("%w: script artifact does not match latest snapshot version", ErrGraphInvalid)
+				}
+			default:
+				return fmt.Errorf("%w: artifact reference is not a candidate or script node", ErrGraphInvalid)
+			}
+		} else {
+			matched := false
+			for _, round := range node.Rounds {
+				if round.ArtifactID == reference.ArtifactID && round.Kind == reference.Kind && round.N == reference.Version {
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				return fmt.Errorf("%w: artifact reference does not match a round", ErrGraphInvalid)
+			}
+			if reference.Kind == valueobject.OutputKindTopics {
+				if reference.CandidateIndex == nil || *reference.CandidateIndex < 0 {
+					return fmt.Errorf("%w: invalid candidate reference", ErrGraphInvalid)
+				}
+			} else if reference.Kind != valueobject.OutputKindScript || reference.CandidateIndex != nil {
+				return fmt.Errorf("%w: invalid artifact kind", ErrGraphInvalid)
+			}
+		}
+	}
+	if s.ProjectVersion >= 2 {
+		for id, node := range pathNodes {
+			if node.Type == valueobject.NodeTypeCandidate {
+				if _, ok := seenArtifacts[id]; !ok {
+					return fmt.Errorf("%w: candidate artifact reference missing", ErrGraphInvalid)
+				}
+			}
+			if node.Type == valueobject.NodeTypeScript && len(node.ScriptVersions) > 0 {
+				if _, ok := seenArtifacts[id]; !ok {
+					return fmt.Errorf("%w: script artifact reference missing", ErrGraphInvalid)
+				}
+			}
+		}
+	}
+	if s.OutputBinding.Bound {
+		if _, exists := pathNodes[s.OutputBinding.NodeID]; exists {
+			return fmt.Errorf("%w: output binding overlaps run path", ErrGraphInvalid)
+		}
+	}
+	return nil
+}
+
+func (s RunExecutionSnapshot) validateDAGInputs() error {
+	if s.ProjectVersion < valueobject.DAGProjectVersion || s.ProjectID == "" || s.NodeID == "" || len(s.ChainPath) != 0 || len(s.PathNodes) != 0 || len(s.PathEdges) != 0 || len(s.InputNodes) < 2 || len(s.Inputs) == 0 {
+		return fmt.Errorf("%w: incomplete DAG execution snapshot", ErrGraphInvalid)
+	}
+	if err := valueobject.ValidateID(s.ProjectID); err != nil {
+		return err
+	}
+	if s.TreeID != "" {
+		if err := valueobject.ValidateID(s.TreeID); err != nil {
+			return err
+		}
+	}
+	inputNodeIDs := make(map[string]struct{}, len(s.InputNodes))
+	allNodeIDs := make(map[string]struct{}, len(s.InputNodes)+len(s.InputRoots))
+	allNodes := cloneNodes(s.InputNodes)
+	for _, node := range s.InputNodes {
+		inputNodeIDs[node.ID] = struct{}{}
+		allNodeIDs[node.ID] = struct{}{}
+	}
+	rootRefs := make(map[string]struct{})
+	for _, node := range s.InputNodes {
+		if node.WorkspaceRootID != "" {
+			rootRefs[node.WorkspaceRootID] = struct{}{}
+		}
+	}
+	if s.TreeID != "" {
+		rootRefs[s.TreeID] = struct{}{}
+	}
+	for _, root := range s.InputRoots {
+		if _, duplicate := allNodeIDs[root.ID]; duplicate || root.Type != valueobject.NodeTypeTopic ||
+			(root.WorkspaceRootID != "" && root.WorkspaceRootID != root.ID) {
+			return fmt.Errorf("%w: invalid input workspace root", ErrGraphInvalid)
+		}
+		if _, referenced := rootRefs[root.ID]; !referenced {
+			return fmt.Errorf("%w: unrelated input workspace root", ErrGraphInvalid)
+		}
+		allNodeIDs[root.ID] = struct{}{}
+		delete(rootRefs, root.ID)
+		allNodes = append(allNodes, root.Clone())
+	}
+	for id := range rootRefs {
+		var root Node
+		found := false
+		for _, node := range s.InputNodes {
+			if node.ID == id {
+				root, found = node, true
+				break
+			}
+		}
+		if !found || root.Type != valueobject.NodeTypeTopic {
+			return fmt.Errorf("%w: missing input workspace root", ErrGraphInvalid)
+		}
+	}
+	project := Project{
+		Version: s.ProjectVersion, ID: s.ProjectID, Revision: s.ProjectRevision,
+		Nodes: allNodes, Edges: append([]Edge(nil), s.InputEdges...),
+	}
+	graph, err := NewGraph(&project)
+	if err != nil {
+		return err
+	}
+	if err := graph.Validate(); err != nil {
+		return err
+	}
+	positions := make(map[string]int, len(s.InputNodes))
+	for i, node := range s.InputNodes {
+		positions[node.ID] = i
+		if node.ID == s.NodeID && i != len(s.InputNodes)-1 {
+			return fmt.Errorf("%w: target must be last in DAG snapshot", ErrGraphInvalid)
+		}
+	}
+	target, ok := graph.Node(s.NodeID)
+	if !ok || target.Type != valueobject.NodeTypeAgent || s.InputNodes[len(s.InputNodes)-1].ID != s.NodeID {
+		return fmt.Errorf("%w: invalid DAG run target", ErrGraphInvalid)
+	}
+	if target.WorkspaceRootID != s.TreeID {
+		return fmt.Errorf("%w: snapshot workspace root does not match target", ErrWorkspaceRootMismatch)
+	}
+	for _, edge := range s.InputEdges {
+		sourcePosition, sourceExists := positions[edge.SourceNodeID]
+		targetPosition, targetExists := positions[edge.TargetNodeID]
+		if !sourceExists || !targetExists || sourcePosition >= targetPosition {
+			return fmt.Errorf("%w: input nodes are not topologically ordered", ErrGraphInvalid)
+		}
+	}
+	ancestors := graph.AncestorNodeIDs(s.NodeID)
+	if len(ancestors) != len(s.InputNodes) {
+		return fmt.Errorf("%w: DAG snapshot contains unrelated nodes", ErrGraphInvalid)
+	}
+	for _, id := range ancestors {
+		if _, exists := positions[id]; !exists {
+			return fmt.Errorf("%w: DAG snapshot is missing an input ancestor", ErrGraphInvalid)
+		}
+	}
+	selectedEdges := make(map[string]struct{}, len(s.Inputs))
+	taskCount := 0
+	for i, input := range s.Inputs {
+		if input.Order != i || input.EdgeID == "" || input.SourceNodeID == s.NodeID {
+			return fmt.Errorf("%w: invalid run input order", ErrGraphInvalid)
+		}
+		source, ok := graph.Node(input.SourceNodeID)
+		if !ok || InputRoleForNodeType(source.Type) == "" || input.Role != InputRoleForNodeType(source.Type) {
+			return fmt.Errorf("%w: invalid run input role", ErrGraphInvalid)
+		}
+		edge, ok := graph.Edge(input.EdgeID)
+		if !ok || edge.Kind != EdgeKindConnection || edge.SourceNodeID != input.SourceNodeID || edge.TargetNodeID != s.NodeID {
+			return fmt.Errorf("%w: selected input edge is missing", ErrGraphInvalid)
+		}
+		if _, exists := selectedEdges[input.EdgeID]; exists {
+			return fmt.Errorf("%w: duplicate selected input", ErrGraphInvalid)
+		}
+		selectedEdges[input.EdgeID] = struct{}{}
+		if input.Role == "task" {
+			if source.Type != valueobject.NodeTypePrompt || strings.TrimSpace(source.Params.Instruction) == "" {
+				return fmt.Errorf("%w: prompt task is empty", ErrGraphInvalid)
+			}
+			taskCount++
+		}
+	}
+	if taskCount == 0 || len(selectedEdges) != len(graph.Incoming(s.NodeID)) {
+		return fmt.Errorf("%w: selected run inputs are incomplete", ErrGraphInvalid)
+	}
+	if s.OutputContract.Kind != valueobject.OutputKindScript || s.OutputContract.SchemaVersion != 1 {
+		return fmt.Errorf("%w: invalid DAG output contract", ErrGraphInvalid)
+	}
+	if s.Version == 4 {
+		binding := s.OutputBinding
+		if s.ProjectVersion < valueobject.ProjectFileVersion || !binding.Bound ||
+			(binding.Mode != RunOutputModeExisting && binding.Mode != RunOutputModeCreate) ||
+			valueobject.ValidateID(binding.NodeID) != nil || binding.NodeID == s.NodeID || binding.ParentNodeID != s.NodeID ||
+			binding.BaselineVersion < 0 || s.OutputEdge == nil ||
+			s.OutputEdge.Kind != EdgeKindConnection || s.OutputEdge.SourceNodeID != s.NodeID ||
+			s.OutputEdge.TargetNodeID != binding.NodeID || s.OutputEdge.ScriptVersion != 0 ||
+			valueobject.ValidateID(s.OutputEdge.ID) != nil {
+			return fmt.Errorf("%w: invalid versioned output binding", ErrGraphInvalid)
+		}
+		if _, exists := allNodeIDs[binding.NodeID]; exists {
+			return fmt.Errorf("%w: output binding overlaps run inputs", ErrGraphInvalid)
+		}
+		for _, edge := range s.InputEdges {
+			if edge.ID == s.OutputEdge.ID {
+				return fmt.Errorf("%w: duplicate output edge id", ErrGraphInvalid)
+			}
+		}
+		switch binding.Mode {
+		case RunOutputModeCreate:
+			if s.OutputNode != nil || binding.BaselineVersion != 0 || binding.BaselineArtifactID != "" {
+				return fmt.Errorf("%w: new output contains an existing baseline", ErrGraphInvalid)
+			}
+		case RunOutputModeExisting:
+			if s.OutputNode == nil || s.OutputNode.ID != binding.NodeID || s.OutputNode.Type != valueobject.NodeTypeScript ||
+				s.OutputNode.WorkspaceRootID != target.WorkspaceRootID || len(s.OutputNode.ScriptVersions) != binding.BaselineVersion ||
+				(binding.BaselineVersion == 0) != (binding.BaselineArtifactID == "") {
+				return fmt.Errorf("%w: invalid frozen output node", ErrGraphInvalid)
+			}
+			if binding.BaselineVersion > 0 && s.OutputNode.ScriptVersions[binding.BaselineVersion-1].ArtifactID != binding.BaselineArtifactID {
+				return fmt.Errorf("%w: output baseline does not match frozen node", ErrGraphInvalid)
+			}
+			outputProject := project
+			outputProject.Nodes = append(cloneNodes(project.Nodes), s.OutputNode.Clone())
+			outputProject.Edges = append(append([]Edge(nil), project.Edges...), *s.OutputEdge)
+			outputGraph, err := NewGraph(&outputProject)
+			if err != nil {
+				return err
+			}
+			if err := outputGraph.Validate(); err != nil {
+				return err
+			}
+		}
+	} else {
+		if s.OutputNode != nil || s.OutputEdge != nil {
+			return fmt.Errorf("%w: legacy output contains versioned metadata", ErrGraphInvalid)
+		}
+		if s.OutputBinding.Bound {
+			if valueobject.ValidateID(s.OutputBinding.NodeID) != nil || s.OutputBinding.NodeID == s.NodeID || s.OutputBinding.ParentNodeID != s.NodeID || s.OutputBinding.BaselineVersion < 0 {
+				return fmt.Errorf("%w: invalid output binding", ErrGraphInvalid)
+			}
+			if (s.OutputBinding.BaselineVersion == 0) != (s.OutputBinding.BaselineArtifactID == "") {
+				return fmt.Errorf("%w: invalid output binding baseline", ErrGraphInvalid)
+			}
+			if _, exists := positions[s.OutputBinding.NodeID]; exists {
+				return fmt.Errorf("%w: output binding overlaps run inputs", ErrGraphInvalid)
+			}
+		} else if s.OutputBinding.NodeID != "" || s.OutputBinding.ParentNodeID != "" || s.OutputBinding.BaselineVersion != 0 || s.OutputBinding.BaselineArtifactID != "" || s.OutputBinding.Mode != "" {
+			return fmt.Errorf("%w: unbound output contains a target", ErrGraphInvalid)
+		}
+	}
+
+	artifactNodes := make(map[string]struct{}, len(s.Artifacts))
+	artifactEdges := make(map[string]struct{}, len(s.Artifacts))
+	for _, reference := range s.Artifacts {
+		node, ok := graph.Node(reference.NodeID)
+		if !ok || node.ID == s.NodeID || reference.ArtifactID == "" {
+			return fmt.Errorf("%w: invalid DAG artifact reference", ErrGraphInvalid)
+		}
+		switch node.Type {
+		case valueobject.NodeTypeCandidate:
+			if _, exists := artifactNodes[node.ID]; exists {
+				return fmt.Errorf("%w: duplicate candidate artifact reference", ErrGraphInvalid)
+			}
+			artifactNodes[node.ID] = struct{}{}
+			source := node.CandidateSource
+			if reference.EdgeID != "" || source == nil || reference.ArtifactID != source.ArtifactID || reference.Kind != valueobject.OutputKindTopics || reference.CandidateIndex == nil || *reference.CandidateIndex != source.Index || reference.Version != 0 {
+				return fmt.Errorf("%w: candidate artifact does not match snapshot source", ErrGraphInvalid)
+			}
+		case valueobject.NodeTypeScript:
+			if len(node.ScriptVersions) == 0 {
+				return fmt.Errorf("%w: selected Script has no immutable version", ErrGraphInvalid)
+			}
+			if s.Version == 4 {
+				edge, exists := graph.Edge(reference.EdgeID)
+				if !exists || edge.Kind != EdgeKindConnection || edge.SourceNodeID != node.ID || edge.ScriptVersion != reference.Version || reference.EdgeID == "" || reference.CandidateIndex != nil || reference.Version <= 0 || reference.Version > len(node.ScriptVersions) {
+					return fmt.Errorf("%w: Script artifact does not match frozen edge version", ErrGraphInvalid)
+				}
+				version := node.ScriptVersions[reference.Version-1]
+				if reference.ArtifactID != version.ArtifactID || reference.Kind != valueobject.OutputKindScript {
+					return fmt.Errorf("%w: Script artifact does not match frozen edge version", ErrGraphInvalid)
+				}
+				if _, exists := artifactEdges[reference.EdgeID]; exists {
+					return fmt.Errorf("%w: duplicate Script edge artifact reference", ErrGraphInvalid)
+				}
+				artifactEdges[reference.EdgeID] = struct{}{}
+			} else {
+				if _, exists := artifactNodes[node.ID]; exists {
+					return fmt.Errorf("%w: duplicate DAG artifact reference", ErrGraphInvalid)
+				}
+				artifactNodes[node.ID] = struct{}{}
+				latest := node.ScriptVersions[len(node.ScriptVersions)-1]
+				if reference.EdgeID != "" || reference.ArtifactID != latest.ArtifactID || reference.Kind != valueobject.OutputKindScript || reference.CandidateIndex != nil || reference.Version != latest.N {
+					return fmt.Errorf("%w: Script artifact does not match frozen version", ErrGraphInvalid)
+				}
+			}
+		default:
+			return fmt.Errorf("%w: unsupported DAG artifact source", ErrGraphInvalid)
+		}
+	}
+	for _, node := range s.InputNodes[:len(s.InputNodes)-1] {
+		if node.Type == valueobject.NodeTypeCandidate {
+			if _, exists := artifactNodes[node.ID]; !exists {
+				return fmt.Errorf("%w: selected candidate artifact is missing", ErrGraphInvalid)
+			}
+		}
+	}
+	for _, edge := range s.InputEdges {
+		source, ok := graph.Node(edge.SourceNodeID)
+		if !ok {
+			return fmt.Errorf("%w: Script input edge source is missing", ErrGraphInvalid)
+		}
+		if source.Type != valueobject.NodeTypeScript {
+			continue
+		}
+		if s.Version == 4 {
+			if _, exists := artifactEdges[edge.ID]; !exists {
+				return fmt.Errorf("%w: selected Script edge artifact is missing", ErrGraphInvalid)
+			}
+		} else if _, exists := artifactNodes[source.ID]; !exists {
+			return fmt.Errorf("%w: selected Script artifact is missing", ErrGraphInvalid)
+		}
+	}
+	return nil
+}
+
+func InputRoleForNodeType(nodeType valueobject.NodeType) string {
+	switch nodeType {
+	case valueobject.NodeTypePrompt:
+		return "task"
+	case valueobject.NodeTypeCandidate:
+		return "candidate"
+	case valueobject.NodeTypeScript:
+		return "artifact"
+	default:
+		return ""
+	}
+}

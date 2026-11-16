@@ -11,6 +11,7 @@ M2 图与提示词（M2-00～10 旧模型已验收；M2-11A 本地脚本目标�
 ### Changed
 
 - Q-1（用户于 2026-11-16 验收通过）：首轮、普通 pending 应用与 Topic 重跑共用候选节点构造规则；补齐同 artifact 跨 run 身份、重复请求与恢复 fail-closed 回归。Go 全量测试与 vet 通过，详见 `docs/dev/evidence/q1-topic-candidate-transaction.md`。
+- Q-2（用户于 2026-11-16 验收通过）：按职责拆分图校验/运行快照、快照验证及上下文解析/产物读取；补齐 v5 DAG 同 Script 多边版本、共享来源、输入隔离/顺序和预算边界回归。Go 全量测试与 vet 通过，详见 `docs/dev/evidence/q2-graph-context-responsibilities.md`。
 
 ### Fixed
 

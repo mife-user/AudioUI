@@ -282,6 +282,114 @@ func TestDAGContextUsesOrderedTasksAndIsolatedWorkspaceSources(t *testing.T) {
 	}
 }
 
+func TestDAGContextPreservesPerEdgeScriptVersionsAndSharedSources(t *testing.T) {
+	store := &memoryArtifacts{items: make(map[string]artifactItem)}
+	payloadV1 := `{"title":"脚本版本一","scenes":[{"narration":"` + strings.Repeat("甲", 6000) + `","duration":6}]}`
+	payloadV2 := `{"title":"脚本版本二","scenes":[{"narration":"` + strings.Repeat("乙", 6000) + `","duration":8}]}`
+	artifactV1 := store.add(valueobject.OutputKindScript, payloadV1)
+	artifactV2 := store.add(valueobject.OutputKindScript, payloadV2)
+	project := entity.Project{
+		Version: valueobject.ProjectFileVersion, ID: "p_test", Name: "多边版本快照", Revision: 1,
+		Nodes: []entity.Node{
+			{ID: "n_script", Type: valueobject.NodeTypeScript, ScriptVersions: []entity.ScriptVersion{
+				{N: 1, ArtifactID: artifactV1, RunID: "r_script_v1"},
+				{N: 2, ArtifactID: artifactV2, RunID: "r_script_v2"},
+			}},
+			{ID: "n_prompt_a", Type: valueobject.NodeTypePrompt, Title: "任务甲", Params: entity.NodeParams{Instruction: "任务甲指令"}},
+			{ID: "n_prompt_b", Type: valueobject.NodeTypePrompt, Title: "任务乙", Params: entity.NodeParams{Instruction: "任务乙指令"}},
+			{ID: "n_prompt_c", Type: valueobject.NodeTypePrompt, Title: "任务丙", Params: entity.NodeParams{Instruction: "任务丙指令"}},
+			{ID: "n_unselected", Type: valueobject.NodeTypePrompt, Title: "未选任务", Params: entity.NodeParams{Instruction: "未选输入不得进入上下文"}},
+			{ID: "n_agent", Type: valueobject.NodeTypeAgent, Title: "汇合 Agent"},
+		},
+		Edges: []entity.Edge{
+			{ID: "e_script_a", SourceNodeID: "n_script", TargetNodeID: "n_prompt_a", Kind: entity.EdgeKindConnection, ScriptVersion: 1},
+			{ID: "e_script_b", SourceNodeID: "n_script", TargetNodeID: "n_prompt_b", Kind: entity.EdgeKindConnection, ScriptVersion: 2},
+			{ID: "e_script_c", SourceNodeID: "n_script", TargetNodeID: "n_prompt_c", Kind: entity.EdgeKindConnection, ScriptVersion: 1},
+			{ID: "e_script_unselected", SourceNodeID: "n_script", TargetNodeID: "n_unselected", Kind: entity.EdgeKindConnection, ScriptVersion: 1},
+			{ID: "e_task_a", SourceNodeID: "n_prompt_a", TargetNodeID: "n_agent", Kind: entity.EdgeKindConnection},
+			{ID: "e_task_b", SourceNodeID: "n_prompt_b", TargetNodeID: "n_agent", Kind: entity.EdgeKindConnection},
+			{ID: "e_task_c", SourceNodeID: "n_prompt_c", TargetNodeID: "n_agent", Kind: entity.EdgeKindConnection},
+			{ID: "e_task_unselected", SourceNodeID: "n_unselected", TargetNodeID: "n_agent", Kind: entity.EdgeKindConnection},
+		},
+	}
+	graph, err := entity.NewGraph(&project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := graph.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := graph.SnapshotForRunWithInputs("n_agent", []string{"e_task_b", "e_task_a", "e_task_c"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantInputs := []entity.RunInput{
+		{EdgeID: "e_task_b", SourceNodeID: "n_prompt_b", Role: "task", Order: 0},
+		{EdgeID: "e_task_a", SourceNodeID: "n_prompt_a", Role: "task", Order: 1},
+		{EdgeID: "e_task_c", SourceNodeID: "n_prompt_c", Role: "task", Order: 2},
+	}
+	if snapshot.Version != 4 || snapshot.TreeID != "" || len(snapshot.ChainPath) != 0 || !reflect.DeepEqual(snapshot.Inputs, wantInputs) {
+		t.Fatalf("DAG snapshot inputs = %+v", snapshot)
+	}
+	wantArtifacts := []entity.RunArtifactReference{
+		{NodeID: "n_script", EdgeID: "e_script_a", ArtifactID: artifactV1, Kind: valueobject.OutputKindScript, Version: 1},
+		{NodeID: "n_script", EdgeID: "e_script_b", ArtifactID: artifactV2, Kind: valueobject.OutputKindScript, Version: 2},
+		{NodeID: "n_script", EdgeID: "e_script_c", ArtifactID: artifactV1, Kind: valueobject.OutputKindScript, Version: 1},
+	}
+	if !reflect.DeepEqual(snapshot.Artifacts, wantArtifacts) {
+		t.Fatalf("frozen Script artifacts = %+v, want %+v", snapshot.Artifacts, wantArtifacts)
+	}
+	for _, node := range snapshot.InputNodes {
+		if node.ID == "n_unselected" {
+			t.Fatal("unselected input was included in the snapshot")
+		}
+	}
+	workspace := &memoryWorkspace{
+		scope: port.WorkspaceScope{
+			ProjectID: project.ID, NodeID: snapshot.NodeID, InputNodeIDs: snapshot.ScopeNodeIDs(),
+		},
+		dirs: map[string]port.WorkspaceList{".": {Entries: []port.WorkspaceEntry{}}},
+	}
+	builder := NewBuilder(&memoryProvider{store: store})
+	input := Input{Project: project, NodeID: snapshot.NodeID, Snapshot: snapshot, Workspace: workspace}
+	full, err := builder.Build(context.Background(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := decodeBody(t, full)
+	if body.Target.TreeID != "" || len(body.Target.ChainPath) != 0 || body.Workspace.CWD != "workspace/steps/n_agent/" ||
+		len(body.Tasks) != 3 || body.Tasks[0].NodeID != "n_prompt_b" || body.Tasks[1].NodeID != "n_prompt_a" || body.Tasks[2].NodeID != "n_prompt_c" {
+		t.Fatalf("DAG context target, workspace, or task order = %+v", body)
+	}
+	if len(body.Sources) != 3 || body.Sources[0].SourceEdgeID != "e_script_a" || body.Sources[0].ArtifactVersion != 1 ||
+		body.Sources[1].SourceEdgeID != "e_script_b" || body.Sources[1].ArtifactVersion != 2 ||
+		body.Sources[2].SourceEdgeID != "e_script_c" || body.Sources[2].ArtifactVersion != 1 || body.Sources[2].Representation != "shared" || len(body.Sources[2].Payload) != 0 {
+		t.Fatalf("DAG context sources = %+v", body.Sources)
+	}
+	if !strings.Contains(string(body.Sources[0].Payload), "脚本版本一") || !strings.Contains(string(body.Sources[1].Payload), "脚本版本二") ||
+		strings.Contains(full.InitialPrompt, "未选输入不得进入上下文") || !reflect.DeepEqual(store.gets, []string{artifactV1, artifactV2}) {
+		t.Fatalf("DAG sources or selected-input isolation failed; artifact reads = %v", store.gets)
+	}
+
+	input.Budget = full.Estimate.EstimatedTokens - 1
+	degraded, err := builder.Build(context.Background(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	degradedBody, _ := decodeBody(t, degraded)
+	if degradedBody.Sources[0].Representation != "excerpt" || !reflect.DeepEqual(degradedBody.Tasks, body.Tasks) ||
+		degraded.Hashes.AncestorHash != full.Hashes.AncestorHash || degraded.Hashes.ParamsHash != full.Hashes.ParamsHash ||
+		degraded.Hashes.ContextHash == full.Hashes.ContextHash {
+		t.Fatalf("DAG budget degradation changed inputs or hashes: %+v", degradedBody)
+	}
+	input.Budget = 1
+	_, err = builder.Build(context.Background(), input)
+	var tooLarge *ContextTooLargeError
+	if !errors.As(err, &tooLarge) || tooLarge.TokenBudget != 1 || !errors.Is(err, ErrContextTooLarge) {
+		t.Fatalf("DAG over-budget error = %#v", err)
+	}
+}
+
 func TestSnapshotContextUsesFrozenCandidateTaskScriptAndOutputBinding(t *testing.T) {
 	builder, store, project, snapshot, workspace, scriptID, baselineID := snapshotFixture()
 	for _, node := range project.Nodes {
