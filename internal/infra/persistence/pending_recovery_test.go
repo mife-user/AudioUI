@@ -308,7 +308,7 @@ func TestCommittedTopicBatchReplyRecovery(t *testing.T) {
 	layout := testLayout(t.TempDir())
 	projects := NewProjectStore(layout)
 	project := sampleProject("p_topic_batch")
-	firstPayload := []byte(`{"topics":[{"title":"旧一"},{"title":"旧二"},{"title":"旧三"}]}`)
+	firstPayload := []byte(`{"topics":[{"angle":"旧角度一","hook":"旧开头一","title":"旧一"},{"angle":"旧角度二","hook":"旧开头二","title":"旧二"},{"angle":"旧角度三","hook":"旧开头三","title":"旧三"}]}`)
 	firstArtifactID := "sha256:" + hashPayload(firstPayload)
 	project.Nodes[0].Locked = true
 	project.Nodes[0].Rounds = []entity.Round{{N: 1, Kind: valueobject.OutputKindTopics, ArtifactID: firstArtifactID, PendingID: "pa_first", RunID: "r_first"}}
@@ -336,9 +336,17 @@ func TestCommittedTopicBatchReplyRecovery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	artifactStore := NewArtifactStore(projectPaths.Dir)
+	firstMeta := entity.ArtifactMeta{
+		Kind: valueobject.OutputKindTopics, NodeID: "n_root", CreatedAt: "2026-11-12T00:00:00Z",
+		SourceRunID: "r_first", SourcePendingID: "pa_first",
+	}
+	if _, err := artifactStore.Put(ctx, firstPayload, firstMeta); err != nil {
+		t.Fatal(err)
+	}
 	pendingStore := NewPendingStore(projectPaths.Dir)
-	artifactPayload := []byte(`{"topics":[{"angle":"新方向一","hook":"新开场一","title":"新一"},{"angle":"新方向二","hook":"新开场二","title":"新二"},{"angle":"新方向三","hook":"新开场三","title":"新三"}]}`)
-	artifactID := "sha256:" + hashPayload(artifactPayload)
+	artifactPayload := firstPayload
+	artifactID := firstArtifactID
 	pending := entity.Pending{
 		ID: "pa_topic_batch", RunID: "r_topic_batch", ChainID: "c_n_root", ChainPath: []string{"n_root"}, NodeID: "n_root",
 		Kind: valueobject.OutputKindTopics, Status: valueobject.PendingApplied, ArtifactID: artifactID,
@@ -368,7 +376,31 @@ func TestCommittedTopicBatchReplyRecovery(t *testing.T) {
 		})
 		linkNodes(&project, "n_root", id)
 	}
+	if err := validateAppliedReplyGraph(project, pending, artifactPayload); err != nil {
+		t.Fatalf("valid topic batch rejected by recovery validator: %v", err)
+	}
+	tamperedSnapshot := pending
+	alteredSnapshot := pending.ExecutionSnapshot.Clone()
+	alteredSnapshot.TopicBatch.BaselineRound++
+	tamperedSnapshot.ExecutionSnapshot = &alteredSnapshot
+	if err := validateAppliedReplyGraph(project, tamperedSnapshot, artifactPayload); err == nil {
+		t.Fatal("recovery accepted a changed TopicBatch baseline")
+	}
+	tamperedSource := project.Clone()
+	for i := range tamperedSource.Nodes {
+		source := tamperedSource.Nodes[i].CandidateSource
+		if source != nil && source.Round == 2 {
+			source.RunID = "r_tampered"
+			break
+		}
+	}
+	if err := validateAppliedReplyGraph(tamperedSource, pending, artifactPayload); err == nil {
+		t.Fatal("recovery accepted a candidate from another run")
+	}
 	if err := projects.Save(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	if err := pendingStore.Save(ctx, pending, artifactPayload); err != nil {
 		t.Fatal(err)
 	}
 
@@ -380,8 +412,23 @@ func TestCommittedTopicBatchReplyRecovery(t *testing.T) {
 	if err != nil || stored.Status != valueobject.PendingApplied || stored.ExecutionSnapshot == nil || stored.ExecutionSnapshot.TopicBatch == nil {
 		t.Fatalf("recovered topic batch pending = %+v err=%v", stored, err)
 	}
-	if _, _, err := NewArtifactStore(projectPaths.Dir).Get(ctx, artifactID); err != nil {
-		t.Fatalf("topic batch artifact recovery: %v", err)
+	recoveredArtifact, recoveredPayload, err := artifactStore.Get(ctx, artifactID)
+	if err != nil || recoveredArtifact.ID != firstArtifactID || string(recoveredPayload) != string(firstPayload) {
+		t.Fatalf("topic batch artifact recovery = %+v payload=%s err=%v", recoveredArtifact, recoveredPayload, err)
+	}
+	for index, id := range pending.CreatedNodeIDs {
+		var candidate *entity.Node
+		for i := range loaded.Nodes {
+			if loaded.Nodes[i].ID == id {
+				candidate = &loaded.Nodes[i]
+				break
+			}
+		}
+		if candidate == nil || candidate.CandidateSource == nil || candidate.CandidateSource.TopicNodeID != "n_root" ||
+			candidate.CandidateSource.Round != 2 || candidate.CandidateSource.ArtifactID != firstArtifactID ||
+			candidate.CandidateSource.Index != index || candidate.CandidateSource.RunID != pending.RunID {
+			t.Fatalf("recovered topic candidate %s = %+v", id, candidate)
+		}
 	}
 	if _, found, err := pendingStore.LoadTransaction(ctx); err != nil || found {
 		t.Fatalf("topic batch transaction remains: found=%v err=%v", found, err)

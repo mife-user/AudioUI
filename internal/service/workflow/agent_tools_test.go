@@ -435,12 +435,16 @@ func TestSubmitRunReplySerializesConcurrentResults(t *testing.T) {
 }
 
 func beginReplyScope(t *testing.T, h *pendingHarness, runID, nodeID string) port.RunScope {
-	return beginReplyScopeWithInputs(t, h, runID, nodeID, nil)
+	return beginReplyScopeWithOptions(t, h, runID, nodeID, entity.RunStartOptions{})
 }
 
 func beginReplyScopeWithInputs(t *testing.T, h *pendingHarness, runID, nodeID string, inputEdgeIDs []string) port.RunScope {
+	return beginReplyScopeWithOptions(t, h, runID, nodeID, entity.RunStartOptions{InputEdgeIDs: inputEdgeIDs})
+}
+
+func beginReplyScopeWithOptions(t *testing.T, h *pendingHarness, runID, nodeID string, options entity.RunStartOptions) port.RunScope {
 	t.Helper()
-	_, snapshot, err := h.service.BeginRunWithInputs(context.Background(), runID, nodeID, inputEdgeIDs, h.session.project.ID)
+	_, snapshot, err := h.service.BeginRunWithOptions(context.Background(), runID, nodeID, options, h.session.project.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

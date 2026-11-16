@@ -192,38 +192,14 @@ func (s *Service) SubmitRunReply(ctx context.Context, scope port.RunScope, kind 
 			if err != nil {
 				return fmt.Errorf("%w: %v", ErrPendingInvalid, err)
 			}
-			nodeIDs := make([]string, len(candidates))
-			candidateNodes := make([]entity.Node, len(candidates))
-			candidateEdges := make([]entity.Edge, len(candidates))
-			candidateSize := entity.DefaultNodeSize(valueobject.NodeTypeCandidate)
-			topicID := target.ID
 			roundNumber := nextRound(target.Rounds)
-			for index, candidate := range candidates {
-				id, err := valueobject.NewID(valueobject.NodeIDPrefix)
-				if err != nil {
-					return err
-				}
-				nodeIDs[index] = id
-				edgeID, err := valueobject.NewID(valueobject.EdgeIDPrefix)
-				if err != nil {
-					return err
-				}
-				candidateEdges[index] = entity.Edge{ID: edgeID, SourceNodeID: topicID, TargetNodeID: id, Kind: entity.EdgeKindCandidateSource}
-				position := generatedNodePosition(append(append([]entity.Node(nil), project.Nodes...), candidateNodes[:index]...), entity.Position{
-					X: target.Position.X + target.Size.Width + generatedNodeGap,
-					Y: target.Position.Y + float64(index)*(candidateSize.Height+generatedNodeGap),
-				}, valueobject.NodeTypeCandidate)
-				candidateNodes[index] = entity.Node{
-					ID: id, Type: valueobject.NodeTypeCandidate,
-					Title:           generatedNodeTitle(candidate.Title, fmt.Sprintf("候选 %d", index+1)),
-					WorkspaceRootID: scope.TreeID,
-					CandidateSource: &entity.CandidateSource{TopicNodeID: topicID, Round: roundNumber, ArtifactID: pending.ArtifactID, Index: index, RunID: scope.RunID},
-					Position:        position,
-					Size:            candidateSize,
-					Rounds:          []entity.Round{},
-				}
+			candidateNodes, candidateEdges, candidateIDs, err := buildTopicCandidateBatch(
+				project.Nodes, *target, scope.TreeID, roundNumber, pending.ArtifactID, scope.RunID, candidates,
+			)
+			if err != nil {
+				return err
 			}
-			pending.CreatedNodeIDs = nodeIDs
+			pending.CreatedNodeIDs = candidateIDs
 			target.Locked = true
 			target.Stale = false
 			target.Rounds = append(target.Rounds, entity.Round{
@@ -232,7 +208,7 @@ func (s *Service) SubmitRunReply(ctx context.Context, scope port.RunScope, kind 
 			})
 			project.Nodes = append(project.Nodes, candidateNodes...)
 			project.Edges = append(project.Edges, candidateEdges...)
-			meta.NodeID = topicID
+			meta.NodeID = target.ID
 		case valueobject.NodeTypeAgent:
 			if output == nil {
 				title, err := decodeScriptTitle(payload)
@@ -585,6 +561,39 @@ func decodeTopicCandidates(payload []byte) ([]topicReplyCandidate, error) {
 	return result.Topics, nil
 }
 
+func buildTopicCandidateBatch(nodes []entity.Node, topic entity.Node, workspaceRootID string, round int, artifactID, runID string, candidates []topicReplyCandidate) ([]entity.Node, []entity.Edge, []string, error) {
+	candidateNodes := make([]entity.Node, len(candidates))
+	candidateEdges := make([]entity.Edge, len(candidates))
+	candidateIDs := make([]string, len(candidates))
+	candidateSize := entity.DefaultNodeSize(valueobject.NodeTypeCandidate)
+	for index, candidate := range candidates {
+		nodeID, err := valueobject.NewID(valueobject.NodeIDPrefix)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		edgeID, err := valueobject.NewID(valueobject.EdgeIDPrefix)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		candidateIDs[index] = nodeID
+		candidateEdges[index] = entity.Edge{ID: edgeID, SourceNodeID: topic.ID, TargetNodeID: nodeID, Kind: entity.EdgeKindCandidateSource}
+		candidateNodes[index] = entity.Node{
+			ID: nodeID, Type: valueobject.NodeTypeCandidate,
+			Title:           generatedNodeTitle(candidate.Title, fmt.Sprintf("候选 %d", index+1)),
+			WorkspaceRootID: workspaceRootID,
+			CandidateSource: &entity.CandidateSource{
+				TopicNodeID: topic.ID, Round: round, ArtifactID: artifactID, Index: index, RunID: runID,
+			},
+			Position: generatedNodePosition(append(append([]entity.Node(nil), nodes...), candidateNodes[:index]...), entity.Position{
+				X: topic.Position.X + topic.Size.Width + generatedNodeGap,
+				Y: topic.Position.Y + float64(index)*(candidateSize.Height+generatedNodeGap),
+			}, valueobject.NodeTypeCandidate),
+			Size: candidateSize, Rounds: []entity.Round{},
+		}
+	}
+	return candidateNodes, candidateEdges, candidateIDs, nil
+}
+
 func decodeScriptTitle(payload []byte) (string, error) {
 	var result struct {
 		Title string `json:"title"`
@@ -908,36 +917,13 @@ func (s *Service) ApplyPending(ctx context.Context, id string, force bool, expec
 			if err != nil {
 				return fmt.Errorf("%w: %v", ErrPendingInvalid, err)
 			}
-			candidateNodes := make([]entity.Node, len(candidates))
-			candidateEdges := make([]entity.Edge, len(candidates))
-			candidateSize := entity.DefaultNodeSize(valueobject.NodeTypeCandidate)
-			for index, candidate := range candidates {
-				nodeID, err := valueobject.NewID(valueobject.NodeIDPrefix)
-				if err != nil {
-					return err
-				}
-				edgeID, err := valueobject.NewID(valueobject.EdgeIDPrefix)
-				if err != nil {
-					return err
-				}
-				candidateNodes[index] = entity.Node{
-					ID: nodeID, Type: valueobject.NodeTypeCandidate,
-					Title:           generatedNodeTitle(candidate.Title, fmt.Sprintf("候选 %d", index+1)),
-					WorkspaceRootID: node.WorkspaceRootID,
-					CandidateSource: &entity.CandidateSource{
-						TopicNodeID: node.ID, Round: roundNumber, ArtifactID: artifactID, Index: index, RunID: pending.RunID,
-					},
-					Position: generatedNodePosition(append(append([]entity.Node(nil), project.Nodes...), candidateNodes[:index]...), entity.Position{
-						X: node.Position.X + node.Size.Width + generatedNodeGap,
-						Y: node.Position.Y + float64(index)*(candidateSize.Height+generatedNodeGap),
-					}, valueobject.NodeTypeCandidate),
-					Size: candidateSize, Rounds: []entity.Round{},
-				}
-				candidateEdges[index] = entity.Edge{
-					ID: edgeID, SourceNodeID: node.ID, TargetNodeID: nodeID, Kind: entity.EdgeKindCandidateSource,
-				}
-				pending.CreatedNodeIDs = append(pending.CreatedNodeIDs, nodeID)
+			candidateNodes, candidateEdges, candidateIDs, err := buildTopicCandidateBatch(
+				project.Nodes, *node, node.WorkspaceRootID, roundNumber, artifactID, pending.RunID, candidates,
+			)
+			if err != nil {
+				return err
 			}
+			pending.CreatedNodeIDs = candidateIDs
 			project.Nodes = append(project.Nodes, candidateNodes...)
 			project.Edges = append(project.Edges, candidateEdges...)
 		}
@@ -989,36 +975,11 @@ func (s *Service) applyTopicBatchPending(ctx context.Context, access port.Projec
 	}
 	artifact := artifactID(canonical)
 	roundNumber := nextRound(topic.Rounds)
-	candidateNodes := make([]entity.Node, len(candidates))
-	candidateEdges := make([]entity.Edge, len(candidates))
-	candidateIDs := make([]string, len(candidates))
-	candidateSize := entity.DefaultNodeSize(valueobject.NodeTypeCandidate)
-	for index, candidate := range candidates {
-		nodeID, err := valueobject.NewID(valueobject.NodeIDPrefix)
-		if err != nil {
-			return entity.Project{}, err
-		}
-		edgeID, err := valueobject.NewID(valueobject.EdgeIDPrefix)
-		if err != nil {
-			return entity.Project{}, err
-		}
-		candidateIDs[index] = nodeID
-		candidateEdges[index] = entity.Edge{
-			ID: edgeID, SourceNodeID: topic.ID, TargetNodeID: nodeID, Kind: entity.EdgeKindCandidateSource,
-		}
-		position := generatedNodePosition(append(append([]entity.Node(nil), project.Nodes...), candidateNodes[:index]...), entity.Position{
-			X: topic.Position.X + topic.Size.Width + generatedNodeGap,
-			Y: topic.Position.Y + float64(index)*(candidateSize.Height+generatedNodeGap),
-		}, valueobject.NodeTypeCandidate)
-		candidateNodes[index] = entity.Node{
-			ID: nodeID, Type: valueobject.NodeTypeCandidate,
-			Title:           generatedNodeTitle(candidate.Title, fmt.Sprintf("候选 %d", index+1)),
-			WorkspaceRootID: topic.WorkspaceRootID,
-			CandidateSource: &entity.CandidateSource{
-				TopicNodeID: topic.ID, Round: roundNumber, ArtifactID: artifact, Index: index, RunID: pending.RunID,
-			},
-			Position: position, Size: candidateSize, Rounds: []entity.Round{},
-		}
+	candidateNodes, candidateEdges, candidateIDs, err := buildTopicCandidateBatch(
+		project.Nodes, *topic, topic.WorkspaceRootID, roundNumber, artifact, pending.RunID, candidates,
+	)
+	if err != nil {
+		return entity.Project{}, err
 	}
 	topic.Rounds = append(topic.Rounds, entity.Round{
 		N: roundNumber, Kind: pending.Kind, ArtifactID: artifact, PendingID: pending.ID, RunID: pending.RunID,

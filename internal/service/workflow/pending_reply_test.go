@@ -119,6 +119,107 @@ func TestSubmitTopicsReplyPlacesCandidatesAroundResizedNodes(t *testing.T) {
 	}
 }
 
+func TestTopicFirstRunAndRerunKeepCandidateBatchIdentity(t *testing.T) {
+	project := entity.Project{
+		Version: valueobject.ProjectFileVersion, ID: "p_topic_batches", Name: "选题批次", Revision: 1, ActiveNodeID: "n_topic",
+		Nodes: []entity.Node{{
+			ID: "n_topic", Type: valueobject.NodeTypeTopic, Title: "选题", WorkspaceRootID: "n_topic",
+			Position: entity.Position{X: 40, Y: 60}, Size: entity.DefaultNodeSize(valueobject.NodeTypeTopic),
+			Params: entity.NodeParams{Idea: "夜间城市", CandidateCount: 3}, Rounds: []entity.Round{},
+		}},
+	}
+	h := newPendingHarness(t, project)
+	payload := []byte(`{"topics":[{"title":"甲","angle":"角度甲","hook":"开头甲"},{"title":"乙","angle":"角度乙","hook":"开头乙"},{"title":"丙","angle":"角度丙","hook":"开头丙"}]}`)
+
+	firstScope := beginReplyScope(t, h, "r_topic_first", "n_topic")
+	first, err := h.service.SubmitRunReply(context.Background(), firstScope, valueobject.OutputKindTopics, payload, "req_topic_batch")
+	if err != nil || first.Status != valueobject.PendingApplied || len(first.CreatedNodeIDs) != 3 {
+		t.Fatalf("first topic result = %+v err=%v", first, err)
+	}
+	revision := h.session.project.Revision
+	retry, err := h.service.SubmitRunReply(context.Background(), firstScope, valueobject.OutputKindTopics, payload, "req_topic_batch")
+	if err != nil || retry.ID != first.ID || h.session.project.Revision != revision || len(h.session.project.Nodes) != len(project.Nodes)+3 {
+		t.Fatalf("first topic retry = %+v err=%v revision=%d", retry, err, h.session.project.Revision)
+	}
+	firstArtifactID := pendingReplyNode(t, h.session.project, "n_topic").Rounds[0].ArtifactID
+	if err := h.service.ReleaseRunLock(context.Background(), firstScope.RunID); err != nil {
+		t.Fatal(err)
+	}
+
+	secondScope := beginReplyScopeWithOptions(t, h, "r_topic_second", "n_topic", entity.RunStartOptions{TopicRerun: true})
+	if secondScope.ExecutionSnapshot.TopicBatch == nil || secondScope.ExecutionSnapshot.TopicBatch.BaselineRound != 1 {
+		t.Fatalf("topic rerun snapshot = %+v", secondScope.ExecutionSnapshot.TopicBatch)
+	}
+	second, err := h.service.SubmitRunReply(context.Background(), secondScope, valueobject.OutputKindTopics, payload, "req_topic_batch")
+	if err != nil || second.Status != valueobject.PendingPending || second.ArtifactID != "" || len(second.CreatedNodeIDs) != 0 {
+		t.Fatalf("topic rerun result = %+v err=%v", second, err)
+	}
+	revision = h.session.project.Revision
+	secondRetry, err := h.service.SubmitRunReply(context.Background(), secondScope, valueobject.OutputKindTopics, payload, "req_topic_batch")
+	if err != nil || secondRetry.ID != second.ID || h.session.project.Revision != revision {
+		t.Fatalf("topic rerun retry = %+v err=%v revision=%d", secondRetry, err, h.session.project.Revision)
+	}
+	if err := h.service.ReleaseRunLock(context.Background(), secondScope.RunID); err != nil {
+		t.Fatal(err)
+	}
+
+	applied, err := h.service.ApplyPending(context.Background(), second.ID, false, project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, err := h.service.GetPending(context.Background(), second.ID, project.ID)
+	if err != nil || stored.Pending.Status != valueobject.PendingApplied || stored.Pending.ArtifactID != firstArtifactID || len(stored.Pending.CreatedNodeIDs) != 3 {
+		t.Fatalf("applied topic rerun = %+v err=%v", stored.Pending, err)
+	}
+	topic := pendingReplyNode(t, applied, "n_topic")
+	if len(topic.Rounds) != 2 || topic.Rounds[0].ArtifactID != firstArtifactID || topic.Rounds[0].RunID != firstScope.RunID ||
+		topic.Rounds[1].ArtifactID != firstArtifactID || topic.Rounds[1].RunID != secondScope.RunID {
+		t.Fatalf("topic rounds = %+v", topic.Rounds)
+	}
+
+	seenIDs := make(map[string]bool)
+	seenIndexes := map[int]map[int]bool{1: {}, 2: {}}
+	batchCounts := map[int]int{}
+	occupied := []entity.Node{topic}
+	for _, candidate := range applied.Nodes {
+		if candidate.Type != valueobject.NodeTypeCandidate || candidate.CandidateSource == nil || candidate.CandidateSource.TopicNodeID != topic.ID {
+			continue
+		}
+		source := candidate.CandidateSource
+		wantRunID := map[int]string{1: firstScope.RunID, 2: secondScope.RunID}[source.Round]
+		if wantRunID == "" || source.RunID != wantRunID || source.ArtifactID != firstArtifactID || source.Index < 0 || source.Index >= 3 {
+			t.Fatalf("candidate batch source = %+v", source)
+		}
+		if seenIndexes[source.Round][source.Index] || seenIDs[candidate.ID] {
+			t.Fatalf("duplicate candidate identity: node=%+v", candidate)
+		}
+		seenIndexes[source.Round][source.Index] = true
+		seenIDs[candidate.ID] = true
+		batchCounts[source.Round]++
+		if !generatedNodePositionClear(occupied, candidate.Position, candidate.Size) {
+			t.Fatalf("candidate %s overlaps a prior batch node", candidate.ID)
+		}
+		occupied = append(occupied, candidate)
+	}
+	if batchCounts[1] != 3 || batchCounts[2] != 3 {
+		t.Fatalf("candidate batch counts = %+v", batchCounts)
+	}
+	seenEdges := make(map[string]bool)
+	edgeCount := 0
+	for _, edge := range applied.Edges {
+		if edge.SourceNodeID != topic.ID || edge.Kind != entity.EdgeKindCandidateSource {
+			continue
+		}
+		edgeCount++
+		if seenEdges[edge.ID] || !seenIDs[edge.TargetNodeID] {
+			t.Fatalf("candidate source edge = %+v", edge)
+		}
+		seenEdges[edge.ID] = true
+	}
+	if edgeCount != 6 {
+		t.Fatalf("candidate source edge count = %d, want 6", edgeCount)
+	}
+}
 func TestSubmitRunReplyAutomaticallyWritesFirstVersionToBoundEmptyScript(t *testing.T) {
 	h := newBoundScriptReplyHarness(t, 0)
 	scope := beginReplyScope(t, h, "r_empty_script", "n_b")

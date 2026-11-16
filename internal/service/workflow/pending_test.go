@@ -379,6 +379,16 @@ func TestApplyTopicUsesRoundKindWhenArtifactMetadataWasFirstWrittenForAnotherKin
 	if applied.Nodes[0].Rounds[0].ArtifactID != first.ID || applied.Nodes[0].Rounds[0].Kind != valueobject.OutputKindTopics {
 		t.Fatalf("round did not retain authoritative kind and reused artifact: %+v", applied.Nodes[0].Rounds)
 	}
+	if len(applied.Nodes) != 4 {
+		t.Fatalf("topic apply nodes = %d, want 4", len(applied.Nodes))
+	}
+	for index, candidate := range applied.Nodes[1:] {
+		source := candidate.CandidateSource
+		if candidate.Type != valueobject.NodeTypeCandidate || source == nil || source.TopicNodeID != "n_topic" ||
+			source.Round != 1 || source.ArtifactID != first.ID || source.Index != index || source.RunID != input.RunID {
+			t.Fatalf("applied topic candidate[%d] = %+v", index, candidate)
+		}
+	}
 	counter := NewArtifactCandidateCounter(&fakeArtifactProvider{store: h.artifacts})
 	count, err := counter.Count(context.Background(), project.ID, applied.Nodes[0])
 	if err != nil || count != 3 {
