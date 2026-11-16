@@ -37,6 +37,7 @@
 - U21～U24 链路收纳与目标端拖拽：[单文件交互示意](design/u21-u24-chain-reconnect-demo.html)（U21 已于 2026-11-14 通过用户验收；U22 已于 2026-11-15 通过用户验收；U23 已于 2026-11-15 通过用户页面验收；U24 已于 2026-11-15 通过 AC-U-63～65 页面验收；模拟数据，不访问工程、Agent 或网络，不代表实现或验收证据）。
 - U25 选中节点四角外观：[调整前后单文件示意](design/u25-selected-node-outline-demo.html)（用户于 2026-11-15 通过 AC-U-66～67 页面验收；静态模拟，不连接工程或网络、不模拟缩放，不代表实现或验收证据）。
 - U25 实现与门禁：[自检及离线构建记录](dev/evidence/u25-selected-node-outline.md)（自动化检查、离线 exe 构建及用户页面验收已通过）。
+- U8 本地 Agent 搜索能力：[离线核对记录](dev/evidence/u8-agent-search-capability.md)（2026-11-16 用户验收通过；仅核对能力与权限，未接入搜索或访问外网）。
 - U22 目标端原子重连：用户于 2026-11-15 验收通过；命令与自检见 [U22 证据](dev/evidence/u22-reconnect-target.md)。
 - U23 箭头拖拽与关系浮层：[自检与页面验收证据](dev/evidence/u23-edge-reconnect.md)（用户于 2026-11-15 确认 AC-U-60～62 验收通过）。
 - U24 清理旧连接入口与关系栏：[实现、自检及页面验收记录](dev/evidence/u24-canvas-relation-cleanup.md)（用户于 2026-11-15 确认 AC-U-63～65 验收通过）。

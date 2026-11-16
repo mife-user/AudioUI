@@ -61,7 +61,7 @@ MCP `reply` 的 `node_id` 指当前 topic 或 Agent 运行目标；Agent 的脚�
 
 ### 工具与本地权限边界
 
-- 本地 Agent 的搜索、文件读写/删除和 Bash 能力由 Agent 执行环境提供；应用 MCP 不再作为通用文件代理，只负责受运行授权的应用交互与必要的图/产物快照查询。
+- 本地 Agent 的文件读写/删除和 Bash 能力由 Agent 执行环境提供；搜索能力取决于适配器与显式工具清单。当前 AudioUI 运行工具清单不含 `WebSearch`，因此未向本地 Agent 开放网页搜索；本机 CLI 包的类型声明不等于 AudioUI 运行可用证据，详见 [U8 能力核对](dev/evidence/u8-agent-search-capability.md)。应用 MCP 不作为通用文件或搜索代理，只负责受运行授权的应用交互与必要的图/产物快照查询。
 - 文件读取/写入的路径边界不比当前更宽：读范围受当前路径祖先与共享 `runtime/` 只读视图约束，写入限当前运行节点增量目录；其他 topic、越界、保留目录硬拒绝。Bash 仍是 RM-017 的协作式门禁残余风险，不宣称 OS 沙箱。
 - 应用 MCP 只监听 `127.0.0.1`，每次运行独立 token，并绑定 `runId/projectId/treeId/agentNodeId/chainPath`；活动运行租约覆盖图/产物查询与 reply 提交。
 - 本阶段不提供云端 Agent、文件上传或远程 MCP；相关需求仍按 ADR-028/RM-019 评估。
