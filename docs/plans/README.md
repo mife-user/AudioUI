@@ -8,6 +8,7 @@
 |---|---|---|
 | [画布、节点与 Agent 交互优化](active/canvas-workbench-optimization-plan.md) | U0 已确认；U1～U7、U10～U25 已按范围通过用户验收；U8 按离线核对范围完成；U9 fixture、自检、离线构建及用户最终页面验收完成；AC-U-18 未验收 | 包含多上游无环图、无 Topic 有效任务运行、版本引用及 Topic 新批次；U25 去除选中节点四角方块，已于 2026-11-15 通过用户验收。 |
 | [提示词节点拖动渲染问题](active/canvas-drag-rendering-fix-plan.md) | 实现与本地自检完成，待评审 | 015 受控复现修复记录；Wails/WebView2 专项未覆盖。 |
+| [前后端代码质量与精简函数注释](active/code-quality-optimization-plan.md) | 独立维护专项；Q-0 已通过用户验收；Q-1～Q-7 未开始 | Q-0 复现并修正 v5 DAG 多 Script 输出事务恢复缺陷，见 `docs/dev/evidence/q0-pending-recovery-risk.md`。 |
 
 ## 阶段计划：M2
 

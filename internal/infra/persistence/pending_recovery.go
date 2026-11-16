@@ -205,12 +205,20 @@ func validateAppliedReplyGraph(project entity.Project, pending entity.Pending, a
 	var output *entity.Node
 	for _, childID := range graph.Children(target.ID) {
 		child, ok := graph.Node(childID)
-		if ok && child.Type == valueobject.NodeTypeScript {
-			if output != nil {
-				return fmt.Errorf("Agent has multiple Script outputs")
-			}
-			output = child
+		if !ok || child.Type != valueobject.NodeTypeScript {
+			continue
 		}
+		if binding.Bound {
+			if child.ID == binding.NodeID {
+				output = child
+				break
+			}
+			continue
+		}
+		if output != nil {
+			return fmt.Errorf("Agent has multiple Script outputs")
+		}
+		output = child
 	}
 	if output == nil || output.Stale {
 		return fmt.Errorf("Script output is missing or stale")

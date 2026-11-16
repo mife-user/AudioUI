@@ -153,18 +153,22 @@ func TestCommittedRootlessDAGScriptReplyRecovery(t *testing.T) {
 			{ID: "n_prompt", Type: valueobject.NodeTypePrompt, Title: "任务", Size: entity.DefaultNodeSize(valueobject.NodeTypePrompt), Params: entity.NodeParams{Instruction: "续写"}, Rounds: []entity.Round{}},
 			{ID: "n_agent", Type: valueobject.NodeTypeAgent, Title: "Agent", Size: entity.DefaultNodeSize(valueobject.NodeTypeAgent), Rounds: []entity.Round{}},
 			{ID: "n_output", Type: valueobject.NodeTypeScript, Title: "输出", Size: entity.DefaultNodeSize(valueobject.NodeTypeScript), ScriptVersions: []entity.ScriptVersion{{N: 1, ArtifactID: "sha256:output-v1", RunID: "r_old"}}, Rounds: []entity.Round{}},
+			{ID: "n_parallel", Type: valueobject.NodeTypeScript, Title: "并行输出", Size: entity.DefaultNodeSize(valueobject.NodeTypeScript), ScriptVersions: []entity.ScriptVersion{{N: 1, ArtifactID: "sha256:parallel-v1", RunID: "r_parallel"}}, Rounds: []entity.Round{}},
 		},
 		Edges: []entity.Edge{
 			{ID: "e_source_prompt", SourceNodeID: "n_source", TargetNodeID: "n_prompt", Kind: entity.EdgeKindConnection, ScriptVersion: 1},
 			{ID: "e_prompt_agent", SourceNodeID: "n_prompt", TargetNodeID: "n_agent", Kind: entity.EdgeKindConnection},
 			{ID: "e_agent_output", SourceNodeID: "n_agent", TargetNodeID: "n_output", Kind: entity.EdgeKindConnection},
+			{ID: "e_agent_parallel", SourceNodeID: "n_agent", TargetNodeID: "n_parallel", Kind: entity.EdgeKindConnection},
 		},
 	}
 	graph, err := entity.NewGraph(&project)
 	if err != nil {
 		t.Fatal(err)
 	}
-	snapshot, err := graph.SnapshotForRunWithInputs("n_agent", []string{"e_prompt_agent"})
+	snapshot, err := graph.SnapshotForRunWithOptions("n_agent", entity.RunStartOptions{
+		InputEdgeIDs: []string{"e_prompt_agent"}, OutputNodeID: "n_output",
+	})
 	if err != nil || snapshot.Version != 4 || snapshot.OutputBinding.NodeID != "n_output" {
 		t.Fatalf("rootless DAG snapshot = %+v err=%v", snapshot, err)
 	}
@@ -201,8 +205,14 @@ func TestCommittedRootlessDAGScriptReplyRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := projects.Load(ctx, project.ID); err != nil {
+	loaded, err := projects.Load(ctx, project.ID)
+	if err != nil {
 		t.Fatalf("rootless DAG transaction recovery: %v", err)
+	}
+	if loaded.Revision != 2 || len(loaded.Nodes) != 5 || loaded.Nodes[3].ID != "n_output" || len(loaded.Nodes[3].ScriptVersions) != 2 ||
+		loaded.Nodes[3].ScriptVersions[1].ArtifactID != pending.ArtifactID || loaded.Nodes[4].ID != "n_parallel" ||
+		len(loaded.Nodes[4].ScriptVersions) != 1 || loaded.Nodes[4].ScriptVersions[0].ArtifactID != "sha256:parallel-v1" {
+		t.Fatalf("recovered parallel outputs = %+v", loaded)
 	}
 	stored, err := pendingStore.Load(ctx, pending.ID)
 	if err != nil || stored.Status != valueobject.PendingApplied || stored.ExecutionSnapshot == nil || stored.ExecutionSnapshot.Version != 4 {
@@ -219,8 +229,12 @@ func TestCommittedCreateOutputDAGReplyRecovery(t *testing.T) {
 		Nodes: []entity.Node{
 			{ID: "n_prompt", Type: valueobject.NodeTypePrompt, Title: "任务", Position: entity.Position{X: 10, Y: 20}, Size: entity.DefaultNodeSize(valueobject.NodeTypePrompt), Params: entity.NodeParams{Instruction: "续写"}, Rounds: []entity.Round{}},
 			{ID: "n_agent", Type: valueobject.NodeTypeAgent, Title: "Agent", Position: entity.Position{X: 30, Y: 20}, Size: entity.DefaultNodeSize(valueobject.NodeTypeAgent), Rounds: []entity.Round{}},
+			{ID: "n_existing", Type: valueobject.NodeTypeScript, Title: "已有输出", Size: entity.DefaultNodeSize(valueobject.NodeTypeScript), ScriptVersions: []entity.ScriptVersion{{N: 1, ArtifactID: "sha256:existing", RunID: "r_existing"}}, Rounds: []entity.Round{}},
 		},
-		Edges: []entity.Edge{{ID: "e_prompt_agent", SourceNodeID: "n_prompt", TargetNodeID: "n_agent", Kind: entity.EdgeKindConnection}},
+		Edges: []entity.Edge{
+			{ID: "e_prompt_agent", SourceNodeID: "n_prompt", TargetNodeID: "n_agent", Kind: entity.EdgeKindConnection},
+			{ID: "e_agent_existing", SourceNodeID: "n_agent", TargetNodeID: "n_existing", Kind: entity.EdgeKindConnection},
+		},
 	}
 	graph, err := entity.NewGraph(&project)
 	if err != nil {
@@ -267,8 +281,14 @@ func TestCommittedCreateOutputDAGReplyRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	if _, err := NewArtifactStore(projectPaths.Dir).Put(ctx, artifactPayload, meta); err != nil {
+		t.Fatal(err)
+	}
+	if err := pendingStore.Save(ctx, pending, artifactPayload); err != nil {
+		t.Fatal(err)
+	}
 	loaded, err := projects.Load(ctx, project.ID)
-	if err != nil || len(loaded.Nodes) != 3 || loaded.Nodes[2].ID != pending.ResultNodeID {
+	if err != nil || loaded.Revision != 2 || len(loaded.Nodes) != 4 || loaded.Nodes[2].ID != "n_existing" || loaded.Nodes[3].ID != pending.ResultNodeID {
 		t.Fatalf("create-output recovery nodes=%+v err=%v", loaded.Nodes, err)
 	}
 	stored, err := pendingStore.Load(ctx, pending.ID)

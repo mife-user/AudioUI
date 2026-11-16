@@ -4,6 +4,7 @@
 >
 > - [当前计划与阶段计划总览](plans/README.md)
 > - [当前工作计划：画布、节点与 Agent 交互优化](plans/active/canvas-workbench-optimization-plan.md)
+> - [已评审代码质量计划：前后端优化与精简函数注释](plans/active/code-quality-optimization-plan.md)（独立维护专项及 M3 启动前置；Q-0 已通过用户验收，Q-1～Q-7 未开始）
 > - [M2 阶段任务手册](plans/stages/M2/m2-workplan.md)
 
 ## 按用途查找
@@ -42,6 +43,7 @@
 - U22 目标端原子重连：用户于 2026-11-15 验收通过；命令与自检见 [U22 证据](dev/evidence/u22-reconnect-target.md)。
 - U23 箭头拖拽与关系浮层：[自检与页面验收证据](dev/evidence/u23-edge-reconnect.md)（用户于 2026-11-15 确认 AC-U-60～62 验收通过）。
 - U24 清理旧连接入口与关系栏：[实现、自检及页面验收记录](dev/evidence/u24-canvas-relation-cleanup.md)（用户于 2026-11-15 确认 AC-U-63～65 验收通过）。
+- 前后端代码质量专项 Q-0：[事务恢复风险核对](dev/evidence/q0-pending-recovery-risk.md)（多 Script 输出恢复缺陷已复现并修正，用户已验收）。
 - 既有阶段自检与验收记录按编号存放在 [`dev/evidence/`](dev/evidence/m2.md)；M2-13 汇总见 [M2 集成证据](dev/evidence/m2.md)。
 - 其它历史原型、诊断示意按主题存放于 `design/`，历史验收截图与记录存放于 `dev/evidence/`。
 

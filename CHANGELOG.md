@@ -10,6 +10,7 @@ M2 图与提示词（M2-00～10 旧模型已验收；M2-11A 本地脚本目标�
 
 ### Fixed
 
+- Q-0（用户于 2026-11-16 确认验收）：修复 v5 DAG 中 Agent 存在多个 Script 输出时，事务恢复错误拒绝冻结目标的问题；绑定结果改按目标节点 ID 校验，未绑定旧结果仍要求唯一输出。回归与全量 Go 检查结果见 `docs/dev/evidence/q0-pending-recovery-risk.md`。
 - U25（用户于 2026-11-15 确认 AC-U-66～67 页面验收通过）：选中节点的四角缩放手柄仅隐藏视觉外观，保留 10px 手柄、四边缩放控制、既有选中描边与轻微光晕；选中、折叠、禁用和键盘尺寸设置规则不变。Go vet/test、前端全量 24 文件 / 258 项、typecheck、令牌检查、绑定生成、前端构建和离线 Wails 构建通过；lint 0 错误、2 条既存警告。用户页面验收已通过，见 `docs/dev/evidence/u25-selected-node-outline.md`。
 - Prompt 节点名称改为可选画布标签；空任务内容会返回 `PROMPT_TASK_EMPTY`，Agent 界面给出填写提示。
 
