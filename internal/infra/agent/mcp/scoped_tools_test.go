@@ -155,10 +155,18 @@ func TestRunMCPOptionsExposeRootlessDAGScope(t *testing.T) {
 	if err := validateRunToolOptions(options); err != nil {
 		t.Fatalf("rootless DAG MCP scope rejected: %v", err)
 	}
-	server := &Server{options: options}
+	server, err := New(options)
+	if err != nil {
+		t.Fatalf("construct scoped MCP server: %v", err)
+	}
+	scope.InputNodeIDs = nil
+	scope.ExecutionSnapshot.InputNodes[0].Params.Instruction = "changed after construction"
 	_, output, err := server.getRunChain(context.Background(), nil, GetChainInput{})
 	if err != nil || output.TreeID != "" || len(output.ChainPath) != 0 || !slices.Equal(output.InputNodeIDs, snapshot.ScopeNodeIDs()) {
 		t.Fatalf("rootless DAG chain output = %+v err=%v", output, err)
+	}
+	if server.options.RunScope.ExecutionSnapshot.InputNodes[0].Params.Instruction != "写一段脚本" {
+		t.Fatal("scoped MCP server did not retain its frozen execution snapshot")
 	}
 
 	invalid := scope.Clone()

@@ -197,197 +197,37 @@ func (m *Manager) StartWithOptions(ctx context.Context, nodeID string, options e
 		_ = m.gate.Release(runID)
 	}()
 
-	project, executionSnapshot, err := m.opts.Workflow.BeginRunWithOptions(ctx, runID, nodeID, options, expectedProjectID...)
+	project, snapshot, err := m.opts.Workflow.BeginRunWithOptions(ctx, runID, nodeID, options, expectedProjectID...)
 	if err != nil {
 		return entity.RunRecord{}, err
 	}
 	lockAcquired = true
-	executionSnapshot = executionSnapshot.Clone()
-	chainPath := executionSnapshot.ChainPath
-	if executionSnapshot.Version < 3 && len(chainPath) < 1 {
-		return entity.RunRecord{}, errors.New("NOT_IN_CHAIN: empty run path")
-	}
-	treeID := executionSnapshot.TreeID
-	workspace, err := m.opts.Workspaces.OpenRun(ctx, project.ID, executionSnapshot)
+	prepared, err := m.prepareRun(ctx, runID, nodeID, project, snapshot)
 	if err != nil {
 		return entity.RunRecord{}, err
 	}
-	config, err := m.opts.Projects.Config(ctx)
-	if err != nil {
-		return entity.RunRecord{}, err
-	}
-	budget := config.ContextTokenBudget
-	if budget == 0 {
-		budget = valueobject.DefaultContextTokenBudget
-	}
-	runContext, err := m.opts.Contexts.BuildRunContext(ctx, project, nodeID, executionSnapshot, workspace, budget)
-	if err != nil {
-		return entity.RunRecord{}, err
-	}
-	if runContext.TreeID != treeID || runContext.NodeID != nodeID || !slices.Equal(runContext.ChainPath, chainPath) ||
-		executionSnapshot.Version >= 3 && !slices.Equal(runContext.InputNodeIDs, executionSnapshot.ScopeNodeIDs()) ||
-		runContext.Hashes.ContextHash == "" || runContext.Hashes.AncestorHash == "" || runContext.Hashes.ParamsHash == "" {
-		return entity.RunRecord{}, errors.New("RUN_CONTEXT_SCOPE_INVALID")
-	}
-	store, err := m.opts.RunStores.ForProject(ctx, project.ID)
-	if err != nil {
-		return entity.RunRecord{}, err
-	}
-	now := m.now().UTC()
-	preview, truncated := contextPreview(runContext.InitialPrompt)
-	scope := port.RunScope{
-		RunID: runID, ProjectID: project.ID, TreeID: treeID, NodeID: nodeID,
-		ChainID: "c_" + nodeID, ChainPath: append([]string(nil), chainPath...),
-		InputNodeIDs: append([]string(nil), executionSnapshot.ScopeNodeIDs()...),
-		ContextHash:  runContext.Hashes.ContextHash, AncestorHash: runContext.Hashes.AncestorHash,
-		ParamsHash: runContext.Hashes.ParamsHash, ExecutionSnapshot: executionSnapshot.Clone(),
-	}
-	record := entity.RunRecord{
-		RunSummary: entity.RunSummary{
-			ID: runID, TreeID: treeID, NodeID: nodeID, ChainID: scope.ChainID,
-			ChainPath: append([]string(nil), chainPath...), Status: valueobject.RunStarting,
-			ContextVersion: runContext.ContextVersion, EstimatorVersion: runContext.Estimate.EstimatorVersion,
-			ContextHash: runContext.Hashes.ContextHash, EstimatedTokens: runContext.Estimate.EstimatedTokens,
-			TokenBudget: runContext.Estimate.TokenBudget, StartedAt: now.Format(time.RFC3339Nano),
-		},
-		ContextPreview: preview, ContextPreviewTruncated: truncated,
-		ExecutionSnapshot: &executionSnapshot,
-		Transcript:        []valueobject.TranscriptItem{},
-	}
-	if err := store.Save(ctx, record); err != nil {
-		return entity.RunRecord{}, err
-	}
+
 	runCtx, cancel := context.WithCancel(context.Background())
 	state := &runState{
-		scope: scope.Clone(), store: store, record: record, runContext: runCtx, cancel: cancel,
+		scope: prepared.scope.Clone(), store: prepared.store, record: prepared.record, runContext: runCtx, cancel: cancel,
 		permissionsByID: make(map[string]valueobject.PermissionRequest),
 		questionsByID:   make(map[string]valueobject.QuestionRequest),
 	}
 	state.leaseCond = sync.NewCond(&state.leaseMu)
 	if err := m.register(state); err != nil {
 		cancel()
+		record := prepared.record
 		record.Status = valueobject.RunFailed
 		record.Error = errorCode(err)
 		record.FinishedAt = m.now().UTC().Format(time.RFC3339Nano)
-		_ = store.Save(context.Background(), record)
+		_ = prepared.store.Save(context.Background(), record)
 		return record, err
 	}
 	managerOwnsGate = true
 	m.emitStatus(state, valueobject.RunStarting, nil)
-	state.setupMu.Lock()
-	setupHeld := true
-	defer func() {
-		if setupHeld {
-			state.setupMu.Unlock()
-		}
-	}()
-	failStartup := func(startErr error) (entity.RunRecord, error) {
-		if setupHeld {
-			state.setupMu.Unlock()
-			setupHeld = false
-		}
-		m.finish(state, valueobject.RunFailed, errorCode(startErr), nil)
-		return state.snapshot(), startErr
-	}
-	if err := runCtx.Err(); err != nil {
-		return failStartup(err)
-	}
-
-	setupCtx, setupCancel := context.WithTimeout(ctx, m.opts.RunTimeout)
-	stopSetupOnRunEnd := context.AfterFunc(runCtx, setupCancel)
-	defer func() {
-		stopSetupOnRunEnd()
-		setupCancel()
-	}()
-	mcpConfigPath, err := m.opts.RunConfigs.Prepare(setupCtx, project.ID, runID)
-	if err != nil {
-		_ = m.opts.RunConfigs.Cleanup(context.Background(), project.ID, runID)
-		return failStartup(err)
-	}
-	state.mu.Lock()
-	state.configReady = true
-	state.mu.Unlock()
-	spec := RunSpec{
-		Scope: scope.Clone(), Workspace: workspace, Context: runContext, MCPConfigPath: mcpConfigPath,
-		SystemPrompt: runSystemPrompt,
-		BuiltinTools: append([]string(nil), runBuiltinTools...),
-		AllowedTools: append([]string(nil), runAllowedTools...),
-	}
-	state.mu.Lock()
-	state.spec = spec
-	state.mu.Unlock()
-
-	permissions, err := m.opts.Permissions.NewRunPermissions(scope.Clone(), workspace.Resolver(), func(event valueobject.AgentEvent) {
-		m.onAgentEvent(state, event)
-	})
-	if err != nil {
-		return failStartup(err)
-	}
-	state.mu.Lock()
-	state.permissions = permissions
-	state.mu.Unlock()
-	permissions.SetResolvedCallback(func(kind, id string) {
-		if !state.acquireLease() {
-			return
-		}
-		defer state.releaseLease()
-		m.resolveRequest(state, kind, id)
-	})
-
-	tool, err := m.opts.ToolServers.NewForRun(scope.Clone(), workspace.CWD(), runID, permissions, func(message string) {
-		m.onReply(state, message)
-	}, workspace, m)
-	if err != nil {
-		return failStartup(err)
-	}
-	state.mu.Lock()
-	state.tool = tool
-	state.mu.Unlock()
-	if err := tool.Start(setupCtx); err != nil {
-		return failStartup(err)
-	}
-	if err := tool.WriteConfig(mcpConfigPath); err != nil {
-		return failStartup(err)
-	}
-
-	driverSpec := port.DriverSpec{
-		ChainID: scope.ChainID, Workspace: workspace.CWD(), SystemPrompt: spec.SystemPrompt,
-		BuiltinTools: append([]string(nil), spec.BuiltinTools...), AllowedTools: append([]string(nil), spec.AllowedTools...),
-		MCPConfigPath: mcpConfigPath, MCPURL: tool.URL(), MCPToken: tool.Token(),
-		PermissionGate: permissions, QuestionGate: permissions, ToolPolicy: permissions,
-		EventSink: func(event valueobject.AgentEvent) { m.onAgentEvent(state, event) },
-	}
-	session, err := driver.Start(setupCtx, driverSpec)
-	if err != nil {
-		return failStartup(err)
-	}
-	if err := runCtx.Err(); err != nil {
-		_ = session.Close()
-		return failStartup(err)
-	}
-	state.mu.Lock()
-	state.session = session
-	state.mu.Unlock()
-
-	m.emitWith(state, valueobject.RunEvent{Type: valueobject.EventStatus, Status: valueobject.RunRunning}, func() {
-		state.record.Status = valueobject.RunRunning
-	})
-	if err := m.persist(state); err != nil {
-		return failStartup(fmt.Errorf("RUN_STORE_FAILED: %w", err))
-	}
-	state.mu.Lock()
-	state.timer = m.opts.NewTimer(m.opts.RunTimeout, func() {
-		m.finish(state, valueobject.RunFailed, "RUN_TIMEOUT", nil)
-	})
-	state.mu.Unlock()
-	if err := session.Send(runCtx, runContext.InitialPrompt); err != nil {
-		state.setupMu.Unlock()
-		setupHeld = false
-		m.finish(state, valueobject.RunFailed, errorCode(err), nil)
+	if err := m.startPreparedRun(ctx, state, driver, prepared); err != nil {
 		return state.snapshot(), err
 	}
-	state.setupMu.Unlock()
-	setupHeld = false
 	return state.snapshot(), nil
 }
 
@@ -712,6 +552,10 @@ func (m *Manager) onAgentEvent(state *runState, event valueobject.AgentEvent) {
 		return
 	}
 	m.resetWatchdog(state)
+	m.handleAgentEvent(state, event)
+}
+
+func (m *Manager) handleAgentEvent(state *runState, event valueobject.AgentEvent) {
 	switch event.Type {
 	case valueobject.EventStatus:
 		if event.State == nil {
@@ -739,31 +583,31 @@ func (m *Manager) onAgentEvent(state *runState, event valueobject.AgentEvent) {
 		}
 		go m.finish(state, valueobject.RunFailed, code, event.ActualInputTokens)
 	case valueobject.EventMessage:
-		if event.Message != nil {
-			item := *event.Message
-			m.emitWith(state, valueobject.RunEvent{Type: valueobject.EventMessage, Message: &item}, func() {
-				applyMessage(&state.record.Transcript, item)
-			})
-			if !event.Message.Streaming {
-				if err := m.persist(state); err != nil {
-					m.opts.Logf("persist transcript for run %s: %v", state.scope.RunID, err)
-				}
-			}
+		if event.Message == nil {
+			m.emitAgentEvent(state, event)
 			return
 		}
-		m.emitAgentEvent(state, event)
-	case valueobject.EventTool:
-		if event.Tool != nil {
-			item := *event.Tool
-			m.emitWith(state, valueobject.RunEvent{Type: valueobject.EventTool, Tool: &item}, func() {
-				applyTool(&state.record.Transcript, item)
-			})
+		item := *event.Message
+		m.emitWith(state, valueobject.RunEvent{Type: valueobject.EventMessage, Message: &item}, func() {
+			applyMessage(&state.record.Transcript, item)
+		})
+		if !event.Message.Streaming {
 			if err := m.persist(state); err != nil {
-				m.opts.Logf("persist tool event for run %s: %v", state.scope.RunID, err)
+				m.opts.Logf("persist transcript for run %s: %v", state.scope.RunID, err)
 			}
+		}
+	case valueobject.EventTool:
+		if event.Tool == nil {
+			m.emitAgentEvent(state, event)
 			return
 		}
-		m.emitAgentEvent(state, event)
+		item := *event.Tool
+		m.emitWith(state, valueobject.RunEvent{Type: valueobject.EventTool, Tool: &item}, func() {
+			applyTool(&state.record.Transcript, item)
+		})
+		if err := m.persist(state); err != nil {
+			m.opts.Logf("persist tool event for run %s: %v", state.scope.RunID, err)
+		}
 	case valueobject.EventPermission:
 		if event.Permission == nil {
 			return
@@ -832,71 +676,9 @@ func (m *Manager) finish(state *runState, status valueobject.RunStatus, errorCod
 		}
 		state.leaseMu.Unlock()
 
-		state.mu.Lock()
-		if state.timer != nil {
-			state.timer.Stop()
-		}
-		session := state.session
-		tool := state.tool
-		permissions = state.permissions
-		configReady := state.configReady
-		state.mu.Unlock()
-		if session != nil {
-			if err := session.Close(); err != nil {
-				m.opts.Logf("close Agent run %s: %v", state.scope.RunID, err)
-			}
-		}
-		if permissions != nil {
-			permissions.Close()
-		}
-		if tool != nil {
-			stopCtx, stopCancel := context.WithTimeout(context.Background(), statusCleanupTimeout)
-			if err := tool.Stop(stopCtx); err != nil {
-				if status == valueobject.RunSucceeded {
-					status = valueobject.RunFailed
-					errorCode = "RUN_CLEANUP_FAILED"
-				}
-				m.opts.Logf("stop MCP server for run %s: %v", state.scope.RunID, err)
-			}
-			stopCancel()
-		}
-		if configReady {
-			if err := m.opts.RunConfigs.Cleanup(context.Background(), state.scope.ProjectID, state.scope.RunID); err != nil {
-				if status == valueobject.RunSucceeded {
-					status = valueobject.RunFailed
-					errorCode = "RUN_CLEANUP_FAILED"
-				}
-				m.opts.Logf("remove MCP config for run %s: %v", state.scope.RunID, err)
-			}
-		}
-		record := state.snapshot()
-		record.Status = status
-		record.Error = errorCode
-		record.FinishedAt = m.now().UTC().Format(time.RFC3339Nano)
-		if actualInputTokens != nil {
-			if usage, err := (valueobject.ContextEstimate{
-				EstimatorVersion: record.EstimatorVersion,
-				EstimatedTokens:  record.EstimatedTokens,
-				TokenBudget:      record.TokenBudget,
-			}).WithActualInputTokens(*actualInputTokens); err == nil {
-				record.ActualInputTokens = usage.ActualInputTokens
-				record.UsageReported = true
-				record.OverBudget = usage.OverBudget
-			}
-		}
-		if len(record.Transcript) > valueobject.MaxRunTranscriptItems {
-			record.Transcript = append([]valueobject.TranscriptItem(nil), record.Transcript[len(record.Transcript)-valueobject.MaxRunTranscriptItems:]...)
-		}
-		if err := m.persistRecord(state, record); err != nil {
-			m.opts.Logf("persist terminal run %s: %v", state.scope.RunID, err)
-			record.Status = valueobject.RunFailed
-			record.Error = "RUN_STORE_FAILED"
-			status = valueobject.RunFailed
-			errorCode = "RUN_STORE_FAILED"
-			if retryErr := m.persistRecord(state, record); retryErr != nil {
-				m.opts.Logf("retry terminal run store for %s: %v", state.scope.RunID, retryErr)
-			}
-		}
+		status, errorCode = m.closeRunResources(state, status, errorCode)
+		record := m.terminalRecord(state, status, errorCode, actualInputTokens)
+		record, status, errorCode = m.persistTerminalRecord(state, record)
 		var eventError *valueobject.AgentError
 		if errorCode != "" {
 			eventError = &valueobject.AgentError{Code: errorCode, Message: errorCode, Recoverable: false}
@@ -932,6 +714,82 @@ func (m *Manager) finish(state *runState, status valueobject.RunStatus, errorCod
 		state.mu.Unlock()
 		m.mu.Unlock()
 	})
+}
+
+func (m *Manager) closeRunResources(state *runState, status valueobject.RunStatus, errorCode string) (valueobject.RunStatus, string) {
+	state.mu.Lock()
+	if state.timer != nil {
+		state.timer.Stop()
+	}
+	session := state.session
+	tool := state.tool
+	permissions := state.permissions
+	configReady := state.configReady
+	state.mu.Unlock()
+	if session != nil {
+		if err := session.Close(); err != nil {
+			m.opts.Logf("close Agent run %s: %v", state.scope.RunID, err)
+		}
+	}
+	if permissions != nil {
+		permissions.Close()
+	}
+	if tool != nil {
+		stopCtx, stopCancel := context.WithTimeout(context.Background(), statusCleanupTimeout)
+		if err := tool.Stop(stopCtx); err != nil {
+			if status == valueobject.RunSucceeded {
+				status = valueobject.RunFailed
+				errorCode = "RUN_CLEANUP_FAILED"
+			}
+			m.opts.Logf("stop MCP server for run %s: %v", state.scope.RunID, err)
+		}
+		stopCancel()
+	}
+	if configReady {
+		if err := m.opts.RunConfigs.Cleanup(context.Background(), state.scope.ProjectID, state.scope.RunID); err != nil {
+			if status == valueobject.RunSucceeded {
+				status = valueobject.RunFailed
+				errorCode = "RUN_CLEANUP_FAILED"
+			}
+			m.opts.Logf("remove MCP config for run %s: %v", state.scope.RunID, err)
+		}
+	}
+	return status, errorCode
+}
+
+func (m *Manager) terminalRecord(state *runState, status valueobject.RunStatus, errorCode string, actualInputTokens *int) entity.RunRecord {
+	record := state.snapshot()
+	record.Status = status
+	record.Error = errorCode
+	record.FinishedAt = m.now().UTC().Format(time.RFC3339Nano)
+	if actualInputTokens != nil {
+		if usage, err := (valueobject.ContextEstimate{
+			EstimatorVersion: record.EstimatorVersion,
+			EstimatedTokens:  record.EstimatedTokens,
+			TokenBudget:      record.TokenBudget,
+		}).WithActualInputTokens(*actualInputTokens); err == nil {
+			record.ActualInputTokens = usage.ActualInputTokens
+			record.UsageReported = true
+			record.OverBudget = usage.OverBudget
+		}
+	}
+	if len(record.Transcript) > valueobject.MaxRunTranscriptItems {
+		record.Transcript = append([]valueobject.TranscriptItem(nil), record.Transcript[len(record.Transcript)-valueobject.MaxRunTranscriptItems:]...)
+	}
+	return record
+}
+
+func (m *Manager) persistTerminalRecord(state *runState, record entity.RunRecord) (entity.RunRecord, valueobject.RunStatus, string) {
+	if err := m.persistRecord(state, record); err != nil {
+		m.opts.Logf("persist terminal run %s: %v", state.scope.RunID, err)
+		record.Status = valueobject.RunFailed
+		record.Error = "RUN_STORE_FAILED"
+		if retryErr := m.persistRecord(state, record); retryErr != nil {
+			m.opts.Logf("retry terminal run store for %s: %v", state.scope.RunID, retryErr)
+		}
+		return record, valueobject.RunFailed, "RUN_STORE_FAILED"
+	}
+	return record, record.Status, record.Error
 }
 
 func (m *Manager) Close() {
@@ -1160,10 +1018,6 @@ func cloneQuestionRequest(request valueobject.QuestionRequest) valueobject.Quest
 	clone := request
 	clone.Options = append([]string(nil), request.Options...)
 	return clone
-}
-
-func (m *Manager) sameScope(state *runState, scope port.RunScope) bool {
-	return sameScope(state.scope, scope)
 }
 
 func sameScope(a, b port.RunScope) bool {

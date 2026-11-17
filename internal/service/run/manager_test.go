@@ -129,6 +129,17 @@ func TestStartWithInputsSupportsRootlessDAGSnapshot(t *testing.T) {
 		!slices.Equal(h.toolFactory.scope.InputNodeIDs, record.ExecutionSnapshot.ScopeNodeIDs()) {
 		t.Fatalf("rootless run scope = %+v", h.toolFactory.scope)
 	}
+	if h.toolFactory.scope.ExecutionSnapshot.ProjectID != project.ID ||
+		h.toolFactory.scope.ExecutionSnapshot.ProjectRevision != record.ExecutionSnapshot.ProjectRevision ||
+		!slices.Equal(h.toolFactory.scope.ExecutionSnapshot.ScopeNodeIDs(), record.ExecutionSnapshot.ScopeNodeIDs()) {
+		t.Fatalf("MCP scope did not retain the frozen execution snapshot: %+v", h.toolFactory.scope.ExecutionSnapshot)
+	}
+	h.workflow.mu.Lock()
+	h.workflow.project.Nodes[0].Params.Instruction = "live graph changed"
+	h.workflow.mu.Unlock()
+	if got := h.toolFactory.scope.ExecutionSnapshot.InputNodes[0].Params.Instruction; got != "整理输入" {
+		t.Fatalf("frozen run scope changed with the live project: %q", got)
+	}
 	if err := h.manager.Interrupt(context.Background(), record.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -450,6 +461,103 @@ func TestDriverStartFailureReleasesRunResources(t *testing.T) {
 	}
 	if h.manager.IsBusy() || !h.workflow.released || !h.configs.cleaned || !h.tool.stopped {
 		t.Fatalf("startup failure leaked resources: busy=%v lock=%v config=%v tool=%v", h.manager.IsBusy(), h.workflow.released, h.configs.cleaned, h.tool.stopped)
+	}
+}
+
+func TestStartRejectsWorkspaceScopeOutsideSnapshot(t *testing.T) {
+	h := newRunHarness(t)
+	h.manager.opts.Workspaces = fakeWorkspaceProvider{scopeTransform: func(scope port.WorkspaceScope) port.WorkspaceScope {
+		scope.NodeID = "n_other"
+		return scope
+	}}
+	if _, err := h.manager.Start(context.Background(), "n_topic"); ErrorCode(err) != "RUN_WORKSPACE_SCOPE_INVALID" {
+		t.Fatalf("start error = %v, want RUN_WORKSPACE_SCOPE_INVALID", err)
+	}
+	if h.manager.IsBusy() || !h.workflow.released || h.workflow.locked {
+		t.Fatalf("invalid workspace scope leaked run resources: busy=%v released=%v locked=%v", h.manager.IsBusy(), h.workflow.released, h.workflow.locked)
+	}
+	h.store.mu.Lock()
+	recordCount := len(h.store.records)
+	h.store.mu.Unlock()
+	if recordCount != 0 {
+		t.Fatalf("invalid workspace scope persisted %d run records", recordCount)
+	}
+}
+
+func TestStartPrepareFailureCleansPartialConfig(t *testing.T) {
+	h := newRunHarness(t)
+	h.configs.prepareErr = errors.New("injected config prepare failure")
+	record, err := h.manager.Start(context.Background(), "n_topic")
+	if err == nil || record.Status != valueobject.RunFailed {
+		t.Fatalf("start record=%+v err=%v, want failed startup", record.RunSummary, err)
+	}
+	configDir := filepath.Join(h.configs.root, "p_test", record.ID)
+	if _, err := os.Stat(configDir); !os.IsNotExist(err) {
+		t.Fatalf("partially prepared config remains, stat error = %v", err)
+	}
+	if h.manager.IsBusy() || !h.workflow.released || h.configs.cleanupCount != 1 {
+		t.Fatalf("prepare failure leaked resources: busy=%v lockReleased=%v cleanupCount=%d", h.manager.IsBusy(), h.workflow.released, h.configs.cleanupCount)
+	}
+}
+
+func TestMCPStartFailureReleasesRunResources(t *testing.T) {
+	h := newRunHarness(t)
+	h.tool.startErr = errors.New("injected MCP start failure")
+	record, err := h.manager.Start(context.Background(), "n_topic")
+	if err == nil || record.Status != valueobject.RunFailed {
+		t.Fatalf("start record=%+v err=%v, want failed startup", record.RunSummary, err)
+	}
+	if h.manager.IsBusy() || !h.workflow.released || !h.configs.cleaned || !h.tool.stopped {
+		t.Fatalf("MCP start failure leaked resources: busy=%v lock=%v config=%v tool=%v", h.manager.IsBusy(), h.workflow.released, h.configs.cleaned, h.tool.stopped)
+	}
+}
+
+func TestTerminalCleanupFailuresMarkRunFailedAndReleaseLocks(t *testing.T) {
+	for _, failure := range []struct {
+		name string
+		set  func(*runHarness)
+	}{
+		{name: "MCP stop", set: func(h *runHarness) { h.tool.stopErr = errors.New("injected MCP stop failure") }},
+		{name: "config cleanup", set: func(h *runHarness) { h.configs.cleanupErr = errors.New("injected config cleanup failure") }},
+	} {
+		t.Run(failure.name, func(t *testing.T) {
+			h := newRunHarness(t)
+			record, err := h.manager.Start(context.Background(), "n_topic")
+			if err != nil {
+				t.Fatal(err)
+			}
+			failure.set(h)
+			h.driver.spec.EventSink(valueobject.AgentEvent{Type: valueobject.EventStatus, State: &valueobject.AgentState{Status: valueobject.SessionIdle}})
+			waitFor(t, func() bool { return !h.manager.IsBusy() })
+			stored, err := h.store.Load(context.Background(), record.ID)
+			if err != nil || stored.Status != valueobject.RunFailed || stored.Error != "RUN_CLEANUP_FAILED" {
+				t.Fatalf("terminal run=%+v err=%v, want RUN_CLEANUP_FAILED", stored.RunSummary, err)
+			}
+			if !h.workflow.released || !h.tool.stopped || h.configs.cleanupCount != 1 {
+				t.Fatalf("cleanup failure leaked resources: lock=%v tool=%v cleanupCount=%d", h.workflow.released, h.tool.stopped, h.configs.cleanupCount)
+			}
+		})
+	}
+}
+
+func TestTerminalPersistenceFailureRetriesAndReleasesLocks(t *testing.T) {
+	h := newRunHarness(t)
+	record, err := h.manager.Start(context.Background(), "n_topic")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.store.mu.Lock()
+	h.store.failSaveOn = h.store.saveCount + 1
+	h.store.saveErrOnCall = errors.New("injected terminal persistence failure")
+	h.store.mu.Unlock()
+	h.driver.spec.EventSink(valueobject.AgentEvent{Type: valueobject.EventStatus, State: &valueobject.AgentState{Status: valueobject.SessionIdle}})
+	waitFor(t, func() bool { return !h.manager.IsBusy() })
+	stored, err := h.store.Load(context.Background(), record.ID)
+	if err != nil || stored.Status != valueobject.RunFailed || stored.Error != "RUN_STORE_FAILED" {
+		t.Fatalf("terminal run=%+v err=%v, want RUN_STORE_FAILED", stored.RunSummary, err)
+	}
+	if !h.workflow.released || !h.configs.cleaned || !h.tool.stopped {
+		t.Fatalf("persistence failure leaked resources: lock=%v config=%v tool=%v", h.workflow.released, h.configs.cleaned, h.tool.stopped)
 	}
 }
 
@@ -819,13 +927,19 @@ func (fakeContextBuilder) BuildRunContext(_ context.Context, project entity.Proj
 	}, nil
 }
 
-type fakeWorkspaceProvider struct{}
+type fakeWorkspaceProvider struct {
+	scopeTransform func(port.WorkspaceScope) port.WorkspaceScope
+}
 
-func (fakeWorkspaceProvider) OpenRun(_ context.Context, projectID string, snapshot entity.RunExecutionSnapshot) (port.RunWorkspace, error) {
-	return &fakeRunWorkspace{scope: port.WorkspaceScope{
+func (p fakeWorkspaceProvider) OpenRun(_ context.Context, projectID string, snapshot entity.RunExecutionSnapshot) (port.RunWorkspace, error) {
+	scope := port.WorkspaceScope{
 		ProjectID: projectID, TreeID: snapshot.TreeID, NodeID: snapshot.NodeID,
 		ChainPath: append([]string(nil), snapshot.ChainPath...), InputNodeIDs: snapshot.ScopeNodeIDs(),
-	}}, nil
+	}
+	if p.scopeTransform != nil {
+		scope = p.scopeTransform(scope)
+	}
+	return &fakeRunWorkspace{scope: scope}, nil
 }
 
 type fakeRunWorkspace struct{ scope port.WorkspaceScope }
@@ -865,9 +979,12 @@ func (p *fakeRunStores) ForProject(_ context.Context, projectID string) (port.Ru
 }
 
 type memoryRunStore struct {
-	mu      sync.Mutex
-	records map[string]entity.RunRecord
-	saveErr error
+	mu            sync.Mutex
+	records       map[string]entity.RunRecord
+	saveErr       error
+	saveCount     int
+	failSaveOn    int
+	saveErrOnCall error
 }
 
 func (s *memoryRunStore) List(context.Context) ([]entity.RunSummary, error) {
@@ -891,18 +1008,25 @@ func (s *memoryRunStore) Load(_ context.Context, id string) (entity.RunRecord, e
 func (s *memoryRunStore) Save(_ context.Context, record entity.RunRecord) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.saveCount++
 	if s.saveErr != nil {
 		return s.saveErr
+	}
+	if s.saveCount == s.failSaveOn {
+		return s.saveErrOnCall
 	}
 	s.records[record.ID] = cloneRecord(record)
 	return nil
 }
 
 type fakeRunConfigs struct {
-	root       string
-	mu         sync.Mutex
-	cleaned    bool
-	cleanedIDs []string
+	root         string
+	mu           sync.Mutex
+	cleaned      bool
+	cleanedIDs   []string
+	cleanupCount int
+	prepareErr   error
+	cleanupErr   error
 }
 
 func (c *fakeRunConfigs) Prepare(_ context.Context, projectID, runID string) (string, error) {
@@ -910,9 +1034,20 @@ func (c *fakeRunConfigs) Prepare(_ context.Context, projectID, runID string) (st
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", err
 	}
+	if c.prepareErr != nil {
+		return "", c.prepareErr
+	}
 	return filepath.Join(dir, "mcp.json"), nil
 }
 func (c *fakeRunConfigs) Cleanup(_ context.Context, projectID, runID string) error {
+	c.mu.Lock()
+	c.cleanupCount++
+	c.cleanedIDs = append(c.cleanedIDs, runID)
+	cleanupErr := c.cleanupErr
+	c.mu.Unlock()
+	if cleanupErr != nil {
+		return cleanupErr
+	}
 	if c.root != "" {
 		if err := os.RemoveAll(filepath.Join(c.root, projectID, runID)); err != nil {
 			return err
@@ -920,7 +1055,6 @@ func (c *fakeRunConfigs) Cleanup(_ context.Context, projectID, runID string) err
 	}
 	c.mu.Lock()
 	c.cleaned = true
-	c.cleanedIDs = append(c.cleanedIDs, runID)
 	c.mu.Unlock()
 	return nil
 }
@@ -939,24 +1073,33 @@ func (f *fakeToolFactory) NewForRun(scope port.RunScope, _, _ string, _ port.Que
 }
 
 type fakeTool struct {
-	token       string
-	started     bool
-	stopped     bool
-	stopStarted chan struct{}
+	token          string
+	started        bool
+	stopped        bool
+	startErr       error
+	stopErr        error
+	writeConfigErr error
+	stopStarted    chan struct{}
 }
 
-func (t *fakeTool) Start(context.Context) error { t.started = true; return nil }
+func (t *fakeTool) Start(context.Context) error {
+	t.started = true
+	return t.startErr
+}
 func (t *fakeTool) Stop(context.Context) error {
 	t.stopped = true
 	select {
 	case t.stopStarted <- struct{}{}:
 	default:
 	}
-	return nil
+	return t.stopErr
 }
 func (*fakeTool) URL() string     { return "http://127.0.0.1:1/mcp" }
 func (t *fakeTool) Token() string { return t.token }
-func (*fakeTool) WriteConfig(path string) error {
+func (t *fakeTool) WriteConfig(path string) error {
+	if t.writeConfigErr != nil {
+		return t.writeConfigErr
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
